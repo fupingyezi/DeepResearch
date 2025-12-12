@@ -77,10 +77,6 @@ async function* chatAgentStream(
   streamMode: "messages" | "updates" | "values"
 ) {
   const checkpointer = await getCheckpointer();
-  const currentCheckpointer = await checkpointer.get({
-    configurable: { thread_id: sessionId },
-  });
-  console.log(currentCheckpointer);
 
   const model = new ChatOpenAI({
     model: "qwen-max",

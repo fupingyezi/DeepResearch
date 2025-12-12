@@ -2,11 +2,11 @@ import { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes, v4 as uuidv4 } from "uuid";
 import apiClient from "../request/api";
 import { deepResearchResultType } from "@/types/conversation";
-import { message } from "antd";
 
 export interface StreamChatConfig {
   apiEndpoint: string;
   mode: "chat" | "search" | "deepResearch";
+  callingMode: "direct" | "reEditCall" | "recall";
   inputValue: string;
   sessionId?: UUIDTypes;
   chatSessions: ChatSessionType[];
@@ -52,7 +52,11 @@ export class StreamChatHandler {
 
     this.setupAbortController();
 
-    this.initializeMessages();
+    if (this.config.callingMode === "direct") {
+      this.initializeMessages();
+    } else {
+      this.reInitializeMessages();
+    }
 
     await this.executeStreamRequest();
   }
@@ -94,7 +98,7 @@ export class StreamChatHandler {
     this.config.setIsChating(true);
   }
 
-  // 初始化user和ai信息
+  // dirct模式初始化user和ai信息
   private initializeMessages(): void {
     const newUserMessage: ChatMessageType = {
       id: this.config.currentMessages.length + 1,
@@ -118,6 +122,48 @@ export class StreamChatHandler {
       } as ChatMessageType,
     ];
 
+    this.config.setCurrentMessages(
+      JSON.parse(JSON.stringify(this.initialUpdateMessages))
+    );
+    this.config.setShouldAutoScroll(true);
+  }
+
+  // recall和reEditCall模式下初始化user和ai消息
+  private reInitializeMessages(): void {
+    const len = this.config.currentMessages.length;
+
+    if (this.config.callingMode === "recall") {
+      this.initialUpdateMessages = [
+        ...this.config.currentMessages.slice(0, len - 1),
+        {
+          ...this.config.currentMessages[len - 1],
+          content: "",
+          mode: this.config.mode,
+          deepResearchResult: undefined,
+          researchStatus: "failed",
+        },
+      ];
+    } else if (this.config.callingMode === "reEditCall") {
+      this.initialUpdateMessages = [
+        ...this.config.currentMessages.slice(0, len - 2),
+        {
+          ...this.config.currentMessages[len - 2],
+          content: this.config.inputValue,
+          mode: this.config.mode,
+          deepResearchResult: undefined,
+          researchStatus: "failed",
+        },
+        {
+          ...this.config.currentMessages[len - 1],
+          content: "",
+          mode: this.config.mode,
+          deepResearchResult: undefined,
+          researchStatus: "failed",
+        },
+      ];
+    }
+
+    this.assistantMessageId = len;
     this.config.setCurrentMessages(
       JSON.parse(JSON.stringify(this.initialUpdateMessages))
     );

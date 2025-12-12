@@ -48,16 +48,19 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       if (selectedAgent === "chat") {
         await chatWithChatAssistant({
           inputValue,
+          callingMode: "direct",
           ...conversationStore,
         });
       } else if (selectedAgent === "search") {
         await chatWithSearhAssistant({
           inputValue,
+          callingMode: "direct",
           ...conversationStore,
         });
       } else if (selectedAgent === "deepResearch") {
         await chatWithDeepResearch({
           inputValue,
+          callingMode: "direct",
           ...conversationStore,
           ...deepResearchStore,
         });

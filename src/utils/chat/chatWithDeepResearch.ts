@@ -10,6 +10,7 @@ export const chatWithDeepResearch = async (
   const handler = new StreamChatHandler({
     apiEndpoint: "/api/chat/v1/deep_research",
     mode: "deepResearch",
+    callingMode: params.callingMode,
     inputValue: params.inputValue,
     sessionId: params.currentSession,
     chatSessions: params.chatSessions,

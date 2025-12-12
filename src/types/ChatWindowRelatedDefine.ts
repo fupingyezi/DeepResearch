@@ -19,6 +19,8 @@ export interface chunkMessageType {
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;
+  isLastAIMessage: boolean;
+  isLastHumanMessage: boolean;
 }
 
 export interface ChatMessagesProps {

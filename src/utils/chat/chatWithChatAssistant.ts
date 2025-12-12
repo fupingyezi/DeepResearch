@@ -7,6 +7,7 @@ export const chatWithChatAssistant = async (
   const handler = new StreamChatHandler({
     apiEndpoint: "/api/chat/basic_agents",
     mode: "chat",
+    callingMode: params.callingMode,
     inputValue: params.inputValue,
     sessionId: params.currentSession,
     chatSessions: params.chatSessions,

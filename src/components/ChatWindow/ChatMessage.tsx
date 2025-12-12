@@ -9,7 +9,11 @@ import apiClient from "@/utils/request/api";
 import copy from "copy-to-clipboard";
 import { useDeepResearchProcessStore } from "@/store";
 
-const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message }) => {
+const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
+  message,
+  isLastAIMessage,
+  isLastHumanMessage,
+}) => {
   const {
     status,
     report,
@@ -100,6 +104,8 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message }) => {
       >
         {(role === "user" ? userMessagesOperators : aiMessagesOperators).map(
           (op, index) => {
+            if (!isLastAIMessage && op === "recall") return null;
+            if (!isLastHumanMessage && op === "edit") return null;
             return (
               <Tooltip
                 key={index}
@@ -332,7 +338,16 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
       onWheel={(e) => checkShouldAutoScroll(e)}
     >
       {messages.map((msg, index) => (
-        <ChatMessageBubble key={index} message={msg} />
+        <ChatMessageBubble
+          key={index}
+          message={msg}
+          isLastAIMessage={
+            msg.role === "assistant" && index === messages.length - 1
+          }
+          isLastHumanMessage={
+            msg.role === "user" && index === messages.length - 2
+          }
+        />
       ))}
     </div>
   );

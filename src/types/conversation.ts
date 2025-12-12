@@ -34,10 +34,12 @@ export interface ChatSessionType {
 
 export interface chatWithChatAssistantProps extends ConversationState {
   inputValue: string;
+  callingMode: "direct" | "reEditCall" | "recall";
 }
 
 export interface chatWithDeepResearchProps
   extends ConversationState,
     DeepResearchProcessState {
   inputValue: string;
+  callingMode: "direct" | "reEditCall" | "recall";
 }
