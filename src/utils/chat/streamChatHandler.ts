@@ -297,6 +297,7 @@ export class StreamChatHandler {
             ? { ...msg, content: "出错了，哎嘿。", researchStatus: "failed" }
             : msg
         );
+        this.accumulatedContent = "出错了，哎嘿。";
         this.config.setCurrentMessages(
           JSON.parse(JSON.stringify(updateMessages))
         );
@@ -347,11 +348,16 @@ export class StreamChatHandler {
       if (this.deepResearchResult) {
         newAssistantMessage.deepResearchResult = this.deepResearchResult;
         newAssistantMessage.researchStatus = "finished";
+        const updateMessages = this.initialUpdateMessages.map((msg) =>
+          msg.id === this.assistantMessageId ? newAssistantMessage : msg
+        );
+        this.config.setCurrentMessages(
+          JSON.parse(JSON.stringify(updateMessages))
+        );
       }
     }
 
     try {
-      console.log(newAssistantMessage, newAssistantMessage);
       await apiClient.post("/conversations/add_messages", {
         chat_messages: [newUserMessage, newAssistantMessage],
       });

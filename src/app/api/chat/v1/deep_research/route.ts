@@ -26,7 +26,7 @@ export async function POST(request: Request) {
         summary: "",
       },
       {
-        configurable: { thread_id: sessionId },
+        configurable: { thread_id: `dr-${sessionId}-${Date.now()}` },
         streamMode: "values",
         recursionLimit: 200,
       }

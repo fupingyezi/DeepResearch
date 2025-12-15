@@ -35,6 +35,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const { isChating, shouldAutoScroll, currentMessages, setShouldAutoScroll } =
     conversationStore;
 
+  const { resetState } = deepResearchStore;
+
   const handleChangeScroll = useCallback(
     (shouldAutoScroll: boolean) => {
       setShouldAutoScroll(shouldAutoScroll);
@@ -58,6 +60,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           ...conversationStore,
         });
       } else if (selectedAgent === "deepResearch") {
+        resetState();
         await chatWithDeepResearch({
           inputValue,
           callingMode: "direct",

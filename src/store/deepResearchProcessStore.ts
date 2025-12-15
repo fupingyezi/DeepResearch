@@ -11,6 +11,7 @@ export interface DeepResearchProcessState {
   simpleAnalysis: string;
   tasks: taskType[];
   report: string;
+  resetState: () => void;
   setIsOpenProcessSider: (isOpenProcessSider: boolean) => void;
   setStatus: (status: processStatusType) => void;
   setSimpleAnalysis: (simpleAnalysis: string) => void;
@@ -29,6 +30,15 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
     simpleAnalysis: "",
     tasks: [],
     report: "",
+    resetState: () =>
+      set(() => ({
+        isOpenProcessSider: false,
+        status: "notCall",
+        researchTarget: "",
+        simpleAnalysis: "",
+        tasks: [],
+        report: "",
+      })),
     setIsOpenProcessSider: (isOpenProcessSider: boolean) =>
       set((state) => {
         state.isOpenProcessSider = isOpenProcessSider;
