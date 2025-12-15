@@ -7,13 +7,16 @@ import { ChatMessagesProps, ChatMessageBubbleProps } from "@/types";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import apiClient from "@/utils/request/api";
 import copy from "copy-to-clipboard";
-import { useDeepResearchProcessStore } from "@/store";
+import { useDeepResearchProcessStore, useConversationStore } from "@/store";
+import { reChatWithAssistant } from "@/utils/chat";
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
   isLastAIMessage,
   isLastHumanMessage,
 }) => {
+  const deepResearchStore = useDeepResearchProcessStore();
+  const conversationStore = useConversationStore();
   const {
     status,
     report,
@@ -22,10 +25,20 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     setIsOpenProcessSider,
     setTasks,
     updateReport,
-  } = useDeepResearchProcessStore();
+  } = deepResearchStore;
+  const {
+    currentMessages,
+    isChating,
+    currentAbortController,
+    abortCurrentChat,
+  } = conversationStore;
   const [isShowOtherOperators, setIsShowOtherOperators] =
     useState<boolean>(false);
   const [showCopySuccess, setShowCopySuccess] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [reEditValue, setReEditValue] = useState<string>(
+    message.content as string
+  );
 
   useEffect(() => {
     if (showCopySuccess) {
@@ -84,12 +97,27 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       }
     };
 
-    const handleOperator = (op: "copy" | "edit" | "recall" | "download") => {
+    const handleOperator = async (
+      op: "copy" | "edit" | "recall" | "download"
+    ) => {
       switch (op) {
         case "copy": {
           copy(renderContent());
           setShowCopySuccess(true);
           return;
+        }
+        case "edit": {
+          setIsEditing(true);
+          return;
+        }
+        case "recall": {
+          await reChatWithAssistant({
+            callingMode: "recall",
+            inputValue: message.content as string,
+            mode: message.mode,
+            ...conversationStore,
+            ...deepResearchStore,
+          });
         }
       }
     };
@@ -223,18 +251,94 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
   // user气泡
   if (message.role === "user") {
-    return (
-      <div className="w-full px-3 mb-5 flex justify-end relative">
-        <div
-          className="max-w-2/3 p-3 rounded-3xl bg-sky-100"
-          onMouseEnter={() => setIsShowOtherOperators(true)}
-          onMouseLeave={() => setIsShowOtherOperators(false)}
-        >
-          <CustomMarkdown content={renderContent()} />
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (isChating) {
+        if (currentAbortController) {
+          abortCurrentChat();
+        }
+        setIsEditing(false);
+        return;
+      }
+
+      if (reEditValue.trim()) {
+        setIsEditing(false);
+        await reChatWithAssistant({
+          callingMode: "reEditCall",
+          inputValue: reEditValue,
+          mode: currentMessages[currentMessages.length - 1].mode,
+          ...conversationStore,
+          ...deepResearchStore,
+        });
+      }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      e.stopPropagation();
+      if (isChating) {
+        setIsEditing(false);
+        return;
+      }
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        reEditValue.trim() !== renderContent()
+      ) {
+        e.preventDefault();
+        handleSubmit(e);
+      }
+    };
+
+    // 正常气泡
+    if (!isEditing) {
+      return (
+        <div className="w-full px-3 mb-5 flex justify-end relative">
+          <div
+            className="max-w-2/3 p-3 rounded-3xl bg-sky-100"
+            onMouseEnter={() => setIsShowOtherOperators(true)}
+            onMouseLeave={() => setIsShowOtherOperators(false)}
+          >
+            <CustomMarkdown content={renderContent()} />
+          </div>
+          {renderAdditionalOperator(message.role)}
         </div>
-        {renderAdditionalOperator(message.role)}
-      </div>
-    );
+      );
+    } else {
+      // 编辑气泡
+      return (
+        <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
+          <textarea
+            value={reEditValue}
+            onChange={(e) => setReEditValue(e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e)}
+            rows={1}
+            className="w-2/3 px-3 py-2 border-2 border-sky-400 rounded-md focus:outline-none resize-none overflow-y-auto scrollbar-hide"
+            style={{
+              minHeight: "40px",
+              maxHeight: "100px",
+              height: "auto",
+            }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = "auto";
+              target.style.height = Math.min(target.scrollHeight, 100) + "px";
+            }}
+          />
+          <div className="flex gap-2">
+            <Button onClick={(e) => handleSubmit(e)}>确定</Button>
+            <Button
+              onClick={(e) => {
+                e.stopPropagation();
+                setReEditValue(message.content as string);
+                setIsEditing(false);
+              }}
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      );
+    }
   }
 
   // loading气泡

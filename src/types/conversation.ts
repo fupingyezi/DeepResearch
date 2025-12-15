@@ -43,3 +43,11 @@ export interface chatWithDeepResearchProps
   inputValue: string;
   callingMode: "direct" | "reEditCall" | "recall";
 }
+
+export interface reChatWithAssistantProps
+  extends ConversationState,
+    DeepResearchProcessState {
+  inputValue: string;
+  callingMode: "reEditCall" | "recall";
+  mode: "chat" | "search" | "deepResearch";
+}

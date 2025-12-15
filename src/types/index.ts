@@ -12,6 +12,7 @@ import type {
   ChatSessionType,
   chatWithChatAssistantProps,
   chatWithDeepResearchProps,
+  reChatWithAssistantProps,
 } from "./conversation";
 import type { taskType, searchResultItem } from "./agentFlowRelatedDefine";
 
@@ -31,6 +32,7 @@ export {
   ChatSessionType,
   chatWithChatAssistantProps,
   chatWithDeepResearchProps,
+  reChatWithAssistantProps,
 };
 
 export { taskType, searchResultItem };

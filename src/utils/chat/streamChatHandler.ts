@@ -358,9 +358,15 @@ export class StreamChatHandler {
     }
 
     try {
-      await apiClient.post("/conversations/add_messages", {
-        chat_messages: [newUserMessage, newAssistantMessage],
-      });
+      if (this.config.callingMode === "direct") {
+        await apiClient.post("/conversations/add_messages", {
+          chat_messages: [newUserMessage, newAssistantMessage],
+        });
+      } else {
+        await apiClient.post("/conversations/update_messages", {
+          chat_messages: [newUserMessage, newAssistantMessage],
+        });
+      }
     } catch (error) {
       console.error("Failed to save messages:", error);
     }
