@@ -1,21 +1,5 @@
 import { ReactNode } from "react";
-import { UUIDTypes } from "uuid";
-import { ChatMessageType } from "./conversation";
-
-// export interface ChatMessageType {
-//   id?: string;
-//   role: string;
-//   content: string | Record<string, string>;
-// }
-
-export interface chunkMessageType {
-  type: "start" | "content" | "done" | "error";
-  content?: string;
-  role?: "user" | "assistant" | string;
-  id?: string;
-  done: boolean;
-  error?: string;
-}
+import { ChatMessageType } from "./ChatInfoDefine";
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;

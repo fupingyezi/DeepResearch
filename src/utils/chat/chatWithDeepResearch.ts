@@ -1,4 +1,4 @@
-import { deepResearchResultType } from "@/types/conversation";
+import { deepResearchResultType } from "@/types";
 import { StreamChatHandler } from "./streamChatHandler";
 import { chatWithDeepResearchProps } from "@/types";
 import { useDeepResearchProcessStore } from "@/store";

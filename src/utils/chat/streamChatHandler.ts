@@ -1,7 +1,7 @@
 import { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes, v4 as uuidv4 } from "uuid";
 import apiClient from "../request/api";
-import { deepResearchResultType } from "@/types/conversation";
+import { deepResearchResultType } from "@/types";
 
 export interface StreamChatConfig {
   apiEndpoint: string;
