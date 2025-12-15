@@ -204,6 +204,8 @@ export class StreamChatHandler {
   private async processStream(
     reader: ReadableStreamDefaultReader<Uint8Array>
   ): Promise<void> {
+    let streamCompleted = false; //结束信号
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -231,17 +233,23 @@ export class StreamChatHandler {
 
             if (data.type === "done") {
               console.log("Stream completed");
+              streamCompleted = true;
               break;
             }
 
             if (data.type === "error") {
               console.error("Stream error:", data.content);
+              streamCompleted = true;
               break;
             }
           } catch (parseError) {
             console.error("JSON解析错误:", parseError);
           }
         }
+      }
+
+      if (streamCompleted) {
+        break;
       }
     }
   }
