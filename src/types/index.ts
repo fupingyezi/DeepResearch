@@ -15,6 +15,8 @@ import type {
 } from "./conversation";
 import type { taskType, searchResultItem } from "./agentFlowRelatedDefine";
 
+import type { SSEEvent } from "./sse";
+
 export {
   ChatLayoutProps,
   ChatMessageBubbleProps,
@@ -32,3 +34,5 @@ export {
 };
 
 export { taskType, searchResultItem };
+
+export { SSEEvent };

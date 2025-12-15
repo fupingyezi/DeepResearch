@@ -5,7 +5,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { TavilySearchAPIRetriever } from "@langchain/community/retrievers/tavily_search_api";
 import type { taskType } from "@/types";
 import { getCheckpointer } from "@/lib";
-import { parseSearchResult } from "@/utils/streamUtils";
+import { parseSearchResult } from "@/utils/handleStateUpdate";
 
 import dotenv from "dotenv";
 

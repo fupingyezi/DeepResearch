@@ -9,7 +9,7 @@ import {
   LoadingOutlined,
   ArrowUpOutlined,
 } from "@ant-design/icons";
-import { parseSearchResult } from "@/utils/streamUtils";
+import { parseSearchResult } from "@/utils/handleStateUpdate";
 
 export const Title: React.FC<{ title: string; className?: string }> = ({
   title,

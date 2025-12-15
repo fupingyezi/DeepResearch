@@ -1,5 +1,6 @@
 import { createDeepResearchWorkflow } from "@/app/agents";
-import { handleStateUpdate } from "@/utils/streamUtils";
+import { handleStateUpdate } from "@/utils/handleStateUpdate";
+import { createSSEStream } from "@/app/api/utils/createSSEStream";
 
 export async function POST(request: Request) {
   const { input, sessionId } = await request.json();
@@ -11,54 +12,34 @@ export async function POST(request: Request) {
     });
   }
 
-  let lastState: any = null;
+  const readableStream = createSSEStream(request, async (enqueue) => {
+    let lastState: any = null;
+    enqueue({ type: "start", timeStamp: Date.now() });
 
-  // 创建 ReadableStream
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const state of await deepResearchWorkflow.stream(
-          {
-            input: input,
-            simpleAnalysis: "",
-            messages: [],
-            tasks: [],
-            nextAction: "",
-            summary: "",
-          },
-          {
-            configurable: { thread_id: sessionId },
-            streamMode: "values",
-            recursionLimit: 200,
-          }
-        )) {
-          // console.log("state:", state);
-          const updateState = handleStateUpdate(lastState, state);
-          // console.log("delta:", delta);
-          if (updateState) {
-            const message = `data: ${JSON.stringify(updateState)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(message));
-            lastState = state;
-          }
-        }
-
-        controller.enqueue(
-          new TextEncoder().encode('data: {"type":"done"}\n\n')
-        );
-        controller.close();
-      } catch (error) {
-        console.error("Workflow error:", error);
-        const errMsg = `data: ${JSON.stringify({
-          type: "error",
-          payload: "生成失败",
-        })}\n\n`;
-        controller.enqueue(new TextEncoder().encode(errMsg));
-        controller.close();
+    for await (const state of await deepResearchWorkflow.stream(
+      {
+        input: input,
+        simpleAnalysis: "",
+        messages: [],
+        tasks: [],
+        nextAction: "",
+        summary: "",
+      },
+      {
+        configurable: { thread_id: sessionId },
+        streamMode: "values",
+        recursionLimit: 200,
       }
-    },
+    )) {
+      const updateState = handleStateUpdate(lastState, state);
+      if (updateState) {
+        enqueue(updateState);
+        lastState = state;
+      }
+    }
   });
 
-  return new Response(stream, {
+  return new Response(readableStream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",

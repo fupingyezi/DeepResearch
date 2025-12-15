@@ -1,7 +1,8 @@
 import { ChatAgentWithSearchTool } from "@/app/agents";
 import { NextRequest, NextResponse } from "next/server";
 import { ConvertLangChainMessageToRoleMessage } from "@/utils";
-import { ChatMessageType } from "@/types";
+import { SSEEvent } from "@/types";
+import { createSSEStream } from "../../utils/createSSEStream";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,62 +29,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const encoder = new TextEncoder();
     const assistantMessage = response.messages[response.messages.length - 1];
     const responseContent = assistantMessage.content;
 
-    const readableStream = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: "start",
-              id: Date.now(),
-            })}\n\n`
-          )
-        );
+    const readableStream = createSSEStream(request, async (enqueue) => {
+      enqueue({ type: "start", timeStamp: Date.now() });
 
-        try {
-          const chunks = splitContentToChunks(responseContent as string);
+      const chunks = splitContentToChunks(responseContent as string);
 
-          for (let i = 0; i < chunks.length; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
+      for (let i = 0; i < chunks.length; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "content",
-                  content: chunks[i],
-                  role: "assistant",
-                  id: i,
-                  done: false,
-                })}\n\n`
-              )
-            );
-          }
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "done",
-                id: Date.now(),
-              })}\n\n`
-            )
-          );
-        } catch (err) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "error",
-                error: err instanceof Error ? err.message : "Unknown error",
-                id: Date.now(),
-              })}\n\n`
-            )
-          );
-        } finally {
-          controller.close();
-        }
-      },
+        const data = {
+          type: "content",
+          content: chunks[i],
+          role: "assistant",
+          id: i,
+          done: false,
+        } as SSEEvent;
+        if (!enqueue(data)) break;
+      }
     });
 
     return new Response(readableStream, {
