@@ -1,4 +1,5 @@
 import { Client } from "minio";
+import { UUIDTypes } from "uuid";
 
 const minioClient = new Client({
   endPoint: process.env.MINIO_ENDPOINT!,
@@ -10,7 +11,7 @@ const minioClient = new Client({
 
 const BUCKET_NAME = process.env.MINIO_BUCKET!;
 
-async function ensureBucket() {
+export async function ensureBucket() {
   try {
     const bucketExists = await minioClient.bucketExists(BUCKET_NAME);
     if (!bucketExists) {
@@ -26,7 +27,7 @@ async function ensureBucket() {
 }
 
 let bucketInitialized = false;
-async function initializeBucket() {
+export async function initializeBucket() {
   if (!bucketInitialized) {
     await ensureBucket();
     bucketInitialized = true;
@@ -35,38 +36,50 @@ async function initializeBucket() {
 
 export async function uploadFile(
   fileName: string,
-  buffer: Buffer,
-  contentType?: string
+  fileId: UUIDTypes,
+  buffer: Buffer
 ) {
   await initializeBucket();
-  const objectName = `uploads/${Date.now()}-${fileName}`;
+  const extensionName = fileName.split(".").pop() || "";
+  const objectName = `${Date.now()}-${fileName}`;
+  const objectKey = `files/${fileId}/${objectName}`;
 
-  await minioClient.putObject(
-    BUCKET_NAME,
-    objectName,
-    buffer,
-    buffer.length,
-    contentType ? { "Content-Type": contentType } : undefined
-  );
+  await minioClient.putObject(BUCKET_NAME, objectKey, buffer, buffer.length, {
+    contentType: getMimeType(extensionName),
+  });
 
-  return objectName;
+  return { objectKey };
 }
 
-export async function getFileUrl(objectName: string, expiryHours = 24) {
+export async function getFileUrl(objectKey: string, expiryHours = 24) {
   const url = await minioClient.presignedGetObject(
     BUCKET_NAME,
-    objectName,
-    expiryHours * 60 * 60
+    objectKey,
+    expiryHours * 7 * 3600
   );
   return url;
 }
 
-export async function deleteFile(objectName: string) {
-  await minioClient.removeObject(BUCKET_NAME, objectName);
+export async function deleteFile(objectKey: string) {
+  await minioClient.removeObject(BUCKET_NAME, objectKey);
 }
 
-export async function getFile(objectName: string) {
-  return await minioClient.getObject(BUCKET_NAME, objectName);
+export async function getFile(objectKey: string) {
+  return await minioClient.getObject(BUCKET_NAME, objectKey);
+}
+
+export function getMimeType(ext: string): string {
+  const mimeMap: Record<string, string> = {
+    pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    doc: "application/msword",
+    md: "text/markdown",
+    txt: "text/plain",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+  };
+  return mimeMap[ext.toLowerCase()] || "application/octet-stream";
 }
 
 export default minioClient;

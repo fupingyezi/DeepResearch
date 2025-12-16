@@ -3,7 +3,11 @@ import { getClient } from "@/lib";
 
 export async function POST(request: NextRequest) {
   try {
-    const { chat_messages } = await request.json();
+    const {
+      chat_messages,
+      hasFiles = false,
+      uploadedFiles = [],
+    } = await request.json();
 
     if (!Array.isArray(chat_messages) || chat_messages.length === 0) {
       return NextResponse.json(
@@ -122,6 +126,31 @@ export async function POST(request: NextRequest) {
                 sr.relativeScore != null ? sr.relativeScore : null,
               ]);
             }
+          }
+        }
+      }
+
+      // 如果有文件，插入文件元数据
+      if (hasFiles && uploadedFiles.length > 0) {
+        const userMessage = chat_messages.find((msg) => msg.role === "user");
+        if (userMessage) {
+          for (const file of uploadedFiles) {
+            const insertFileQuery = `
+              INSERT INTO file_metadata (
+                id, message_id, session_id, filename, mime_type, size_bytes, minio_bucket, minio_key
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `;
+
+            await client.query(insertFileQuery, [
+              file.fileId,
+              userMessage.id,
+              userMessage.sessionId,
+              file.filename,
+              file.mimeType,
+              file.sizeBytes,
+              process.env.MINIO_BUCKET!,
+              file.minioKey,
+            ]);
           }
         }
       }

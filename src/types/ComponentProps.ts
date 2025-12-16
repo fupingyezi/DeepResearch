@@ -1,5 +1,6 @@
-import { ReactNode } from "react";
+import React, { ReactNode } from "react";
 import { ChatMessageType } from "./ChatInfoDefine";
+import { UploadedFile } from "./ChatInfoDefine";
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;
@@ -17,7 +18,7 @@ export interface ChatMessagesProps {
 
 export interface ChatInputProps {
   placeholder?: string;
-  onSend?: (message: string) => void;
+  onSend?: (message: string, hasFiles?: boolean) => void;
   disabled?: boolean;
   className?: string;
 }
@@ -31,4 +32,14 @@ export interface ChatWindowProps {
 export interface ChatLayoutProps {
   content: ReactNode;
   footer: ReactNode;
+}
+
+export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
+  fileName: string;
+  ImgComponent: React.ComponentType<{
+    className?: string;
+    style?: React.CSSProperties;
+  }>;
+  removeFile?: (id: string) => void;
+  canClose?: boolean;
 }

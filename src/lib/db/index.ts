@@ -80,12 +80,6 @@ export async function initialDB() {
       );
     `);
 
-    // 修改现有表的 content 字段类型（如果表已存在）
-    await query(`
-      ALTER TABLE chat_message 
-      ALTER COLUMN content TYPE text;
-    `);
-
     // 3. deep_research_result
     await query(`
       create table if not exists deep_research_result (
@@ -147,6 +141,19 @@ export async function initialDB() {
         foreign key (session_id, message_id) 
           references chat_message(session_id, id) 
           on delete cascade
+      );
+    `);
+
+    await query(`
+      create table if not exists file_content (
+        minio_bucket varchar(100) not null,
+        minio_key text not null primary key,
+        content text,                    
+        status varchar(20) not null default 'pending' 
+            check (status in ('pending', 'parsing', 'success', 'failed')),
+        error_message text,               
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
       );
     `);
 

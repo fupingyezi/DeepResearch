@@ -5,6 +5,7 @@ interface ApiClientOptions {
 
 interface RequestOptions extends RequestInit {
   headers?: Record<string, string>;
+  isFormData?: boolean;
 }
 
 class ApiClient {
@@ -23,16 +24,33 @@ class ApiClient {
   }
 
   // 通用请求
-  async request(endpoint: string, options: RequestOptions = {}): Promise<any> {
+  async request(
+    endpoint: string,
+    options: RequestOptions = {},
+    isFormData: boolean = false
+  ): Promise<any> {
     const url = `${this.baseURL}${endpoint}`;
-    const config = {
-      ...this.defaultOptions,
-      ...options,
-      headers: {
+
+    let config: RequestInit;
+
+    if (isFormData) {
+      // FormData，不设置headers
+      config = {
+        ...options,
+      };
+    } else {
+      // 普通请求， 合并headers
+      const headers = {
         ...this.defaultOptions.headers,
         ...options.headers,
-      },
-    };
+      };
+
+      config = {
+        ...this.defaultOptions,
+        ...options,
+        headers,
+      };
+    }
 
     try {
       const response = await fetch(url, config);
@@ -73,11 +91,17 @@ class ApiClient {
     data: any = {},
     options: RequestOptions = {}
   ): Promise<any> {
-    return this.request(endpoint, {
-      method: "POST",
-      body: JSON.stringify(data),
-      ...options,
-    });
+    const isFormData = data instanceof FormData;
+
+    return this.request(
+      endpoint,
+      {
+        method: "POST",
+        body: isFormData ? data : JSON.stringify(data),
+        ...options,
+      },
+      isFormData
+    );
   }
 
   // PUT 请求

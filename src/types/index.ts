@@ -5,6 +5,7 @@ import type {
   ChatInputProps,
   ChatMessagesProps,
   ChatWindowProps,
+  FileItemsProps,
 } from "./ComponentProps";
 
 // 数据定义相关
@@ -15,6 +16,9 @@ import type {
   searchResultItem,
   SSEEvent,
   deepResearchResultType,
+  fileMetadataType,
+  UploadedFileStatus,
+  UploadedFile,
 } from "./ChatInfoDefine";
 
 //函数参数相关
@@ -25,6 +29,7 @@ import type {
 } from "./ChatUtilsParams";
 
 export {
+  FileItemsProps,
   ChatLayoutProps,
   ChatMessageBubbleProps,
   ChatInputProps,
@@ -39,6 +44,9 @@ export {
   searchResultItem,
   SSEEvent,
   deepResearchResultType,
+  fileMetadataType,
+  UploadedFileStatus,
+  UploadedFile,
 };
 
 export {

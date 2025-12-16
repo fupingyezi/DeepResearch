@@ -8,6 +8,7 @@ import {
   useConversationStore,
   useDeepResearchProcessStore,
   useChatSelectStore,
+  useFileUploadStore,
 } from "@/store";
 import {
   chatWithChatAssistant,
@@ -31,6 +32,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const conversationStore = useConversationStore();
   const deepResearchStore = useDeepResearchProcessStore();
+  const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
 
   const { isChating, shouldAutoScroll, currentMessages, setShouldAutoScroll } =
     conversationStore;
@@ -45,14 +47,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   );
 
   const handleSendMessage = useCallback(
-    async (inputValue: string) => {
+    async (inputValue: string, hasFiles?: boolean) => {
       const { selectedAgent } = useChatSelectStore.getState();
       if (selectedAgent === "chat") {
         await chatWithChatAssistant({
           inputValue,
+          hasFiles,
+          uploadedFiles,
           callingMode: "direct",
           ...conversationStore,
         });
+        // 发送后清理文件状态
+        if (hasFiles) {
+          clearUploadedFiles();
+        }
       } else if (selectedAgent === "search") {
         await chatWithSearhAssistant({
           inputValue,
@@ -69,7 +77,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         });
       }
     },
-    [conversationStore, deepResearchStore]
+    [conversationStore, deepResearchStore, uploadedFiles, clearUploadedFiles]
   );
 
   return (

@@ -1,7 +1,6 @@
 import { ContentBlock } from "langchain";
 import { UUIDTypes } from "uuid";
 
-
 export type SSEEvent =
   | { type: "start"; timestamp: number }
   | { type: "content"; content: string; role: string; id?: string | number }
@@ -37,13 +36,34 @@ export interface deepResearchResultType {
   report: string;
 }
 
+export type UploadedFileStatus = "pending" | "parsing" | "success" | "failed";
+export interface UploadedFile {
+  id: string;
+  file: File;
+  parsedStatus: UploadedFileStatus;
+  sizeBytes?: number;
+  error?: string;
+}
+
+export interface fileMetadataType {
+  id: UUIDTypes;
+  messageId: number;
+  sessionId: UUIDTypes;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  minioBucket: string;
+  minioKey: string;
+  uploadedAt: Date;
+}
+
 export interface ChatMessageType {
   id: number;
   sessionId: UUIDTypes;
   role: string;
   content: string | ContentBlock[];
   mode: "chat" | "search" | "deepResearch";
-  files?: any[];
+  files?: fileMetadataType[];
   accumulatedTokenUsage?: number;
   deepResearchResult?: deepResearchResultType;
   researchStatus?: "finished" | "failed" | "processing" | "suspended";
@@ -56,4 +76,3 @@ export interface ChatSessionType {
   created_at: number;
   updated_at: number;
 }
-

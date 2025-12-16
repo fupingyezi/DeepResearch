@@ -1,5 +1,7 @@
 import Image from "next/image";
 import CustomMarkdown from "../Markdown/CustomMarkdown";
+import FileItem from "../Files/FileItems";
+import { getFileIcon, formatFileSize } from "@/utils/files/fileInfoHandler";
 import { Button, Spin, Tooltip, message as antdMessage } from "antd";
 import { LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 
@@ -9,6 +11,7 @@ import apiClient from "@/utils/request/api";
 import copy from "copy-to-clipboard";
 import { useDeepResearchProcessStore, useConversationStore } from "@/store";
 import { reChatWithAssistant } from "@/utils/chat";
+import { fa } from "zod/v4/locales";
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
@@ -292,7 +295,22 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     // 正常气泡
     if (!isEditing) {
       return (
-        <div className="w-full px-3 mb-5 flex justify-end relative">
+        <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
+          <div className="w-1/3 grid grid-cols-1 gap-2">
+            {message.files &&
+              message.files.length !== 0 &&
+              message.files.map((file) => (
+                <FileItem
+                  id={file.id as string}
+                  key={file.id as KeyType}
+                  fileName={file.filename}
+                  parsedStatus={"success"}
+                  sizeBytes={file.sizeBytes}
+                  ImgComponent={getFileIcon(file.mimeType, file.filename)}
+                  canClose={false}
+                />
+              ))}
+          </div>
           <div
             className="max-w-2/3 p-3 rounded-3xl bg-sky-100"
             onMouseEnter={() => setIsShowOtherOperators(true)}

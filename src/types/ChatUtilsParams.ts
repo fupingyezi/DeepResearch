@@ -2,6 +2,8 @@ import { ConversationState, DeepResearchProcessState } from "@/store";
 
 export interface chatWithChatAssistantProps extends ConversationState {
   inputValue: string;
+  hasFiles?: boolean;
+  uploadedFiles?: any[];
   callingMode: "direct" | "reEditCall" | "recall";
 }
 

@@ -9,6 +9,8 @@ export interface StreamChatConfig {
   callingMode: "direct" | "reEditCall" | "recall";
   inputValue: string;
   sessionId?: UUIDTypes;
+  hasFiles?: boolean; // "chat模式是否携带文件"
+  uploadedFiles?: any[]; // 上传的文件信息
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
@@ -179,6 +181,8 @@ export class StreamChatHandler {
         body: JSON.stringify({
           input: this.config.inputValue,
           sessionId: this.sessionId,
+          hasFiles: this.config.hasFiles,
+          uploadedFiles: this.config.uploadedFiles || [],
         }),
         signal: this.abortController!.signal,
       });
@@ -361,10 +365,14 @@ export class StreamChatHandler {
       if (this.config.callingMode === "direct") {
         await apiClient.post("/conversations/add_messages", {
           chat_messages: [newUserMessage, newAssistantMessage],
+          hasFiles: this.config.hasFiles,
+          uploadedFiles: this.config.uploadedFiles || [],
         });
       } else {
         await apiClient.post("/conversations/update_messages", {
           chat_messages: [newUserMessage, newAssistantMessage],
+          hasFiles: this.config.hasFiles,
+          uploadedFiles: this.config.uploadedFiles || [],
         });
       }
     } catch (error) {

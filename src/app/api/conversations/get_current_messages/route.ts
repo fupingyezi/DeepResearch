@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib";
-import { ChatMessageType, taskType } from "@/types";
+import { ChatMessageType, taskType, fileMetadataType } from "@/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +28,40 @@ export async function POST(request: NextRequest) {
     const processedData = [];
 
     for (const message of messagesResponse.rows) {
+      // 在 for (const message of messagesResponse.rows) 循环内部，添加如下代码：
+
+      const fileMetadataQuery = `
+        select 
+          id,
+          message_id as "messageId",
+          session_id as "sessionId",
+          filename,
+          mime_type as "mimeType",
+          size_bytes as "sizeBytes",
+          minio_bucket as "minioBucket",
+          minio_key as "minioKey",
+          uploaded_at as "uploadedAt"
+        from file_metadata
+        where session_id = $1 and message_id = $2
+      `;
+
+      const fileMetadataResult = await query(fileMetadataQuery, [
+        message.session_id,
+        message.id,
+      ]);
+
+      const files = fileMetadataResult.rows.map((row) => ({
+        id: row.id,
+        messageId: row.messageId,
+        sessionId: row.sessionId,
+        filename: row.filename,
+        mimeType: row.mimeType,
+        sizeBytes: Number(row.sizeBytes),
+        minioBucket: row.minioBucket,
+        minioKey: row.minioKey,
+        uploadedAt: new Date(row.uploadedAt),
+      })) as fileMetadataType[];
+
       const processedMessage: ChatMessageType = {
         id: message.id,
         sessionId: message.session_id,
@@ -37,6 +71,7 @@ export async function POST(request: NextRequest) {
         // accumulatedTokenUsage: message.accumulated_token_usage,
         mode: message.mode,
         researchStatus: message.research_status,
+        files: files,
       };
 
       if (
