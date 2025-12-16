@@ -2,7 +2,12 @@ import Image from "next/image";
 import CustomMarkdown from "../Markdown/CustomMarkdown";
 import FileItem from "../Files/FileItems";
 import { getFileIcon, formatFileSize } from "@/utils/files/fileInfoHandler";
-import { Button, Spin, Tooltip, message as antdMessage } from "antd";
+import {
+  handleDownloadMD,
+  handleDownloadPDF,
+  handleDownloadDOC,
+} from "@/utils/files/fileDownload";
+import { Button, Spin, Tooltip, Popover, message as antdMessage } from "antd";
 import { LoadingOutlined, CheckCircleOutlined } from "@ant-design/icons";
 
 import { ChatMessagesProps, ChatMessageBubbleProps } from "@/types";
@@ -11,12 +16,13 @@ import apiClient from "@/utils/request/api";
 import copy from "copy-to-clipboard";
 import { useDeepResearchProcessStore, useConversationStore } from "@/store";
 import { reChatWithAssistant } from "@/utils/chat";
-import { fa } from "zod/v4/locales";
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
   isLastAIMessage,
   isLastHumanMessage,
+  selectDownloadId,
+  setSelectDownloadId,
 }) => {
   const deepResearchStore = useDeepResearchProcessStore();
   const conversationStore = useConversationStore();
@@ -122,6 +128,13 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             ...deepResearchStore,
           });
         }
+        case "download": {
+          if (selectDownloadId === message.id) {
+            setSelectDownloadId(0);
+          } else {
+            setSelectDownloadId(message.id);
+          }
+        }
       }
     };
 
@@ -143,14 +156,68 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                 title={`${operatorToTextMap(op)}`}
                 placement="bottom"
               >
-                <Image
-                  src={`/${op}.svg`}
-                  alt={`${op}`}
-                  width={20}
-                  height={20}
-                  className="w-7 h-7 rounded-xl p-1 m-0.5 mb-2 hover:bg-[#e7e7e7] hover:cursor-pointer"
-                  onClick={() => handleOperator(op)}
-                ></Image>
+                <Popover
+                  content={
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
+                        onClick={() => {
+                          handleDownloadPDF(
+                            message.mode === "deepResearch"
+                              ? message.deepResearchResult?.report || ""
+                              : (message.content as string)
+                          );
+                          setSelectDownloadId(0);
+                        }}
+                      >
+                        pdf
+                      </div>
+                      <div
+                        className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
+                        onClick={() => {
+                          handleDownloadDOC(
+                            message.mode === "deepResearch"
+                              ? message.deepResearchResult?.report || ""
+                              : (message.content as string)
+                          );
+                          setSelectDownloadId(0);
+                        }}
+                      >
+                        word
+                      </div>
+                      <div
+                        className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
+                        onClick={() => {
+                          handleDownloadMD(
+                            message.mode === "deepResearch"
+                              ? message.deepResearchResult?.report || ""
+                              : (message.content as string)
+                          );
+                          setSelectDownloadId(0);
+                        }}
+                      >
+                        markdown
+                      </div>
+                      <div
+                        className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
+                        onClick={() => setSelectDownloadId(0)}
+                      >
+                        取消
+                      </div>
+                    </div>
+                  }
+                  placement="right"
+                  open={op === "download" && selectDownloadId === message.id}
+                >
+                  <Image
+                    src={`/${op}.svg`}
+                    alt={`${op}`}
+                    width={20}
+                    height={20}
+                    className="w-7 h-7 rounded-xl p-1 m-0.5 mb-2 hover:bg-[#e7e7e7] hover:cursor-pointer"
+                    onClick={() => handleOperator(op)}
+                  ></Image>
+                </Popover>
               </Tooltip>
             );
           }
@@ -397,6 +464,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   className,
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [selectDownloadId, setSelectDownLoadId] = useState<number>(0);
 
   const scrollToBottom = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -469,6 +537,8 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
           isLastHumanMessage={
             msg.role === "user" && index === messages.length - 2
           }
+          selectDownloadId={selectDownloadId}
+          setSelectDownloadId={setSelectDownLoadId}
         />
       ))}
     </div>
