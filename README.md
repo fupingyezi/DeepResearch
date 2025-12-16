@@ -34,6 +34,7 @@
 
 - **PostgreSQL** - 关系型数据库，用于存储对话历史
 - **Redis** - 缓存和会话管理
+- **Minio** - 文件存储管理
 
 ## 📁 项目结构
 
@@ -69,9 +70,10 @@
 
 ### 环境要求
 
-- Node.js 18.17+ 或 Bun 1.0+
-- PostgreSQL 14+
-- Redis 6+
+- Node.js 18+
+- PostgreSQL 8+
+- Redis 5+
+- Minio 8+
 
 ### 安装依赖
 
@@ -79,14 +81,8 @@
 # 使用 npm
 npm install
 
-# 使用 yarn
-yarn install
-
 # 使用 pnpm
 pnpm install
-
-# 使用 bun
-bun install
 ```
 
 ### 配置环境变量
@@ -107,20 +103,29 @@ OPENAI_SPARK_API_KEY=your-spark-api-key
 OPENAI_SPARK_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # PostgreSQL 配置
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=password
-POSTGRES_DATABASE=langchain-next
+DATABASE_URL="postgresql://yezi:fupingyezi123@localhost:5432/mini-DeepResearch"
 
 # Redis 配置
-REDIS_URL=redis://localhost:6379
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_URL="redis://localhost:6379"
 
-# Tavily API 配置（可选，用于深度研究）
+# Minio 配置
+MINIO_ENDPOINT=localhost
+MINIO_PORT=9000
+MINIO_USE_SSL=false
+MINIO_ACCESS_KEY=yezi
+MINIO_SECRET_KEY=fupingyezi123
+MINIO_BUCKET=chat-files
+
+# Tavily API 配置
 TAVILY_API_KEY=your-tavily-api-key
 ```
 
-注意：本项目目前使用千问，如果需要使用其他模型，请到 agent 对应处修改代码。
+注意：
+
+1. 本项目目前使用千问，如果需要使用其他模型，请到 agent 对应处修改代码。
+2. 环境配置和 docker 配置是相对应的，如修改请同时修改两处。
 
 ### 使用 Docker
 
@@ -135,11 +140,7 @@ docker-compose up -d
 ```bash
 npm run dev
 # or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
 打开 [http://localhost:3000](http://localhost:3000) 查看应用。
@@ -174,17 +175,17 @@ bun dev
 使用 ESLint 进行代码检查：
 
 ```bash
-npm run lint
+pnpm run lint
 ```
 
 ### 构建生产版本
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 ### 启动生产服务器
 
 ```bash
-npm start
+pnpm start
 ```
