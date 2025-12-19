@@ -1,39 +1,11 @@
 import { ChatOpenAI } from "@langchain/openai";
-import { BaseMessage, createAgent, HumanMessage, tool } from "langchain";
-import z from "zod";
-import { TavilySearchAPIRetriever } from "@langchain/community/retrievers/tavily_search_api";
+import { searchWebTool } from "../tools";
+import { createAgent } from "langchain";
 import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
 const systemPrompt = `你是个网络搜索助手，会使用网络搜索工具来帮助用户搜索相关信息`;
-
-const searchWebTool = tool(
-  async (input) => {
-    const tavy = new TavilySearchAPIRetriever({
-      apiKey: process.env.TAVILY_API_KEY,
-    });
-    const response = await tavy.invoke(input.question);
-    const relatedWebInfo = response
-      .map((doc, index) => {
-        return `结果 ${index + 1}:
-        标题: ${doc.metadata.title}
-        来源: ${doc.metadata.source}    
-        内容: ${doc.pageContent}
-        相关性评分: ${doc.metadata.score}
-        ---`;
-      })
-      .join("\n");
-    return relatedWebInfo;
-  },
-  {
-    name: "search_web_tool",
-    description: "当用户提到搜索相关信息的时候调用",
-    schema: z.object({
-      question: z.string(),
-    }),
-  }
-);
 
 export const ChatAgentWithSearchTool = async (
   input: string,

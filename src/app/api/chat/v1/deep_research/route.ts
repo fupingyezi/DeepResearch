@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         messages: [],
         tasks: [],
         nextAction: "",
-        summary: "",
+        report: "",
       },
       {
         configurable: { thread_id: `dr-${sessionId}-${Date.now()}` },

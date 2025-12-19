@@ -12,13 +12,13 @@ export const chatWithDeepResearch = async (
     mode: "deepResearch",
     callingMode: params.callingMode,
     inputValue: params.inputValue,
-    sessionId: params.currentSession,
+    sessionId: params.currentSessionId,
     chatSessions: params.chatSessions,
     currentMessages: params.currentMessages,
     setIsChating: params.setIsChating,
     setShouldAutoScroll: params.setShouldAutoScroll,
     addChatSession: params.addChatSession,
-    setCurrentSession: params.setCurrentSession,
+    setCurrentSessionId: params.setCurrentSessionId,
     setCurrentMessages: params.setCurrentMessages,
     setAbortController: params.setAbortController,
 
@@ -31,7 +31,7 @@ export const chatWithDeepResearch = async (
         return accumulatedContent + data.payload.simpleAnalysis;
       }
 
-      if (data.type === "summary" && data.payload) {
+      if (data.type === "report" && data.payload) {
         params.updateReport(data.payload);
         params.setStatus("end");
       }

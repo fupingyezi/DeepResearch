@@ -30,9 +30,9 @@ export function handleStateUpdate(prevState: any, currentState: any) {
     }
   }
 
-  if (currentState.summary && !prevState?.summary) {
-    delta.type = "summary";
-    delta.payload = currentState.summary;
+  if (currentState.report && !prevState?.report) {
+    delta.type = "report";
+    delta.payload = currentState.report;
   }
 
   return Object.keys(delta).length ? delta : null;

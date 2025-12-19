@@ -144,6 +144,7 @@ export async function initialDB() {
       );
     `);
 
+    //7. file_content
     await query(`
       create table if not exists file_content (
         minio_bucket varchar(100) not null,

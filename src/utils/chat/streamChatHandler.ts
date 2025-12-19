@@ -18,7 +18,7 @@ export interface StreamChatConfig {
   setIsChating: (loading: boolean) => void;
   setShouldAutoScroll: (scroll: boolean) => void;
   addChatSession: (session: ChatSessionType) => void;
-  setCurrentSession: (id: UUIDTypes) => void;
+  setCurrentSessionId: (id: UUIDTypes) => void;
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
 
@@ -84,7 +84,7 @@ export class StreamChatHandler {
 
         if (res.success) {
           this.config.addChatSession(chat_session);
-          this.config.setCurrentSession(chat_session.id);
+          this.config.setCurrentSessionId(chat_session.id);
         }
       } catch (error) {
         console.error("Failed to create session:", error);

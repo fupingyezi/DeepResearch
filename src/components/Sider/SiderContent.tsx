@@ -45,7 +45,7 @@ const SessionBubble: React.FC<{
   }) => {
     const [isHover, setIsHover] = useState<boolean>(false);
 
-    const { currentSession, setCurrentSession, setCurrentMessages } =
+    const { currentSessionId, setCurrentSessionId, setCurrentMessages } =
       useConversationStore();
     const date = new Date(chatSession.updated_at);
     const showDate = `${date.getFullYear()}-${
@@ -53,7 +53,7 @@ const SessionBubble: React.FC<{
     }-${date.getDate()}`;
 
     const handleSelectSession = async (sessionId: UUIDTypes) => {
-      setCurrentSession(sessionId);
+      setCurrentSessionId(sessionId);
       try {
         const response = await apiClient.post(
           "/conversations/get_current_messages",
@@ -104,8 +104,8 @@ const SessionBubble: React.FC<{
             className="w-full px-3 min-h-10 leading-10 rounded-2xl relative overflow-hidden text-ellipsis whitespace-nowrap hover:bg-[#ebedef] hover:cursor-pointer"
             style={{
               backgroundColor:
-                chatSession.id === currentSession ? "#e4ecfc" : "",
-              color: chatSession.id === currentSession ? "blue" : "",
+                chatSession.id === currentSessionId ? "#e4ecfc" : "",
+              color: chatSession.id === currentSessionId ? "blue" : "",
             }}
             onMouseEnter={() => setIsHover(true)}
             onMouseLeave={() => setIsHover(false)}
@@ -115,14 +115,14 @@ const SessionBubble: React.FC<{
             {isHover && (
               <div
                 className={`w-9 h-full flex items-center justify-center absolute right-0 top-1/2 transform -translate-y-1/2  ${
-                  chatSession.id === currentSession
+                  chatSession.id === currentSessionId
                     ? "bg-[#e4ecfc]"
                     : "bg-[#ebedef]"
                 }`}
               >
                 <EllipsisOutlined
                   className={`w-6 h-6 rounded-4xl p-0.5 ${
-                    chatSession.id === currentSession
+                    chatSession.id === currentSessionId
                       ? "hover:bg-[#d9e3f3]"
                       : "hover:bg-[#e5e8eb]"
                   } transition`}
@@ -154,7 +154,7 @@ const SiderContent = () => {
     intialChatSessions,
     updateChatSession,
     chatSessions,
-    setCurrentSession,
+    setCurrentSessionId,
     setCurrentMessages,
   } = useConversationStore();
 
@@ -177,8 +177,8 @@ const SiderContent = () => {
   // 点击开启新对话
   const handleCreateNewSession = useCallback(() => {
     setCurrentMessages([]);
-    setCurrentSession("");
-  }, [setCurrentMessages, setCurrentSession]);
+    setCurrentSessionId("");
+  }, [setCurrentMessages, setCurrentSessionId]);
 
   // 点击编辑session
   const handleSelectEditSession = useCallback(

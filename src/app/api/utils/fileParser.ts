@@ -1,6 +1,5 @@
 import mammoth from "mammoth";
 import minioClient from "@/lib/storage";
-// import pdf from "pdf-parse";
 
 async function downloadFileFromMinio(
   bucket: string,

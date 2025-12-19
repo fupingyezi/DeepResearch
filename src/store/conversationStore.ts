@@ -1,13 +1,12 @@
 import { create } from "zustand";
 import type { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes } from "uuid";
-import { abort } from "process";
 
 export interface ConversationState {
   isChating: boolean;
   shouldAutoScroll: boolean;
   chatSessions: ChatSessionType[];
-  currentSession: UUIDTypes;
+  currentSessionId: UUIDTypes;
   currentMessages: ChatMessageType[];
   currentAbortController: AbortController | null;
   setIsChating: (isChating: boolean) => void;
@@ -18,7 +17,7 @@ export interface ConversationState {
     chatSession: ChatSessionType | null,
     op: "edit" | "delete"
   ) => void;
-  setCurrentSession: (sessionId: UUIDTypes) => void;
+  setCurrentSessionId: (sessionId: UUIDTypes) => void;
   setCurrentMessages: (chatMessages: ChatMessageType[]) => void;
   updateCurrentMessages: (
     ChatMessages: ChatMessageType | ChatMessageType[]
@@ -31,7 +30,7 @@ const useConversationStore = create<ConversationState>((set) => ({
   isChating: false,
   shouldAutoScroll: false,
   chatSessions: [],
-  currentSession: "",
+  currentSessionId: "",
   currentMessages: [],
   currentAbortController: null,
   setIsChating: (isChating) =>
@@ -66,25 +65,25 @@ const useConversationStore = create<ConversationState>((set) => ({
         );
 
         // 如果当前会话被删除，重置
-        let newCurrentSession = state.currentSession;
+        let newcurrentSessionId = state.currentSessionId;
         let newCurrentMessages: ChatMessageType[] = state.currentMessages;
 
-        if (state.currentSession === chatSession.id) {
-          newCurrentSession = "";
+        if (state.currentSessionId === chatSession.id) {
+          newcurrentSessionId = "";
           newCurrentMessages = [];
         }
 
         return {
           chatSessions: filteredSessions,
-          currentSession: newCurrentSession,
+          currentSessionId: newcurrentSessionId,
           currentMessages: newCurrentMessages,
         };
       }
       return {};
     }),
-  setCurrentSession: (sessionId) =>
+  setCurrentSessionId: (sessionId) =>
     set(() => ({
-      currentSession: sessionId,
+      currentSessionId: sessionId,
     })),
   setCurrentMessages: (chatMessages) =>
     set(() => ({ currentMessages: chatMessages })),

@@ -3,9 +3,7 @@ import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import { createAgent, tool } from "langchain";
 import { ChatOpenAI } from "@langchain/openai";
 import { TavilySearchAPIRetriever } from "@langchain/community/retrievers/tavily_search_api";
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
-import { trimMessages } from "langchain";
-import { BaseMessage, HumanMessage, AIMessage } from "langchain";
+import { BaseMessage } from "langchain";
 import type { taskType } from "@/types";
 
 import dotenv from "dotenv";
