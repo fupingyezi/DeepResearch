@@ -6,6 +6,9 @@ import type {
   ChatMessagesProps,
   ChatWindowProps,
   FileItemsProps,
+  MessageToolType,
+  SupportDownloadFileType,
+  MessageToolBarProps,
 } from "./ComponentProps";
 
 // 数据定义相关
@@ -35,6 +38,9 @@ export {
   ChatInputProps,
   ChatMessagesProps,
   ChatWindowProps,
+  MessageToolType,
+  SupportDownloadFileType,
+  MessageToolBarProps,
 };
 
 export {

@@ -34,6 +34,7 @@ const DeepResearchProcess = () => {
       {/* header */}
       <ProcessHeader
         selectedTab={selectedTab}
+        report={report}
         setSelectedTab={setSelectedTab}
         setIsOpen={setIsOpenProcessSider}
         researchTarget={researchTarget}

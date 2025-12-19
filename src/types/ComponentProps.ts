@@ -45,3 +45,14 @@ export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
   removeFile?: (id: string) => void;
   canClose?: boolean;
 }
+
+export type MessageToolType = "copy" | "recall" | "edit" | "download";
+export type SupportDownloadFileType = "pdf" | "word" | "md" | "cancle";
+
+export interface MessageToolBarProps {
+  tools: MessageToolType[];
+  supportDownloadFiles: SupportDownloadFileType[];
+  handleToolAction?: (tool: MessageToolType) => void;
+  handleDownloadFiles?: (fileType: SupportDownloadFileType) => void;
+  className?: string;
+}

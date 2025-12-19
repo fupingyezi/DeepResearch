@@ -1,9 +1,20 @@
 import Image from "next/image";
+import { Button, message as antdMessage } from "antd";
+import MessageToolBar from "../MessageToolBar/MessageToolBar";
 
-import { Button } from "antd";
+import copy from "copy-to-clipboard";
+import { useEffect, useState } from "react";
+import {
+  handleDownloadPDF,
+  handleDownloadDOC,
+  handleDownloadMD,
+} from "@/utils/files/fileDownload";
+
+import { MessageToolType, SupportDownloadFileType } from "@/types";
 
 export interface ProcessHeaderProps {
   researchTarget: string;
+  report: string;
   setIsOpen: (isOpen: boolean) => void;
   selectedTab: "report" | "process";
   setSelectedTab: (selectedTab: "report" | "process") => void;
@@ -11,29 +22,69 @@ export interface ProcessHeaderProps {
 
 export const ProcessHeader: React.FC<ProcessHeaderProps> = ({
   researchTarget,
+  report,
   setIsOpen,
   selectedTab,
   setSelectedTab,
 }) => {
+  const [showCopySuccess, setShowCopySuccess] = useState<boolean>(false);
+  useEffect(() => {
+    if (showCopySuccess) {
+      antdMessage.success("Copy Success!");
+      const timer = setTimeout(() => {
+        setShowCopySuccess(false);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [showCopySuccess]);
   const renderOtherOperations = () => {
+    const tools: MessageToolType[] = ["copy", "download"];
+    const supportDownloadFiles: SupportDownloadFileType[] = [
+      "pdf",
+      "word",
+      "md",
+      "cancle",
+    ];
+
+    const handleOperator = async (
+      op: "copy" | "edit" | "recall" | "download"
+    ) => {
+      switch (op) {
+        case "copy": {
+          copy(report);
+          setShowCopySuccess(true);
+          return;
+        }
+      }
+    };
+
+    const handleDownloadFiles = (fileType: SupportDownloadFileType) => {
+      switch (fileType) {
+        case "pdf": {
+          handleDownloadPDF(report);
+          return;
+        }
+        case "word": {
+          handleDownloadDOC(report);
+          return;
+        }
+        case "md": {
+          handleDownloadMD(report);
+          return;
+        }
+        case "cancle": {
+          return;
+        }
+      }
+    };
     if (selectedTab === "process") return null;
     return (
-      <>
-        <Image
-          src={`/copy.svg`}
-          alt={`复制`}
-          width={20}
-          height={20}
-          className="w-7 h-7 rounded-xl p-1 hover:bg-[#e7e7e7] hover:cursor-pointer"
-        ></Image>
-        <Image
-          src={`/download.svg`}
-          alt={`下载`}
-          width={20}
-          height={20}
-          className="w-7 h-7 rounded-xl p-1 hover:bg-[#e7e7e7] hover:cursor-pointer"
-        ></Image>
-      </>
+      <MessageToolBar
+        tools={tools}
+        handleToolAction={handleOperator}
+        supportDownloadFiles={supportDownloadFiles}
+        handleDownloadFiles={handleDownloadFiles}
+      />
     );
   };
 
