@@ -2,8 +2,7 @@ import Image from "next/image";
 import { Button, message as antdMessage } from "antd";
 import MessageToolBar from "../MessageToolBar/MessageToolBar";
 
-import copy from "copy-to-clipboard";
-import { useEffect, useState } from "react";
+import { useCopy } from "@/utils/hooks";
 import {
   handleDownloadPDF,
   handleDownloadDOC,
@@ -27,23 +26,15 @@ export const ProcessHeader: React.FC<ProcessHeaderProps> = ({
   selectedTab,
   setSelectedTab,
 }) => {
-  const [showCopySuccess, setShowCopySuccess] = useState<boolean>(false);
-  useEffect(() => {
-    if (showCopySuccess) {
-      antdMessage.success("Copy Success!");
-      const timer = setTimeout(() => {
-        setShowCopySuccess(false);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [showCopySuccess]);
+  const { copyToClipboard } = useCopy();
+
   const renderOtherOperations = () => {
     const tools: MessageToolType[] = ["copy", "download"];
     const supportDownloadFiles: SupportDownloadFileType[] = [
       "pdf",
       "word",
       "md",
-      "cancle",
+      "cancel",
     ];
 
     const handleOperator = async (
@@ -51,8 +42,7 @@ export const ProcessHeader: React.FC<ProcessHeaderProps> = ({
     ) => {
       switch (op) {
         case "copy": {
-          copy(report);
-          setShowCopySuccess(true);
+          copyToClipboard(report);
           return;
         }
       }
@@ -72,7 +62,7 @@ export const ProcessHeader: React.FC<ProcessHeaderProps> = ({
           handleDownloadMD(report);
           return;
         }
-        case "cancle": {
+        case "cancel": {
           return;
         }
       }

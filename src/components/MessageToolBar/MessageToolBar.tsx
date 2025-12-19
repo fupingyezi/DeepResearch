@@ -24,7 +24,7 @@ const OperatorToTextMap = (op: MessageToolType | SupportDownloadFileType) => {
       return "Word";
     case "md":
       return "Markdown";
-    case "cancle":
+    case "cancel":
       return "取消";
   }
 };

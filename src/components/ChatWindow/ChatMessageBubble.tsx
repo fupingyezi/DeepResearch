@@ -4,8 +4,8 @@ import FileItem from "../Files/FileItems";
 import CustomMarkdown from "../Markdown/CustomMarkdown";
 import MessageToolBar from "../MessageToolBar/MessageToolBar";
 
-import copy from "copy-to-clipboard";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useCopy } from "@/utils/hooks";
 import { useDeepResearchProcessStore, useConversationStore } from "@/store";
 import { ChatMessageBubbleProps, SupportDownloadFileType } from "@/types";
 import { reChatWithAssistant } from "@/utils/chat";
@@ -43,21 +43,11 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   } = conversationStore;
   const [isShowOtherOperators, setIsShowOtherOperators] =
     useState<boolean>(false);
-  const [showCopySuccess, setShowCopySuccess] = useState<boolean>(false);
+  const { copyToClipboard } = useCopy();
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [reEditValue, setReEditValue] = useState<string>(
     message.content as string
   );
-
-  useEffect(() => {
-    if (showCopySuccess) {
-      antdMessage.success("Copy Success!");
-      const timer = setTimeout(() => {
-        setShowCopySuccess(false);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [showCopySuccess]);
 
   // 点击查看深度研究结果的处理逻辑
   const hanldeShowDeepResearch = async () => {
@@ -103,7 +93,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       "pdf",
       "word",
       "md",
-      "cancle",
+      "cancel",
     ];
 
     const handleOperator = async (
@@ -111,8 +101,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     ) => {
       switch (op) {
         case "copy": {
-          copy(renderContent());
-          setShowCopySuccess(true);
+          copyToClipboard(renderContent());
           return;
         }
         case "edit": {
@@ -164,7 +153,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           );
           return;
         }
-        case "cancle": {
+        case "cancel": {
           return;
         }
       }

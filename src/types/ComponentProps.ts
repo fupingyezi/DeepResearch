@@ -47,7 +47,7 @@ export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
 }
 
 export type MessageToolType = "copy" | "recall" | "edit" | "download";
-export type SupportDownloadFileType = "pdf" | "word" | "md" | "cancle";
+export type SupportDownloadFileType = "pdf" | "word" | "md" | "cancel";
 
 export interface MessageToolBarProps {
   tools: MessageToolType[];
