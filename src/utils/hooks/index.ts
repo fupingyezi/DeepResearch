@@ -1,3 +1,4 @@
 import useCopy from "./useCopy";
+import useFileUpload from "./useFileUpload";
 
-export { useCopy };
+export { useCopy, useFileUpload };
