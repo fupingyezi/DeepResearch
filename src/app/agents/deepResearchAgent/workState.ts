@@ -20,7 +20,9 @@ const ResearchStateAnnotation = Annotation.Root({
     },
   }),
   nextAction: Annotation<string>(),
+  curAction: Annotation<string>(),
   report: Annotation<string>(),
+  needsHumanReview: Annotation<boolean>(),
 });
 
 export default ResearchStateAnnotation;

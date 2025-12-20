@@ -11,7 +11,8 @@ export interface chatWithDeepResearchProps
   extends ConversationState,
     DeepResearchProcessState {
   inputValue: string;
-  callingMode: "direct" | "reEditCall" | "recall";
+  callingMode: "direct" | "reEditCall" | "recall" | "resume";
+  isResume?: boolean;
 }
 
 export interface reChatWithAssistantProps

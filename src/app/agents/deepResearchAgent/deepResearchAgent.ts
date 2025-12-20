@@ -4,6 +4,7 @@ import { simpleAnalyser } from "./node/simpleAnalyser";
 import { taskDecomposer } from "./node/taskDecomposer";
 import { taskHandler } from "./node/taskHandler";
 import { reportGenerationAssitant } from "./node/reportGenerationAssitant";
+import { humanDecision } from "./node/humanDecision";
 
 import { getCheckpointer } from "@/lib";
 import ResearchStateAnnotation from "./workState";
@@ -19,6 +20,7 @@ async function createDeepResearchWorkflow() {
     .addNode("taskDecomposer", taskDecomposer)
     .addNode("taskHandler", taskHandler)
     .addNode("reportGenerationAssitant", reportGenerationAssitant)
+    .addNode("humanDecision", humanDecision)
 
     .addEdge(START, "supervisor")
 
@@ -30,8 +32,20 @@ async function createDeepResearchWorkflow() {
       __end__: END,
     })
 
+    .addConditionalEdges(
+      "taskDecomposer",
+      (state) => {
+        if (state.needsHumanReview) {
+          return "humanDecision";
+        } else {
+          return "supervisor";
+        }
+      },
+      { humanDecision: "humanDecision", supervisor: "supervisor" }
+    )
+
     .addEdge("simpleAnalyser", "supervisor")
-    .addEdge("taskDecomposer", "supervisor")
+    // .addEdge("taskDecomposer", "supervisor")
     .addEdge("taskHandler", "supervisor")
     .addEdge("reportGenerationAssitant", "supervisor")
 

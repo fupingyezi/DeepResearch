@@ -2,12 +2,14 @@ import { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes, v4 as uuidv4 } from "uuid";
 import apiClient from "../request/api";
 import { deepResearchResultType } from "@/types";
+import { processStatusType } from "@/store/deepResearchProcessStore";
 
 export interface StreamChatConfig {
   apiEndpoint: string;
   mode: "chat" | "search" | "deepResearch";
-  callingMode: "direct" | "reEditCall" | "recall";
+  callingMode: "direct" | "reEditCall" | "recall" | "resume";
   inputValue: string;
+  isResume?: boolean; // 研究human中断恢复模式
   sessionId?: UUIDTypes;
   hasFiles?: boolean; // "chat模式是否携带文件"
   uploadedFiles?: any[]; // 上传的文件信息
@@ -21,6 +23,7 @@ export interface StreamChatConfig {
   setCurrentSessionId: (id: UUIDTypes) => void;
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
+  setCurrentDeepResearchId: (id: string) => void;
 
   // 自定义处理器
   onStreamData?: (data: any, accumulatedContent: string) => string;
@@ -32,6 +35,8 @@ export interface StreamChatConfig {
     sessionId: UUIDTypes,
     messageId: number
   ) => deepResearchResultType | undefined;
+
+  getDeepResearchStatus?: () => processStatusType;
 }
 
 export class StreamChatHandler {
@@ -48,7 +53,8 @@ export class StreamChatHandler {
   }
 
   async execute(): Promise<void> {
-    if (this.config.inputValue === "") return;
+    if (this.config.inputValue === "" && this.config.isResume === undefined)
+      return;
 
     await this.handleSession();
 
@@ -56,6 +62,8 @@ export class StreamChatHandler {
 
     if (this.config.callingMode === "direct") {
       this.initializeMessages();
+    } else if (this.config.callingMode === "resume") {
+      this.resumeMessages();
     } else {
       this.reInitializeMessages();
     }
@@ -172,6 +180,15 @@ export class StreamChatHandler {
     this.config.setShouldAutoScroll(true);
   }
 
+  // 研究过程决策恢复
+  private resumeMessages(): void {
+    const len = this.config.currentMessages.length;
+    this.initialUpdateMessages = this.config.currentMessages;
+    this.assistantMessageId = len;
+    this.accumulatedContent = this.config.currentMessages[len - 1]
+      .content as string;
+  }
+
   // 执行SSE
   private async executeStreamRequest(): Promise<void> {
     try {
@@ -183,6 +200,8 @@ export class StreamChatHandler {
           sessionId: this.sessionId,
           hasFiles: this.config.hasFiles,
           uploadedFiles: this.config.uploadedFiles || [],
+          deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
+          isResume: this.config.isResume,
         }),
         signal: this.abortController!.signal,
       });
@@ -344,6 +363,7 @@ export class StreamChatHandler {
     if (
       this.config.mode === "deepResearch" &&
       this.config.getDeepResearchResult
+      // &&this.config.getDeepResearchStatus?.() === "end"
     ) {
       this.deepResearchResult = this.config.getDeepResearchResult(
         this.sessionId,
@@ -360,6 +380,7 @@ export class StreamChatHandler {
         );
       }
     }
+    // console.log("deepresearch:", this.deepResearchResult);
 
     try {
       if (this.config.callingMode === "direct") {

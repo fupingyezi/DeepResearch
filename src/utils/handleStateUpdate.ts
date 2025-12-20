@@ -4,19 +4,19 @@ export function handleStateUpdate(prevState: any, currentState: any) {
   const delta: Record<string, any> = {};
   // console.log("currentState:", currentState);
 
-  if (currentState.simpleAnalysis && !prevState?.simpleAnalysis) {
+  if (
+    currentState?.curAction === "simpleAnalyse" &&
+    !prevState?.simpleAnalysis
+  ) {
     delta.type = "start_analyse";
     delta.payload = {
       simpleAnalysis: currentState.simpleAnalysis,
       researchTarget: currentState.researchTarget,
     };
-  } else if (
-    currentState.tasks?.length &&
-    (!prevState?.tasks || prevState.tasks.length === 0)
-  ) {
+  } else if (currentState?.curAction === "taskDecompose") {
     delta.type = "tasks_initial";
     delta.payload = currentState.tasks;
-  } else if (currentState.tasks?.length && prevState?.tasks?.length) {
+  } else if (currentState?.curAction === "taskHandle") {
     const updatedTask = currentState.tasks.find(
       (task: taskType) =>
         task.status !==
@@ -28,11 +28,13 @@ export function handleStateUpdate(prevState: any, currentState: any) {
       delta.type = "task_update";
       delta.payload = updatedTask;
     }
-  }
-
-  if (currentState.report && !prevState?.report) {
+  } else if (currentState?.curAction === "report" && !prevState?.report) {
     delta.type = "report";
     delta.payload = currentState.report;
+  } else if (currentState.__interrupt__ && !prevState?.__interrupt__) {
+    delta.type = "interrupt";
+    const length = currentState.__interrupt__.length;
+    delta.payload = currentState.__interrupt__[length - 1].value;
   }
 
   return Object.keys(delta).length ? delta : null;

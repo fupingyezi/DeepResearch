@@ -10,6 +10,7 @@ export const chatWithDeepResearch = async (
   const handler = new StreamChatHandler({
     apiEndpoint: "/api/chat/v1/deep_research",
     mode: "deepResearch",
+    isResume: params.isResume,
     callingMode: params.callingMode,
     inputValue: params.inputValue,
     sessionId: params.currentSessionId,
@@ -21,6 +22,7 @@ export const chatWithDeepResearch = async (
     setCurrentSessionId: params.setCurrentSessionId,
     setCurrentMessages: params.setCurrentMessages,
     setAbortController: params.setAbortController,
+    setCurrentDeepResearchId: params.setCurrentDeepResearchId,
 
     // 自定义深度研究的数据处理
     onStreamData: (data, accumulatedContent) => {
@@ -45,6 +47,11 @@ export const chatWithDeepResearch = async (
         params.updateTasks(data.payload);
       }
 
+      if (data.type === "interrupt" && data.payload) {
+        params.setInterruptRequest(data.payload);
+        params.setStatus("interrupt");
+      }
+
       return accumulatedContent;
     },
 
@@ -64,6 +71,12 @@ export const chatWithDeepResearch = async (
         tasks: tasksWithUuid,
         report: report,
       } as deepResearchResultType;
+    },
+
+    getDeepResearchStatus: () => {
+      const { status } = useDeepResearchProcessStore.getState();
+
+      return status;
     },
   });
 

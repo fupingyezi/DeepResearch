@@ -48,6 +48,7 @@ ${state.input}
     return {
       researchTarget: result.researchTarget.trim(),
       simpleAnalysis: result.simpleAnalysis.trim(),
+      curAction: "simpleAnalyse",
     };
   } catch (error) {
     console.error("Failed to parse LLM response as JSON:", rawContent);

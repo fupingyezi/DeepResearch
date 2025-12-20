@@ -67,5 +67,5 @@ export async function reportGenerationAssitant(
 
   const report = response.messages[response.messages.length - 1].content;
 
-  return { report };
+  return { report, curAction: "report" };
 }

@@ -2,16 +2,29 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { taskType } from "@/types";
 
-export type processStatusType = "notCall" | "initial" | "processing" | "end";
+export type processStatusType =
+  | "notCall"
+  | "initial"
+  | "processing"
+  | "end"
+  | "interrupt";
+
+export type INTR = {
+  question: string;
+  details: any;
+};
 
 export interface DeepResearchProcessState {
+  currentDeepResearchId: string;
   isOpenProcessSider: boolean;
   status: processStatusType;
   researchTarget: string;
   simpleAnalysis: string;
   tasks: taskType[];
   report: string;
+  interruptRequest: { question: string; details: any } | null;
   resetState: () => void;
+  setCurrentDeepResearchId: (id: string) => void;
   setIsOpenProcessSider: (isOpenProcessSider: boolean) => void;
   setStatus: (status: processStatusType) => void;
   setSimpleAnalysis: (simpleAnalysis: string) => void;
@@ -20,16 +33,19 @@ export interface DeepResearchProcessState {
   setTasks: (tasks: taskType[]) => void;
   updateTasks: (task: taskType) => void;
   updateReport: (report: string) => void;
+  setInterruptRequest: (request: INTR) => void;
 }
 
 const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
   immer((set) => ({
+    currentDeepResearchId: "",
     isOpenProcessSider: false,
     status: "notCall",
     researchTarget: "",
     simpleAnalysis: "",
     tasks: [],
     report: "",
+    interruptRequest: null,
     resetState: () =>
       set(() => ({
         isOpenProcessSider: false,
@@ -39,6 +55,10 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
         tasks: [],
         report: "",
       })),
+    setCurrentDeepResearchId: (id) =>
+      set((state) => {
+        state.currentDeepResearchId = id;
+      }),
     setIsOpenProcessSider: (isOpenProcessSider: boolean) =>
       set((state) => {
         state.isOpenProcessSider = isOpenProcessSider;
@@ -73,6 +93,10 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
     updateReport: (report: string) =>
       set((state) => {
         state.report = report;
+      }),
+    setInterruptRequest: (request: INTR) =>
+      set((state) => {
+        state.interruptRequest = request;
       }),
   }))
 );

@@ -199,7 +199,10 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     }
 
     // 历史已经完成的深度研究
-    if (message.researchStatus === "finished") {
+    if (
+      message.researchStatus === "finished" &&
+      message.deepResearchResult?.report
+    ) {
       return (
         <>
           <Button
@@ -243,15 +246,15 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             className="h-4 w-2xs rounded-2xl"
             onClick={() => hanldeShowDeepResearch()}
           >
-            {status === "processing" ? (
-              <>
-                <LoadingOutlined />
-                正在进行深度研究
-              </>
-            ) : (
+            {status === "end" ? (
               <>
                 <CheckCircleOutlined style={{ color: "green" }} />{" "}
                 深度研究完成,查看研究过程
+              </>
+            ) : (
+              <>
+                <LoadingOutlined />
+                正在进行深度研究
               </>
             )}
           </Button>

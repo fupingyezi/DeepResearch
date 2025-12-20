@@ -5,6 +5,7 @@ import { Title } from "./Title";
 import { TaskProcessingItem } from "./TaskProcessingItem";
 import { Report } from "./Report";
 import { ProcessHeader } from "./ProcessHeader";
+import { HumanDecision } from "./HumanDecision";
 
 import useDeepResearchProcessStore from "@/store/deepResearchProcessStore";
 import { useState, useEffect } from "react";
@@ -16,16 +17,23 @@ const DeepResearchProcess = () => {
     tasks,
     report,
     setIsOpenProcessSider,
+    status,
   } = useDeepResearchProcessStore();
   const [selectedTab, setSelectedTab] = useState<"process" | "report">(
     "process"
   );
 
   useEffect(() => {
-    if (selectedTab === "process") {
+    if (selectedTab === "process" && report) {
       setSelectedTab("report");
     }
   }, [report]);
+
+  useEffect(() => {
+    if (selectedTab === "report" && !report) {
+      setSelectedTab("process");
+    }
+  }, [isOpenProcessSider]);
 
   if (!isOpenProcessSider) return null;
 
@@ -78,7 +86,11 @@ const DeepResearchProcess = () => {
                 <TaskProcessingItem
                   key={task.id}
                   task={task}
-                  isShow={index === 0 || tasks[index - 1].result !== ""}
+                  isShow={
+                    (status !== "interrupt" &&
+                      (index === 0 || tasks[index - 1].result !== "")) ||
+                    task.result !== ""
+                  }
                 />
               ))}
               {tasks.every((task) => task.result) && !report && (
@@ -89,6 +101,7 @@ const DeepResearchProcess = () => {
               )}
             </div>
           )}
+          {status === "interrupt" && <HumanDecision />}
         </>
       )}
 

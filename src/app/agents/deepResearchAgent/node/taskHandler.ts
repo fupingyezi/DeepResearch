@@ -78,5 +78,6 @@ export async function taskHandler(state: typeof ResearchStateAnnotation.State) {
           ) || [],
       },
     ],
+    curAction: "taskHandle",
   };
 }
