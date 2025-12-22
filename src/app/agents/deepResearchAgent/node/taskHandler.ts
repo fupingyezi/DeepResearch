@@ -65,19 +65,22 @@ export async function taskHandler(state: typeof ResearchStateAnnotation.State) {
   // console.log("message", messages);
   const toolMessage = messages.find((msg) => msg._getType() === "tool");
   // console.log("toolMessage", toolMessage);
+  const updatedTasks = state.tasks.map((t) =>
+    t.taskId === tasksWaitProcess.taskId
+      ? {
+          ...t,
+          status: "processed",
+          result: finalResult,
+          searchResult:
+            parseSearchResult(
+              toolMessage ? (toolMessage?.content as string) : ""
+            ) || [],
+        }
+      : t
+  );
 
   return {
-    tasks: [
-      {
-        ...tasksWaitProcess,
-        status: "processed",
-        result: finalResult,
-        searchResult:
-          parseSearchResult(
-            toolMessage ? (toolMessage?.content as string) : ""
-          ) || [],
-      },
-    ],
+    tasks: updatedTasks,
     curAction: "taskHandle",
   };
 }

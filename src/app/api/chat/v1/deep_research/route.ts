@@ -38,11 +38,14 @@ export async function POST(request: Request) {
           }
         );
       } else {
-        return deepResearchWorkflow.stream(new Command({ resume: isResume }), {
-          configurable: { thread_id: deepResearchId },
-          streamMode: "values",
-          recursionLimit: 200,
-        });
+        return deepResearchWorkflow.stream(
+          new Command({ resume: isResume ? "supervisor" : "taskDecomposer" }),
+          {
+            configurable: { thread_id: deepResearchId },
+            streamMode: "values",
+            recursionLimit: 200,
+          }
+        );
       }
     };
 

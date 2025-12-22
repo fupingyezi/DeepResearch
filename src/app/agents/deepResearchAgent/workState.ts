@@ -10,15 +10,7 @@ const ResearchStateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
   }),
-  tasks: Annotation<taskType[]>({
-    reducer: (old, update) => {
-      const map = new Map((old || []).map((t) => [t.taskId, t]));
-      for (const t of update || []) {
-        map.set(t.taskId, { ...map.get(t.taskId), ...t });
-      }
-      return Array.from(map.values());
-    },
-  }),
+  tasks: Annotation<taskType[]>(),
   nextAction: Annotation<string>(),
   curAction: Annotation<string>(),
   report: Annotation<string>(),

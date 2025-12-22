@@ -68,8 +68,8 @@ export async function taskDecomposer(
         searchResult: [],
       })
     );
-    // console.log("解析的任务:", tasks);
-    return { tasks, needsHumanReview: true, curAction: "taskDecompose" };
+
+    return { tasks: tasks, needsHumanReview: true, curAction: "taskDecompose" };
   } else {
     console.error("解析结果中缺少有效的 tasks 数组", parsedData);
     return { tasks: [], needsHumanReview: true };
