@@ -1,6 +1,5 @@
 import { createAgent } from "langchain";
-import { ChatOpenAI } from "@langchain/openai";
-
+import { buildLLM } from "@/lib/llm";
 import { searchWebTool } from "../../tools";
 import ResearchStateAnnotation from "../workState";
 import { parseSearchResult } from "@/utils/handleStateUpdate";
@@ -14,15 +13,10 @@ export async function taskHandler(state: typeof ResearchStateAnnotation.State) {
     }
   }
   if (!tasksWaitProcess) return { tasks: [] };
-  const model = new ChatOpenAI({
-    model: "qwen-flash",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: {
-      baseURL: process.env.OPENAI_QWEN_BASE_URL,
-    },
-    maxTokens: 2000,
-    temperature: 0.3,
-  }).bindTools([searchWebTool]);
+
+  const model = buildLLM("qwen", { model: "qwen-flash" }).bindTools([
+    searchWebTool,
+  ]);
 
   const systemPrompt = `
 你是一个深度研究系统中的信息处理助手，采用 ReAct（Reasoning + Acting）推理模式。你的核心职责是：针对当前分配的子任务（task）进行分析与执行。
@@ -73,10 +67,10 @@ export async function taskHandler(state: typeof ResearchStateAnnotation.State) {
           result: finalResult,
           searchResult:
             parseSearchResult(
-              toolMessage ? (toolMessage?.content as string) : ""
+              toolMessage ? (toolMessage?.content as string) : "",
             ) || [],
         }
-      : t
+      : t,
   );
 
   return {

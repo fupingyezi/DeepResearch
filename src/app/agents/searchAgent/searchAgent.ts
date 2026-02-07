@@ -1,26 +1,14 @@
-import { ChatOpenAI } from "@langchain/openai";
 import { searchWebTool } from "../tools";
 import { createAgent } from "langchain";
-import dotenv from "dotenv";
-
-dotenv.config({ path: ".env.local" });
+import { buildLLM } from "@/lib/llm";
 
 const systemPrompt = `你是个网络搜索助手，会使用网络搜索工具来帮助用户搜索相关信息`;
 
 export const ChatAgentWithSearchTool = async (
   input: string,
-  config?: Record<string, any>
+  config?: Record<string, any>,
 ) => {
-  const model = new ChatOpenAI({
-    model: "qwen-flash",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: {
-      baseURL: process.env.OPENAI_QWEN_BASE_URL,
-    },
-    maxTokens: 2000,
-    temperature: 0.3,
-    timeout: 15000,
-  });
+  const model = buildLLM("qwen", { model: "qwen-flash" });
 
   const agent = createAgent({
     model: model,
@@ -35,7 +23,7 @@ export const ChatAgentWithSearchTool = async (
       },
       {
         ...config,
-      }
+      },
     );
     return response;
   } catch (error) {

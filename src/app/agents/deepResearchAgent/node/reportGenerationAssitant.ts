@@ -1,23 +1,14 @@
 import { createAgent } from "langchain";
-import { ChatOpenAI } from "@langchain/openai";
-
+import { buildLLM } from "@/lib/llm";
 import ResearchStateAnnotation from "../workState";
 
 export async function reportGenerationAssitant(
-  state: typeof ResearchStateAnnotation.State
+  state: typeof ResearchStateAnnotation.State,
 ) {
   const allDone = state.tasks.every((task) => task.status === "processed");
   if (!allDone) return { report: "" };
 
-  const model = new ChatOpenAI({
-    model: "qwen-flash",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: {
-      baseURL: process.env.OPENAI_QWEN_BASE_URL,
-    },
-    maxTokens: 2000,
-    temperature: 0.3,
-  });
+  const model = buildLLM("qwen", { model: "qwen-flash" });
 
   const systemPrompt = `
 你是一个研究报告撰写助手，负责在深度研究流程的最后阶段，将所有已完成子任务的结果整合为一份结构清晰、内容完整、符合学术或专业研究报告标准的最终输出。

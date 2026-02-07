@@ -19,12 +19,10 @@ export interface taskType {
   id: string; // 数据库用的UUID
   taskId: string; // AI生成的步骤标识
   description: string;
-  // status: "pending" | "searched" | "failed_attempt" | "processed";
   status: string;
   needSearch?: boolean;
   searchResult?: searchResultItem[];
   result?: string;
-  // feedback: string;
 }
 
 export interface deepResearchResultType {
@@ -37,6 +35,7 @@ export interface deepResearchResultType {
 }
 
 export type UploadedFileStatus = "pending" | "parsing" | "success" | "failed";
+
 export interface UploadedFile {
   id: string;
   file: File;

@@ -1,4 +1,4 @@
-import { chatAgent, chatAgentStream } from "./basicAgent/basic_agents";
+import { chatAgent, chatAgentStream } from "./basicAgent/basicAgents";
 import { ChatAgentWithSearchTool } from "./searchAgent/searchAgent";
 import { multiWorkflow } from "./test/multiAgent";
 import { createDeepResearchWorkflow } from "./deepResearchAgent/deepResearchAgent";

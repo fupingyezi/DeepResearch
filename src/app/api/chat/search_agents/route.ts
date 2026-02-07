@@ -1,6 +1,5 @@
 import { ChatAgentWithSearchTool } from "@/app/agents";
 import { NextRequest, NextResponse } from "next/server";
-import { ConvertLangChainMessageToRoleMessage } from "@/utils";
 import { SSEEvent } from "@/types";
 import { createSSEStream } from "../../utils/createSSEStream";
 
@@ -15,19 +14,6 @@ export async function POST(request: NextRequest) {
     const response = await ChatAgentWithSearchTool(input, {
       configuration: { thread_id: sessionId },
     });
-
-    if (!stream) {
-      return NextResponse.json(
-        {
-          messages: response.messages.map((msg) =>
-            ConvertLangChainMessageToRoleMessage(msg)
-          ),
-        },
-        {
-          status: 200,
-        }
-      );
-    }
 
     const assistantMessage = response.messages[response.messages.length - 1];
     const responseContent = assistantMessage.content;

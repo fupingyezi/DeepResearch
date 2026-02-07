@@ -1,20 +1,13 @@
-import { ChatOpenAI } from "@langchain/openai";
-
+import { buildLLM } from "@/lib/llm";
 import ResearchStateAnnotation from "../workState";
 
 export async function supervisor(state: typeof ResearchStateAnnotation.State) {
-  const model = new ChatOpenAI({
-    model: "qwen-max",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: { baseURL: process.env.OPENAI_QWEN_BASE_URL },
-    temperature: 0,
-    maxTokens: 2000,
-  });
+  const model = buildLLM("qwen", { temperature: 0 });
 
   const taskStatusSummary = state.tasks
     .map(
       (task) =>
-        `任务id, ${task.taskId}, 任务描述: ${task.description}, 任务状态: [${task.status}], 是否需要搜索: [${task.needSearch}]`
+        `任务id, ${task.taskId}, 任务描述: ${task.description}, 任务状态: [${task.status}], 是否需要搜索: [${task.needSearch}]`,
     )
     .join("\n");
 

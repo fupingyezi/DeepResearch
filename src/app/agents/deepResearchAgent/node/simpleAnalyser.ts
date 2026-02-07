@@ -1,17 +1,12 @@
 import { createAgent } from "langchain";
-import { ChatOpenAI } from "@langchain/openai";
-
+import { buildLLM } from "@/lib/llm";
 import ResearchStateAnnotation from "../workState";
 
 export async function simpleAnalyser(
-  state: typeof ResearchStateAnnotation.State
+  state: typeof ResearchStateAnnotation.State,
 ) {
-  const model = new ChatOpenAI({
+  const model = buildLLM("qwen", {
     model: "qwen-flash",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: {
-      baseURL: process.env.OPENAI_QWEN_BASE_URL,
-    },
     maxTokens: 200,
     temperature: 0.1,
   });
