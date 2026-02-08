@@ -1,7 +1,7 @@
 import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
-import { searchWebTool } from "../../tools";
-import ResearchStateAnnotation from "../workState";
+import { searchWebTool } from "../tools";
+import ResearchStateAnnotation from "./workState";
 import { parseSearchResult } from "@/utils/handleStateUpdate";
 
 export async function taskHandler(state: typeof ResearchStateAnnotation.State) {

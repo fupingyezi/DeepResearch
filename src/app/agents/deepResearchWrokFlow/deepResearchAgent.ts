@@ -1,10 +1,10 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { supervisor } from "./node/supervisor";
-import { simpleAnalyser } from "./node/simpleAnalyser";
-import { taskDecomposer } from "./node/taskDecomposer";
-import { taskHandler } from "./node/taskHandler";
-import { reportGenerationAssitant } from "./node/reportGenerationAssitant";
-import { humanDecision } from "./node/humanDecision";
+import { supervisor } from "./supervisor";
+import { simpleAnalyser } from "./simpleAnalyser";
+import { taskDecomposer } from "./taskDecomposer";
+import { taskHandler } from "./taskHandler";
+import { reportGenerationAssitant } from "./reportGenerationAssitant";
+import { humanDecision } from "./humanDecision";
 
 import { getCheckpointer } from "@/lib";
 import ResearchStateAnnotation from "./workState";
@@ -41,7 +41,7 @@ async function createDeepResearchWorkflow() {
           return "supervisor";
         }
       },
-      { humanDecision: "humanDecision", supervisor: "supervisor" }
+      { humanDecision: "humanDecision", supervisor: "supervisor" },
     )
 
     .addEdge("simpleAnalyser", "supervisor")

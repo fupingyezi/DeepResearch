@@ -1,6 +1,6 @@
 import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
-import ResearchStateAnnotation from "../workState";
+import ResearchStateAnnotation from "./workState";
 import { taskType } from "@/types";
 
 export async function taskDecomposer(

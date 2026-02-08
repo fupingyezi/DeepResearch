@@ -9,7 +9,7 @@ import type {
   MessageToolType,
   SupportDownloadFileType,
   MessageToolBarProps,
-} from "./ComponentProps";
+} from "./webview";
 
 // 数据定义相关
 import type {

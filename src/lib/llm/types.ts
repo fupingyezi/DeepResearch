@@ -1,11 +1,4 @@
 /**
- * LLM Provider Types and Interfaces
- *
- * This module defines the types and interfaces for the LLM API build handler.
- * It supports multiple LLM providers including OpenRouter, Qwen, and Spark.
- */
-
-/**
  * Supported LLM providers
  * - openrouter: OpenAI-compatible API via OpenRouter
  * - qwen: Alibaba Qwen (通义千问)
@@ -13,47 +6,30 @@
  */
 export type Provider = "openrouter" | "qwen" | "spark";
 
-/**
- * Options for configuring an LLM instance
- * These options can override the default provider configuration
- */
 export interface LLMOptions {
-  /** Model name to use (e.g., 'qwen-max', 'gpt-4-turbo-preview') */
+  /** 自选模型名，如qwen-max, qwen-plus */
   model?: string;
-
-  /** Temperature for response randomness (0-1, lower is more deterministic) */
+  /** 模型温度，控制输出随机性，0~1 */
   temperature?: number;
-
-  /** Maximum number of tokens in the response */
+  /** 最大tokens */
   maxTokens?: number;
-
-  /** Enable streaming mode for responses */
+  /** 是否采用流式响应 */
   streaming?: boolean;
-
-  /** Request timeout in milliseconds */
+  /** 最大响应时间 */
   timeout?: number;
 }
 
-/**
- * Internal configuration for a provider
- * Contains both authentication and default settings
- */
 export interface ProviderConfig {
-  /** API key for authentication */
+  /** 个人apiKey */
   apiKey: string;
-
-  /** Base URL for the API endpoint (optional, provider-specific) */
+  /** 请求Url */
   baseURL?: string;
-
-  /** Default model name for this provider */
+  /** 默认选用模型 */
   defaultModel: string;
-
-  /** Default temperature setting */
+  /** 默认模型温度 */
   defaultTemperature: number;
-
-  /** Default maximum tokens */
+  /** 默认最大tokens */
   defaultMaxTokens: number;
-
-  /** Default timeout in milliseconds */
+  /** 默认最大响应时间 */
   defaultTimeout: number;
 }

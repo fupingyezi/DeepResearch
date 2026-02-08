@@ -1,5 +1,5 @@
 import { Command, interrupt } from "@langchain/langgraph";
-import ResearchStateAnnotation from "../workState";
+import ResearchStateAnnotation from "./workState";
 
 export async function humanDecision(state: typeof ResearchStateAnnotation) {
   const nextNode = interrupt({
