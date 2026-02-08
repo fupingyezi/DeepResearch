@@ -1,67 +1,65 @@
-// import { NextRequest, NextResponse } from "next/server";
-// import { SSEEvent } from "@/types";
-// import { createSSEStream } from "../../utils/createSSEStream";
+import { NextRequest, NextResponse } from "next/server";
+import { SSEEvent } from "@/types";
+import { createSSEStream } from "../../utils/createSSEStream";
+import { AgentManager, AgentType, SearchAgentServer } from "@/app/agents";
 
-// export async function POST(request: NextRequest) {
-//   try {
-//     const { input, sessionId, stream = true } = await request.json();
+// 注册Agent工厂函数
+const agentManager = AgentManager.getInstance();
+agentManager.registerFactory(AgentType.SEARCH, () => {
+  return new SearchAgentServer({
+    model: "qwen-max",
+    systemPrompt:
+      "You are a helpful assistant that answers user questions with the help of search tools",
+  });
+});
 
-//     if (!input) {
-//       return NextResponse.json({ error: "input is empty" }, { status: 400 });
-//     }
+export async function POST(request: NextRequest) {
+  try {
+    const { input, sessionId, stream = true } = await request.json();
 
-//     const response = await ChatAgentWithSearchTool(input, {
-//       configuration: { thread_id: sessionId },
-//     });
+    if (!input) {
+      return NextResponse.json({ error: "input is empty" }, { status: 400 });
+    }
 
-//     const assistantMessage = response.messages[response.messages.length - 1];
-//     const responseContent = assistantMessage.content;
+    const readableStream = createSSEStream(request, async (enqueue) => {
+      enqueue({ type: "start", timeStamp: Date.now() });
 
-//     const readableStream = createSSEStream(request, async (enqueue) => {
-//       enqueue({ type: "start", timeStamp: Date.now() });
+      // 使用新的Agent系统
+      const agent = agentManager.getAgent(AgentType.SEARCH);
+      const messages = [
+        {
+          role: "user",
+          content: input,
+        },
+      ];
 
-//       const chunks = splitContentToChunks(responseContent as string);
+      for await (const chunk of agent.createMessage(
+        "You are a helpful assistant that answers user questions with the help of search tools",
+        messages,
+        { sessionId },
+      )) {
+        const data = {
+          type: "content",
+          content: "text" in chunk ? chunk.text : "",
+          role: "assistant",
+          id: Date.now().toString(),
+          done: false,
+        } as SSEEvent;
+        if (!enqueue(data)) break;
+      }
+    });
 
-//       for (let i = 0; i < chunks.length; i++) {
-//         await new Promise((resolve) => setTimeout(resolve, 200));
-
-//         const data = {
-//           type: "content",
-//           content: chunks[i],
-//           role: "assistant",
-//           id: i,
-//           done: false,
-//         } as SSEEvent;
-//         if (!enqueue(data)) break;
-//       }
-//     });
-
-//     return new Response(readableStream, {
-//       headers: {
-//         "Content-Type": "text/event-stream",
-//         "Cache-Control": "no-cache",
-//         Connection: "keep-alive",
-//       },
-//     });
-//   } catch (err) {
-//     return NextResponse.json(
-//       { error: err instanceof Error ? err.message : "Internal server error" },
-//       { status: 500 },
-//     );
-//   }
-// }
-
-// function splitContentToChunks(
-//   content: string,
-//   wordsPerChunk: number = 1,
-// ): string[] {
-//   const words = content.split(" ");
-//   const chunks: string[] = [];
-
-//   for (let i = 0; i < words.length; i += wordsPerChunk) {
-//     const chunk = words.slice(i, i + wordsPerChunk).join(" ");
-//     if (chunk) chunks.push(chunk + " ");
-//   }
-
-//   return chunks;
-// }
+    return new Response(readableStream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500 },
+    );
+  }
+}

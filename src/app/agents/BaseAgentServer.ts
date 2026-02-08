@@ -1,5 +1,6 @@
 import { LLMOptions } from "@/lib";
 import { ApiStream } from "@/types/transform/stream";
+import { StreamChunkTransformer } from "@/lib/stream";
 
 /**
  * Agent配置接口
@@ -30,9 +31,16 @@ export interface BaseAgentHandler {
 
 export abstract class BaseAgentServer implements BaseAgentHandler {
   private config: AgentConfig;
+  protected transformer: StreamChunkTransformer;
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.transformer = new StreamChunkTransformer({
+      enableToolCalls: true,
+      enableUsageTracking: true,
+      enableReasoning: false,
+      enableGrounding: false,
+    });
   }
 
   abstract createMessage(
@@ -45,5 +53,9 @@ export abstract class BaseAgentServer implements BaseAgentHandler {
 
   getConfig(): AgentConfig {
     return { ...this.config };
+  }
+
+  protected getTransformer(): StreamChunkTransformer {
+    return this.transformer;
   }
 }

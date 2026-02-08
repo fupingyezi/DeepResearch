@@ -12,6 +12,12 @@ export class SearchAgentServer extends BaseAgentServer {
 
   constructor(config: AgentConfig) {
     super(config);
+    this.transformer = new (require("@/lib/stream").StreamChunkTransformer)({
+      enableToolCalls: true,
+      enableUsageTracking: true,
+      enableReasoning: false,
+      enableGrounding: true,
+    });
     this.buildAgent();
   }
 
@@ -37,7 +43,6 @@ export class SearchAgentServer extends BaseAgentServer {
     metadata?: { [key: string]: any },
   ): ApiStream {
     try {
-      // 检查 Agent 是否已初始化
       if (!this.AgentInstance) {
         yield {
           type: "error",
@@ -47,10 +52,8 @@ export class SearchAgentServer extends BaseAgentServer {
         return;
       }
 
-      // 从 metadata 中提取 sessionId
       const sessionId = metadata?.sessionId;
 
-      // 调用 Agent 的流式方法
       const stream = await this.AgentInstance.stream(
         { messages: messages },
         {
@@ -59,20 +62,11 @@ export class SearchAgentServer extends BaseAgentServer {
         },
       );
 
-      // 转换流式输出为 ApiStreamChunk 格式
-      for await (const chunk of stream) {
-        if (chunk && chunk.length > 0) {
-          const message = chunk[0];
-          if (message.content) {
-            yield {
-              type: "text",
-              text: message.content,
-            } as ApiStreamChunk;
-          }
-        }
-      }
+      yield* this.getTransformer().transformLangChainStream(stream, {
+        sessionId,
+        metadata,
+      });
     } catch (error: any) {
-      // 错误处理
       yield {
         type: "error",
         error: error.name || "UnknownError",

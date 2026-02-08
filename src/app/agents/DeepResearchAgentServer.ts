@@ -1,7 +1,7 @@
 import { Command } from "@langchain/langgraph";
 import { AgentConfig, BaseAgentServer } from "./BaseAgentServer";
 import { ApiStream, ApiStreamChunk } from "@/types/transform/stream";
-import { createDeepResearchWorkflow } from "./deepResearchWrokFlow/deepResearchAgent";
+import { createDeepResearchWorkflow } from "./deepResearchWrokFlow";
 import { handleStateUpdate } from "@/utils/handleStateUpdate";
 
 /**
@@ -34,7 +34,6 @@ export class DeepResearchAgentServer extends BaseAgentServer {
     metadata?: { [key: string]: any },
   ): ApiStream {
     try {
-      // 延迟初始化：如果 Agent 未初始化，先初始化
       if (!this.AgentInstance) {
         await this.buildAgent();
       }
@@ -48,13 +47,11 @@ export class DeepResearchAgentServer extends BaseAgentServer {
         return;
       }
 
-      // 从 metadata 中提取参数
       const { deepResearchId, isResume } = metadata || {};
 
       // 根据是否恢复模式选择不同的输入
       let streamPromise;
       if (isResume !== undefined) {
-        // 恢复模式
         streamPromise = this.AgentInstance.stream(
           new Command({ resume: isResume ? "supervisor" : "taskDecomposer" }),
           {
@@ -64,7 +61,6 @@ export class DeepResearchAgentServer extends BaseAgentServer {
           },
         );
       } else {
-        // 新建模式
         streamPromise = this.AgentInstance.stream(
           {
             input: systemPrompt,
