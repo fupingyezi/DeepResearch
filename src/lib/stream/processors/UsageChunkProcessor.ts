@@ -1,12 +1,17 @@
-import type { ApiStreamChunk, ApiStreamUsageChunk } from "@/types/transform/stream";
-import type { ChunkProcessor, ProcessContext } from "./ChunkProcessor";
-import type { TokenPricing } from "../types";
+import type {
+  ApiStreamChunk,
+  ApiStreamUsageChunk,
+} from "@/types/transform/stream";
+import type { ProcessContext } from "./ChunkProcessor";
+import type { TokenPricing, StreamMode } from "../types";
+import { BaseChunkProcesser } from "./BaseChunkProcessor";
 
-export class UsageChunkProcessor implements ChunkProcessor {
+export class UsageChunkProcessor extends BaseChunkProcesser {
   readonly type = "usage";
   private tokenPricing?: TokenPricing;
 
-  constructor(tokenPricing?: TokenPricing) {
+  constructor(streamMode: StreamMode = "default", tokenPricing?: TokenPricing) {
+    super(streamMode);
     this.tokenPricing = tokenPricing;
   }
 
@@ -20,7 +25,8 @@ export class UsageChunkProcessor implements ChunkProcessor {
         return [];
       }
 
-      const usage = data.usage_metadata;
+      const extracted = this.extractByStreamMode(data);
+      const usage = extracted.usage_metadata;
 
       const chunk: ApiStreamUsageChunk = {
         type: "usage",
@@ -43,7 +49,8 @@ export class UsageChunkProcessor implements ChunkProcessor {
     if (!this.tokenPricing) return undefined;
 
     const inputCost = (usage.input_tokens || 0) * this.tokenPricing.inputPrice;
-    const outputCost = (usage.output_tokens || 0) * this.tokenPricing.outputPrice;
+    const outputCost =
+      (usage.output_tokens || 0) * this.tokenPricing.outputPrice;
 
     return inputCost + outputCost;
   }

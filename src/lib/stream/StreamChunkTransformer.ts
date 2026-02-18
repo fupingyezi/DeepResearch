@@ -19,6 +19,7 @@ export class StreamChunkTransformer {
       enableUsageTracking: true,
       enableReasoning: false,
       enableGrounding: false,
+      streamMode: "default",
       ...options,
     };
 
@@ -29,22 +30,23 @@ export class StreamChunkTransformer {
   }
 
   private initializeProcessors(): void {
-    this.processors.push(new TextChunkProcessor());
+    const streamMode = this.options.streamMode || "default";
+    this.processors.push(new TextChunkProcessor(streamMode));
 
     if (this.options.enableToolCalls) {
-      this.processors.push(new ToolCallChunkProcessor());
+      this.processors.push(new ToolCallChunkProcessor(streamMode));
     }
 
     if (this.options.enableUsageTracking) {
-      this.processors.push(new UsageChunkProcessor());
+      this.processors.push(new UsageChunkProcessor(streamMode));
     }
 
     if (this.options.enableReasoning) {
-      this.processors.push(new ReasoningChunkProcessor());
+      this.processors.push(new ReasoningChunkProcessor(streamMode));
     }
 
     if (this.options.enableGrounding) {
-      this.processors.push(new GroundingChunkProcessor());
+      this.processors.push(new GroundingChunkProcessor(streamMode));
     }
   }
 
@@ -53,10 +55,12 @@ export class StreamChunkTransformer {
     context?: TransformContext,
   ): ApiStream {
     try {
-      for await (const message of stream) {
+      for await (const receivedMessage of stream) {
+        console.log("Received message:", receivedMessage);
+
         try {
-          const chunks = this.processMessage(message, context);
-          
+          const chunks = this.processMessage(receivedMessage, context);
+
           for (const chunk of chunks) {
             if (chunk.type === "usage") {
               this.usageTracker.track(chunk);
@@ -64,21 +68,24 @@ export class StreamChunkTransformer {
             yield chunk;
           }
         } catch (error) {
-          console.error('Message processing error:', error);
+          console.error("Message processing error:", error);
           continue;
         }
       }
     } catch (error: any) {
-      console.error('Stream processing error:', error);
+      console.error("Stream processing error:", error);
       yield {
-        type: 'error',
-        error: error.name || 'StreamError',
-        message: error.message || 'Stream processing failed'
+        type: "error",
+        error: error.name || "StreamError",
+        message: error.message || "Stream processing failed",
       } as ApiStreamChunk;
     }
   }
 
-  private processMessage(message: any, context?: TransformContext): ApiStreamChunk[] {
+  private processMessage(
+    message: any,
+    context?: TransformContext,
+  ): ApiStreamChunk[] {
     const chunks: ApiStreamChunk[] = [];
 
     for (const processor of this.processors) {

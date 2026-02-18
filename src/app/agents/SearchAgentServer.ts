@@ -1,32 +1,33 @@
 import { ApiStream, ApiStreamChunk } from "@/types/transform/stream";
 import { BaseAgentServer, AgentConfig } from "./BaseAgentServer";
 import { createAgent, ReactAgent } from "langchain";
-import { buildLLM } from "@/lib";
+import { buildLLM, StreamChunkTransformer } from "@/lib";
 import { searchWebTool } from "./tools";
 
 /**
- * SearchAgentServer - 处理带搜索工具的聊天对话的 Agent 服务器
+ * SearchAgentServer - 处理带搜索工具的聊天对话的 Agent
  */
 export class SearchAgentServer extends BaseAgentServer {
   private AgentInstance: ReactAgent | undefined;
 
   constructor(config: AgentConfig) {
     super(config);
-    this.transformer = new (require("@/lib/stream").StreamChunkTransformer)({
+    this.transformer = new StreamChunkTransformer({
       enableToolCalls: true,
       enableUsageTracking: true,
       enableReasoning: false,
       enableGrounding: true,
+      streamMode: "updates",
     });
     this.buildAgent();
   }
 
   buildAgent() {
-    const model = buildLLM("qwen", { model: "qwen-flash" });
+    const model = buildLLM("qwen", this.config);
     this.AgentInstance = createAgent({
       model: model,
       tools: [searchWebTool],
-      ...this.getConfig(),
+      systemPrompt: this.config.systemPrompt,
     });
   }
 
@@ -38,7 +39,6 @@ export class SearchAgentServer extends BaseAgentServer {
    * @returns ApiStream - 异步生成器，产生 ApiStreamChunk
    */
   async *createMessage(
-    systemPrompt: string,
     messages: any[],
     metadata?: { [key: string]: any },
   ): ApiStream {
@@ -57,15 +57,15 @@ export class SearchAgentServer extends BaseAgentServer {
       const stream = await this.AgentInstance.stream(
         { messages: messages },
         {
-          streamMode: "messages",
+          streamMode: "updates",
           configurable: { thread_id: sessionId },
         },
       );
 
-      yield* this.getTransformer().transformLangChainStream(stream, {
+      yield* this.transformer?.transformLangChainStream(stream, {
         sessionId,
         metadata,
-      });
+      }) || [];
     } catch (error: any) {
       yield {
         type: "error",

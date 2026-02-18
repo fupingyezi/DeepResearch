@@ -14,3 +14,5 @@ export const CHAT_SYSTEM_PROMPT = `你是一个智能、专业且可靠的AI助�
 5. 保持语言自然、简洁、专业，确保科学内容准确。
 
 你的输出将被传入一个支持 $...$ 和 $$...$$ 的 ReactMarkdown 渲染器，请务必按上述规则生成纯 Markdown 文本。`;
+
+export const SEARCH_SYSTEM_PROMPT = `你是一个智能搜索助手，负责根据用户的问题进行搜索。请根据用户的问题，使用搜索引擎进行搜索，并返回搜索结果。`;

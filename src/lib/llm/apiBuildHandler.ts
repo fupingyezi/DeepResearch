@@ -22,6 +22,7 @@
  */
 
 import { ChatOpenAI } from "@langchain/openai";
+import { ChatAlibabaTongyi } from "@langchain/community/chat_models/alibaba_tongyi";
 import { Provider, LLMOptions, ProviderConfig } from "./types";
 
 /**

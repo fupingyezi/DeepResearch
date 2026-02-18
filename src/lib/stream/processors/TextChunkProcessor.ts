@@ -1,11 +1,35 @@
-import type { ApiStreamChunk, ApiStreamTextChunk } from "@/types/transform/stream";
-import type { ChunkProcessor, ProcessContext } from "./ChunkProcessor";
+import type {
+  ApiStreamChunk,
+  ApiStreamTextChunk,
+} from "@/types/transform/stream";
+import type { ProcessContext } from "./ChunkProcessor";
+import { BaseChunkProcesser } from "./BaseChunkProcessor";
+import type { StreamMode } from "../types";
 
-export class TextChunkProcessor implements ChunkProcessor {
+export class TextChunkProcessor extends BaseChunkProcesser {
   readonly type = "text";
 
+  constructor(streamMode: StreamMode = "default") {
+    super(streamMode);
+  }
+
   canProcess(data: any): boolean {
-    return typeof data.content === "string" && data.content.length > 0;
+    switch (this.streamMode) {
+      case "updates":
+        return data.model_request?.messages?.[0]?.content?.length > 0;
+      case "messages":
+        return (
+          (typeof data?.[0]?.content === "string" &&
+            data?.[0].content.length > 0) ||
+          (typeof data?.content === "string" && data?.content.length > 0)
+        );
+      default:
+        return (
+          (typeof data?.[0]?.content === "string" &&
+            data?.[0].content.length > 0) ||
+          (typeof data?.content === "string" && data?.content.length > 0)
+        );
+    }
   }
 
   process(data: any, context?: ProcessContext): ApiStreamChunk[] {
@@ -14,9 +38,16 @@ export class TextChunkProcessor implements ChunkProcessor {
         return [];
       }
 
+      const text = this.getTextContent(data);
+      console.log("text", text);
+
+      if (!text || text.length === 0) {
+        return [];
+      }
+
       const chunk: ApiStreamTextChunk = {
         type: "text",
-        text: data.content,
+        text,
       };
 
       return [chunk];

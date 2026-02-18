@@ -5,8 +5,10 @@ import type {
   ApiStreamToolCallDeltaChunk,
   ApiStreamToolCallEndChunk,
 } from "@/types/transform/stream";
-import type { ChunkProcessor, ProcessContext } from "./ChunkProcessor";
+import type { ProcessContext } from "./ChunkProcessor";
+import { BaseChunkProcesser } from "./BaseChunkProcessor";
 import { ToolCallTracker } from "../trackers/ToolCallTracker";
+import type { StreamMode } from "../types";
 
 export interface ToolCallState {
   id: string;
@@ -16,20 +18,17 @@ export interface ToolCallState {
   startTime: number;
 }
 
-export class ToolCallChunkProcessor implements ChunkProcessor {
+export class ToolCallChunkProcessor extends BaseChunkProcesser {
   readonly type = "tool_call";
   private toolCallTracker: ToolCallTracker;
 
-  constructor() {
+  constructor(streamMode: StreamMode = "default") {
+    super(streamMode);
     this.toolCallTracker = new ToolCallTracker();
   }
 
   canProcess(data: any): boolean {
-    return (
-      data.tool_calls &&
-      Array.isArray(data.tool_calls) &&
-      data.tool_calls.length > 0
-    );
+    return data?.tools?.messages?.length > 0;
   }
 
   process(data: any, context?: ProcessContext): ApiStreamChunk[] {
@@ -39,8 +38,15 @@ export class ToolCallChunkProcessor implements ChunkProcessor {
       }
 
       const chunks: ApiStreamChunk[] = [];
+      const extractedData = this.extractByStreamMode(data);
+      const toolMessages =
+        extractedData?.tools?.messages || data.tools.messages;
 
-      for (const toolCall of data.tool_calls) {
+      if (!toolMessages || toolMessages.length === 0) {
+        return [];
+      }
+
+      for (const toolCall of toolMessages) {
         if (!toolCall.id || !toolCall.name) {
           continue;
         }

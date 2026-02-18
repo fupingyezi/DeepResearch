@@ -6,15 +6,14 @@ import { taskHandler } from "./taskHandler";
 import { reportGenerationAssitant } from "./reportGenerationAssitant";
 import { humanDecision } from "./humanDecision";
 
-// import { getCheckpointer } from "@/lib";
+import { getCheckpointer } from "@/lib";
 import ResearchStateAnnotation from "./workState";
 
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 async function createDeepResearchWorkflow() {
-  // 暂时注释掉数据库相关的checkpointer代码
-  // const checkpointer = await getCheckpointer();
+  const checkpointer = await getCheckpointer();
   const workflow = new StateGraph(ResearchStateAnnotation)
     .addNode("supervisor", supervisor)
     .addNode("simpleAnalyser", simpleAnalyser)
@@ -50,7 +49,7 @@ async function createDeepResearchWorkflow() {
     .addEdge("taskHandler", "supervisor")
     .addEdge("reportGenerationAssitant", "supervisor")
 
-    .compile();
+    .compile({ checkpointer });
 
   return workflow;
 }

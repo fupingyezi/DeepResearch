@@ -9,12 +9,12 @@ import {
   CHAT_SYSTEM_PROMPT,
 } from "@/app/agents";
 
-// 注册Agent工厂函数
 const agentManager = AgentManager.getInstance();
 agentManager.registerFactory(AgentType.BASIC, () => {
   return new ChatAgentServer({
-    model: "qwen-max",
+    model: "qwen-plus",
     systemPrompt: CHAT_SYSTEM_PROMPT,
+    streaming: true,
   });
 });
 
@@ -55,20 +55,20 @@ export async function POST(request: NextRequest) {
         fullInput = input + fileContents;
       }
 
-      // 使用新的Agent系统
       const agent = agentManager.getAgent(AgentType.BASIC);
+
       const messages = [
         {
-          role: "user",
+          role: "human",
           content: fullInput,
         },
       ];
 
-      for await (const chunk of agent.createMessage(
-        CHAT_SYSTEM_PROMPT,
-        messages,
-        { sessionId },
-      )) {
+      let chunkCount = 0;
+      for await (const chunk of agent.createMessage(messages, { sessionId })) {
+        chunkCount++;
+        console.log(`收到第 ${chunkCount} 个 chunk:`, chunk);
+
         const data = {
           type: "content",
           content: "text" in chunk ? chunk.text : "",
@@ -76,6 +76,8 @@ export async function POST(request: NextRequest) {
           id: Date.now().toString(),
           done: false,
         } as SSEEvent;
+
+        console.log("准备 enqueue 数据:", data);
         if (!enqueue(data)) break;
       }
     });

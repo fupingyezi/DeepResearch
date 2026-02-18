@@ -3,11 +3,10 @@ import { SSEEvent } from "@/types";
 import { createSSEStream } from "../../utils/createSSEStream";
 import { AgentManager, AgentType, SearchAgentServer } from "@/app/agents";
 
-// 注册Agent工厂函数
 const agentManager = AgentManager.getInstance();
 agentManager.registerFactory(AgentType.SEARCH, () => {
   return new SearchAgentServer({
-    model: "qwen-max",
+    model: "qwen-flash",
     systemPrompt:
       "You are a helpful assistant that answers user questions with the help of search tools",
   });
@@ -15,7 +14,7 @@ agentManager.registerFactory(AgentType.SEARCH, () => {
 
 export async function POST(request: NextRequest) {
   try {
-    const { input, sessionId, stream = true } = await request.json();
+    const { input, sessionId } = await request.json();
 
     if (!input) {
       return NextResponse.json({ error: "input is empty" }, { status: 400 });
@@ -24,20 +23,15 @@ export async function POST(request: NextRequest) {
     const readableStream = createSSEStream(request, async (enqueue) => {
       enqueue({ type: "start", timeStamp: Date.now() });
 
-      // 使用新的Agent系统
       const agent = agentManager.getAgent(AgentType.SEARCH);
       const messages = [
         {
-          role: "user",
+          role: "human",
           content: input,
         },
       ];
 
-      for await (const chunk of agent.createMessage(
-        "You are a helpful assistant that answers user questions with the help of search tools",
-        messages,
-        { sessionId },
-      )) {
+      for await (const chunk of agent.createMessage(messages, { sessionId })) {
         const data = {
           type: "content",
           content: "text" in chunk ? chunk.text : "",

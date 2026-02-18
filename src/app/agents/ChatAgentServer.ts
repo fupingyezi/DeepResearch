@@ -1,10 +1,11 @@
 import { ApiStream, ApiStreamChunk } from "@/types/transform/stream";
+import { StreamChunkTransformer } from "@/lib/stream";
 import { BaseAgentServer, AgentConfig } from "./BaseAgentServer";
 import { createAgent, ReactAgent } from "langchain";
 import { buildLLM } from "@/lib";
 
 /**
- * ChatAgentServer - 处理基础聊天对话的 Agent 服务器
+ * ChatAgentServer - 处理基础聊天对话的 Agent
  */
 export class ChatAgentServer extends BaseAgentServer {
   private AgentInstance: ReactAgent | undefined;
@@ -12,14 +13,24 @@ export class ChatAgentServer extends BaseAgentServer {
   constructor(config: AgentConfig) {
     super(config);
     this.buildAgent();
+    this.transformer = new StreamChunkTransformer({
+      enableToolCalls: true,
+      enableUsageTracking: true,
+      enableReasoning: false,
+      enableGrounding: false,
+      streamMode: "messages",
+    });
   }
 
   buildAgent() {
-    const model = buildLLM("qwen", { model: "qwen-max" });
+    const model = buildLLM("qwen", this.config);
     this.AgentInstance = createAgent({
       model: model,
-      ...this.getConfig(),
+      systemPrompt: this.config.systemPrompt,
+      tools: this.config.tools,
+      checkpointer: this.config.checkpointer,
     });
+    console.log("AgentInstance:", this.AgentInstance);
   }
 
   /**
@@ -30,7 +41,6 @@ export class ChatAgentServer extends BaseAgentServer {
    * @returns ApiStream - 异步生成器，产生 ApiStreamChunk
    */
   async *createMessage(
-    systemPrompt: string,
     messages: any[],
     metadata?: { [key: string]: any },
   ): ApiStream {
@@ -54,12 +64,16 @@ export class ChatAgentServer extends BaseAgentServer {
         },
       );
 
-      yield* this.getTransformer().transformLangChainStream(stream, {
+      yield* this.transformer?.transformLangChainStream(stream, {
         sessionId,
         metadata,
-      });
+      }) || [];
     } catch (error: any) {
-      // 错误处理
+      console.error("=== ChatAgentServer.createMessage 发生错误 ===");
+      console.error("错误名称:", error.name);
+      console.error("错误消息:", error.message);
+      console.error("错误堆栈:", error.stack);
+
       yield {
         type: "error",
         error: error.name || "UnknownError",

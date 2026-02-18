@@ -5,7 +5,7 @@ import { createDeepResearchWorkflow } from "./deepResearchWrokFlow";
 import { handleStateUpdate } from "@/utils/handleStateUpdate";
 
 /**
- * DeepResearchAgentServer - 处理深度研究工作流的 Agent 服务器
+ * DeepResearchAgentServer - 处理深度研究工作流的 Agent
  */
 export class DeepResearchAgentServer extends BaseAgentServer {
   private AgentInstance: any;
@@ -29,7 +29,6 @@ export class DeepResearchAgentServer extends BaseAgentServer {
    * @returns ApiStream - 异步生成器，产生 ApiStreamChunk
    */
   async *createMessage(
-    systemPrompt: string,
     _messages: any[],
     metadata?: { [key: string]: any },
   ): ApiStream {
@@ -63,7 +62,7 @@ export class DeepResearchAgentServer extends BaseAgentServer {
       } else {
         streamPromise = this.AgentInstance.stream(
           {
-            input: systemPrompt,
+            input: _messages[0].content,
             simpleAnalysis: "",
             messages: [],
             tasks: [],

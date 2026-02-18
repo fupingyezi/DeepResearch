@@ -20,31 +20,20 @@ export interface AgentResponse {
 }
 
 export interface BaseAgentHandler {
-  createMessage(
-    systemPrompt: string,
-    messages: any[],
-    metadata?: { [key: string]: any },
-  ): ApiStream;
+  createMessage(messages: any[], metadata?: { [key: string]: any }): ApiStream;
   buildAgent(): void | Promise<void>;
   getConfig(): AgentConfig;
 }
 
 export abstract class BaseAgentServer implements BaseAgentHandler {
-  private config: AgentConfig;
-  protected transformer: StreamChunkTransformer;
+  protected config: AgentConfig;
+  protected transformer: StreamChunkTransformer | undefined;
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.transformer = new StreamChunkTransformer({
-      enableToolCalls: true,
-      enableUsageTracking: true,
-      enableReasoning: false,
-      enableGrounding: false,
-    });
   }
 
   abstract createMessage(
-    systemPrompt: string,
     messages: any[],
     metadata?: { [key: string]: any },
   ): ApiStream;
@@ -53,9 +42,5 @@ export abstract class BaseAgentServer implements BaseAgentHandler {
 
   getConfig(): AgentConfig {
     return { ...this.config };
-  }
-
-  protected getTransformer(): StreamChunkTransformer {
-    return this.transformer;
   }
 }
