@@ -1,9 +1,10 @@
-import { chatAgent, chatAgentStream } from "./basicAgent/basic_agents";
-import { ChatAgentWithSearchTool } from "./searchAgent/searchAgent";
-import { multiWorkflow } from "./test/multiAgent";
-import { createDeepResearchWorkflow } from "./deepResearchAgent/deepResearchAgent";
+export { BaseAgentServer } from "./BaseAgentServer";
+export type { AgentConfig, AgentResponse } from "./BaseAgentServer";
 
-export { chatAgent, chatAgentStream };
-export { ChatAgentWithSearchTool };
-export { multiWorkflow };
-export { createDeepResearchWorkflow };
+export { ChatAgentServer } from "./ChatAgentServer";
+export { SearchAgentServer } from "./SearchAgentServer";
+export { DeepResearchAgentServer } from "./DeepResearchAgentServer";
+
+export { AgentManager, AgentType } from "./AgentManager";
+
+export { CHAT_SYSTEM_PROMPT } from "./prompts";

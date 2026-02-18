@@ -1,50 +1,42 @@
-import { ChatAgentWithSearchTool } from "@/app/agents";
 import { NextRequest, NextResponse } from "next/server";
-import { ConvertLangChainMessageToRoleMessage } from "@/utils";
 import { SSEEvent } from "@/types";
 import { createSSEStream } from "../../utils/createSSEStream";
+import { AgentManager, AgentType, SearchAgentServer } from "@/app/agents";
+
+const agentManager = AgentManager.getInstance();
+agentManager.registerFactory(AgentType.SEARCH, () => {
+  return new SearchAgentServer({
+    model: "qwen-flash",
+    systemPrompt:
+      "You are a helpful assistant that answers user questions with the help of search tools",
+  });
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const { input, sessionId, stream = true } = await request.json();
+    const { input, sessionId } = await request.json();
 
     if (!input) {
       return NextResponse.json({ error: "input is empty" }, { status: 400 });
     }
 
-    const response = await ChatAgentWithSearchTool(input, {
-      configuration: { thread_id: sessionId },
-    });
-
-    if (!stream) {
-      return NextResponse.json(
-        {
-          messages: response.messages.map((msg) =>
-            ConvertLangChainMessageToRoleMessage(msg)
-          ),
-        },
-        {
-          status: 200,
-        }
-      );
-    }
-
-    const assistantMessage = response.messages[response.messages.length - 1];
-    const responseContent = assistantMessage.content;
-
     const readableStream = createSSEStream(request, async (enqueue) => {
       enqueue({ type: "start", timeStamp: Date.now() });
 
-      const chunks = splitContentToChunks(responseContent as string);
+      const agent = agentManager.getAgent(AgentType.SEARCH);
+      const messages = [
+        {
+          role: "human",
+          content: input,
+        },
+      ];
 
-      for (let i = 0; i < chunks.length; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-
+      for await (const chunk of agent.createMessage(messages, { sessionId })) {
         const data = {
           type: "content",
-          content: chunks[i],
+          content: "text" in chunk ? chunk.text : "",
           role: "assistant",
-          id: i,
+          id: Date.now().toString(),
           done: false,
         } as SSEEvent;
         if (!enqueue(data)) break;
@@ -61,22 +53,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
-}
-
-function splitContentToChunks(
-  content: string,
-  wordsPerChunk: number = 1
-): string[] {
-  const words = content.split(" ");
-  const chunks: string[] = [];
-
-  for (let i = 0; i < words.length; i += wordsPerChunk) {
-    const chunk = words.slice(i, i + wordsPerChunk).join(" ");
-    if (chunk) chunks.push(chunk + " ");
-  }
-
-  return chunks;
 }

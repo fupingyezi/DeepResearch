@@ -1,22 +1,12 @@
 import { createAgent } from "langchain";
-import { ChatOpenAI } from "@langchain/openai";
-
-import ResearchStateAnnotation from "../workState";
-
+import { buildLLM } from "@/lib/llm";
+import ResearchStateAnnotation from "./workState";
 import { taskType } from "@/types";
 
 export async function taskDecomposer(
-  state: typeof ResearchStateAnnotation.State
+  state: typeof ResearchStateAnnotation.State,
 ) {
-  const model = new ChatOpenAI({
-    model: "qwen-flash",
-    apiKey: process.env.OPENAI_QWEN_API_KEY,
-    configuration: {
-      baseURL: process.env.OPENAI_QWEN_BASE_URL,
-    },
-    maxTokens: 2000,
-    temperature: 0.3,
-  });
+  const model = buildLLM("qwen", { model: "qwen-flash" });
 
   const systemPrompt = `你是一个任务拆解助手，负责将用户的原始问题或研究目标智能地分解为一系列结构清晰、可执行的子任务。每个子任务应具备明确的目标和合理的粒度。
   你将接收一个用户原始问题。
@@ -66,7 +56,7 @@ export async function taskDecomposer(
         status: "pending",
         result: "",
         searchResult: [],
-      })
+      }),
     );
 
     return { tasks: tasks, needsHumanReview: true, curAction: "taskDecompose" };

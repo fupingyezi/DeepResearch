@@ -1,18 +1,26 @@
-import { createDeepResearchWorkflow } from "@/app/agents";
 import { handleStateUpdate } from "@/utils/handleStateUpdate";
 import { createSSEStream } from "@/app/api/utils/createSSEStream";
-import { Command } from "@langchain/langgraph";
+import { AgentManager, AgentType, DeepResearchAgentServer } from "@/app/agents";
+
+// 注册Agent工厂函数
+const agentManager = AgentManager.getInstance();
+agentManager.registerFactory(AgentType.DEEP_RESEARCH, () => {
+  return new DeepResearchAgentServer({
+    model: "qwen-max",
+    systemPrompt:
+      "You are a helpful assistant that conducts deep research on user queries",
+  });
+});
 
 export async function POST(request: Request) {
   const { input, deepResearchId, isResume } = await request.json();
-  const deepResearchWorkflow = await createDeepResearchWorkflow();
   if (!input && isResume === undefined) {
     return new Response(
       JSON.stringify({ error: "Missing input or isResume" }),
       {
         status: 400,
         headers: { "Content-Type": "application/json" },
-      }
+      },
     );
   }
 
@@ -20,40 +28,24 @@ export async function POST(request: Request) {
     let lastState: any = null;
     enqueue({ type: "start", timeStamp: Date.now() });
 
-    const getStream = async () => {
-      if (isResume === undefined) {
-        return deepResearchWorkflow.stream(
-          {
-            input: input,
-            simpleAnalysis: "",
-            messages: [],
-            tasks: [],
-            nextAction: "",
-            report: "",
-          },
-          {
-            configurable: { thread_id: deepResearchId },
-            streamMode: "values",
-            recursionLimit: 200,
-          }
-        );
-      } else {
-        return deepResearchWorkflow.stream(
-          new Command({ resume: isResume ? "supervisor" : "taskDecomposer" }),
-          {
-            configurable: { thread_id: deepResearchId },
-            streamMode: "values",
-            recursionLimit: 200,
-          }
-        );
-      }
-    };
+    const agent = agentManager.getAgent(AgentType.DEEP_RESEARCH);
+    const messages = [
+      {
+        role: "human",
+        content: input,
+      },
+    ];
 
-    for await (const state of await getStream()) {
-      const updateState = handleStateUpdate(lastState, state);
-      if (updateState) {
-        enqueue(updateState);
-        lastState = state;
+    for await (const chunk of agent.createMessage(messages, {
+      deepResearchId,
+      isResume,
+    })) {
+      if (chunk.type === "state") {
+        const updateState = handleStateUpdate(lastState, chunk.state);
+        if (updateState) {
+          enqueue(updateState);
+          lastState = chunk.state;
+        }
       }
     }
   });
