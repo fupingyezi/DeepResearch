@@ -7,7 +7,8 @@ const agentManager = AgentManager.getInstance();
 agentManager.registerFactory(AgentType.DEEP_RESEARCH, () => {
   return new DeepResearchAgentServer({
     model: "qwen-max",
-    systemPrompt: "You are a helpful assistant that conducts deep research on user queries",
+    systemPrompt:
+      "You are a helpful assistant that conducts deep research on user queries",
   });
 });
 
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
       {
         status: 400,
         headers: { "Content-Type": "application/json" },
-      }
+      },
     );
   }
 
@@ -27,24 +28,24 @@ export async function POST(request: Request) {
     let lastState: any = null;
     enqueue({ type: "start", timeStamp: Date.now() });
 
-    // 使用新的Agent系统
     const agent = agentManager.getAgent(AgentType.DEEP_RESEARCH);
     const messages = [
       {
-        role: "user",
+        role: "human",
         content: input,
       },
     ];
 
-    for await (const chunk of agent.createMessage(
-      "You are a helpful assistant that conducts deep research on user queries",
-      messages,
-      { deepResearchId, isResume }
-    )) {
-      const updateState = handleStateUpdate(lastState, chunk);
-      if (updateState) {
-        enqueue(updateState);
-        lastState = chunk;
+    for await (const chunk of agent.createMessage(messages, {
+      deepResearchId,
+      isResume,
+    })) {
+      if (chunk.type === "state") {
+        const updateState = handleStateUpdate(lastState, chunk.state);
+        if (updateState) {
+          enqueue(updateState);
+          lastState = chunk.state;
+        }
       }
     }
   });

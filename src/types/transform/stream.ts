@@ -11,7 +11,13 @@ export type ApiStreamChunk =
   | ApiStreamToolCallDeltaChunk
   | ApiStreamToolCallEndChunk
   | ApiStreamToolCallPartialChunk
-  | ApiStreamError;
+  | ApiStreamError
+  | ApiStreamStateChunk;
+
+export interface ApiStreamStateChunk {
+  type: "state";
+  state: any;
+}
 
 export interface ApiStreamError {
   type: "error";

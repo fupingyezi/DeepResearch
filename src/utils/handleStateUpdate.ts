@@ -20,9 +20,9 @@ export function handleStateUpdate(prevState: any, currentState: any) {
     const updatedTask = currentState.tasks.find(
       (task: taskType) =>
         task.status !==
-        prevState.tasks.find(
-          (pretask: taskType) => pretask.taskId === task.taskId
-        )?.status
+        prevState?.tasks?.find(
+          (pretask: taskType) => pretask.taskId === task.taskId,
+        )?.status,
     );
     if (updatedTask) {
       delta.type = "task_update";

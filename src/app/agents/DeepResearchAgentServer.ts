@@ -81,15 +81,12 @@ export class DeepResearchAgentServer extends BaseAgentServer {
       // 处理工作流状态更新
       let lastState: any = null;
       for await (const state of await streamPromise) {
-        const updateState = handleStateUpdate(lastState, state);
-        if (updateState) {
-          // 将状态更新转换为文本格式
-          yield {
-            type: "text",
-            text: JSON.stringify(updateState),
-          } as ApiStreamChunk;
-          lastState = state;
-        }
+        console.log("state", state);
+        yield {
+          type: "state",
+          state: state,
+        };
+        lastState = state;
       }
     } catch (error: any) {
       // 错误处理
