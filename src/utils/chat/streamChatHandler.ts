@@ -2,10 +2,22 @@ import { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes, v4 as uuidv4 } from "uuid";
 import apiClient from "../request/api";
 import { deepResearchResultType } from "@/types";
+import { AgentEventType } from "@/types/agentEvent";
 import { processStatusType } from "@/store/deepResearchProcessStore";
+import {
+  EventConsumer,
+  createLlmStreamHandler,
+  createStateUpdateHandler,
+  createTaskProgressHandler,
+  createHumanInterruptHandler,
+  createLifecycleHandler,
+  createErrorHandler,
+} from "./EventConsumer";
 
 export interface StreamChatConfig {
   apiEndpoint: string;
+  /** v2 模式下的 agentType，用于统一路由 */
+  agentType?: "basic" | "search" | "deep_research";
   mode: "chat" | "search" | "deepResearch";
   callingMode: "direct" | "reEditCall" | "recall" | "resume";
   inputValue: string;
@@ -192,17 +204,24 @@ export class StreamChatHandler {
   // 执行SSE
   private async executeStreamRequest(): Promise<void> {
     try {
+      const requestBody: Record<string, any> = {
+        input: this.config.inputValue,
+        sessionId: this.sessionId,
+        hasFiles: this.config.hasFiles,
+        uploadedFiles: this.config.uploadedFiles || [],
+        deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
+        isResume: this.config.isResume,
+      };
+
+      // v2 模式下添加 agentType 参数
+      if (this.config.agentType) {
+        requestBody.agentType = this.config.agentType;
+      }
+
       const response = await fetch(this.config.apiEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: this.config.inputValue,
-          sessionId: this.sessionId,
-          hasFiles: this.config.hasFiles,
-          uploadedFiles: this.config.uploadedFiles || [],
-          deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
-          isResume: this.config.isResume,
-        }),
+        body: JSON.stringify(requestBody),
         signal: this.abortController!.signal,
       });
 
@@ -227,7 +246,14 @@ export class StreamChatHandler {
   private async processStream(
     reader: ReadableStreamDefaultReader<Uint8Array>
   ): Promise<void> {
-    let streamCompleted = false; //结束信号
+    // v2 模式：使用 EventConsumer 统一处理
+    if (this.config.agentType) {
+      await this.processStreamV2(reader);
+      return;
+    }
+
+    // v1 兼容模式：保留原有逻辑
+    let streamCompleted = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -241,7 +267,6 @@ export class StreamChatHandler {
           try {
             const data = JSON.parse(line.slice(6));
 
-            // 处理流式信息
             if (this.config.onStreamData) {
               this.accumulatedContent = this.config.onStreamData(
                 data,
@@ -251,7 +276,6 @@ export class StreamChatHandler {
               this.accumulatedContent = this.defaultStreamDataHandler(data);
             }
 
-            // 更新
             this.updateMessages();
 
             if (data.type === "done") {
@@ -275,6 +299,95 @@ export class StreamChatHandler {
         break;
       }
     }
+  }
+
+  /**
+   * v2 事件驱动模式的流处理
+   * 使用 EventConsumer 统一处理所有事件类型
+   */
+  private async processStreamV2(
+    reader: ReadableStreamDefaultReader<Uint8Array>
+  ): Promise<void> {
+    const consumer = new EventConsumer();
+
+    // 注册 LLM 流式文本处理器
+    consumer.registerHandler(
+      AgentEventType.LLM_STREAM,
+      createLlmStreamHandler((text) => {
+        this.accumulatedContent += text;
+        this.updateMessages();
+      }),
+    );
+
+    // 注册状态更新处理器（用于 DeepResearch）
+    if (this.config.onStreamData) {
+      consumer.registerHandler(
+        AgentEventType.STATE_UPDATE,
+        createStateUpdateHandler({
+          onSimpleAnalysis: (data) => {
+            this.config.onStreamData?.({
+              type: "start_analyse",
+              payload: data,
+            }, this.accumulatedContent);
+          },
+          onTasksInitial: (data) => {
+            this.config.onStreamData?.({
+              type: "tasks_initial",
+              payload: data,
+            }, this.accumulatedContent);
+          },
+          onReport: (data) => {
+            this.config.onStreamData?.({
+              type: "report",
+              payload: data,
+            }, this.accumulatedContent);
+          },
+        }),
+      );
+
+      // 注册任务进度处理器
+      consumer.registerHandler(
+        AgentEventType.TASK_PROGRESS,
+        createTaskProgressHandler((payload) => {
+          this.config.onStreamData?.({
+            type: "task_update",
+            payload: payload,
+          }, this.accumulatedContent);
+        }),
+      );
+
+      // 注册人工中断处理器
+      consumer.registerHandler(
+        AgentEventType.HUMAN_INTERRUPT,
+        createHumanInterruptHandler((payload) => {
+          this.config.onStreamData?.({
+            type: "interrupt",
+            payload: payload,
+          }, this.accumulatedContent);
+        }),
+      );
+    }
+
+    // 注册生命周期处理器
+    consumer.registerHandler(
+      AgentEventType.LIFECYCLE,
+      createLifecycleHandler({
+        onDone: () => {
+          console.log("v2 Stream completed");
+        },
+      }),
+    );
+
+    // 注册错误处理器
+    consumer.registerHandler(
+      AgentEventType.ERROR,
+      createErrorHandler((payload) => {
+        console.error("v2 Stream error:", payload.errorMessage);
+      }),
+    );
+
+    // 使用 EventConsumer 消费 SSE 流
+    await consumer.consumeSSEStream(reader);
   }
 
   // 默认流式信息处理

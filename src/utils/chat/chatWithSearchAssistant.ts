@@ -5,7 +5,8 @@ export const chatWithSearhAssistant = async (
   params: chatWithChatAssistantProps
 ) => {
   const handler = new StreamChatHandler({
-    apiEndpoint: "/api/chat/search_agents",
+    apiEndpoint: "/api/chat/v2",
+    agentType: "search",
     mode: "search",
     callingMode: params.callingMode,
     inputValue: params.inputValue,
@@ -18,6 +19,7 @@ export const chatWithSearhAssistant = async (
     setCurrentSessionId: params.setCurrentSessionId,
     setCurrentMessages: params.setCurrentMessages,
     setAbortController: params.setAbortController,
+    setCurrentDeepResearchId: () => {},
   });
 
   await handler.execute();

@@ -1,5 +1,10 @@
 import type { taskType, searchResultItem } from "@/types";
 
+/**
+ * @deprecated 此函数已被 v2 事件驱动架构中的 EventStreamAdapter + dispatchCustomEvent 替代。
+ * 新架构下，工作流节点通过 dispatchCustomEvent 直接发射事件，无需手动做状态 diff。
+ * 保留此函数仅用于 v1 路由的向后兼容。
+ */
 export function handleStateUpdate(prevState: any, currentState: any) {
   const delta: Record<string, any> = {};
   // console.log("currentState:", currentState);

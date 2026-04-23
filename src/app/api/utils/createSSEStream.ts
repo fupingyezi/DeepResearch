@@ -1,5 +1,9 @@
 import { SSEEvent } from "@/types";
 
+/**
+ * @deprecated 请使用 createAgentEventSSEStream 替代。
+ * 此函数保留以支持 v1 路由的渐进式迁移。
+ */
 export function createSSEStream(
   request: Request,
   handler: (enqueue: (data: any) => boolean) => Promise<void>

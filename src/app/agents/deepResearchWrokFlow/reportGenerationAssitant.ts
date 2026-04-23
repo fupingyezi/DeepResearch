@@ -1,5 +1,5 @@
-import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
+import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import ResearchStateAnnotation from "./workState";
 
 export async function reportGenerationAssitant(
@@ -41,22 +41,31 @@ export async function reportGenerationAssitant(
 
 **输出要求**：
 - 仅返回最终研究报告正文，使用纯 Markdown 格式
-- 不得包含 JSON、系统提示、元信息、额外注释、工具调用痕迹或“我正在生成报告”等自我指涉语句
+- 不得包含 JSON、系统提示、元信息、额外注释、工具调用痕迹或"我正在生成报告"等自我指涉语句
 - 语言应准确、简洁、专业，符合学术或行业报告规范
 - 输出将被传入支持 $...$ 和 $$...$$ 的 ReactMarkdown 渲染器，请严格遵守上述格式规则
 `;
 
-  const agent = createAgent({
-    model: model,
-    systemPrompt: systemPrompt,
-  });
-
   const results = state.tasks.map((task) => task.result).filter(Boolean);
-  const response = await agent.invoke({
-    messages: `总结汇总信息输出最终回复：${results.join("\n\n")}`,
-  });
+  const userMessage = `总结汇总信息输出最终回复：${results.join("\n\n")}`;
 
-  const report = response.messages[response.messages.length - 1].content;
+  // 使用流式输出，使 LLM 的 on_chat_model_stream 事件能被 streamEvents 捕获
+  let report = "";
+  const stream = await model.stream([
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userMessage },
+  ]);
+
+  for await (const chunk of stream) {
+    const text = typeof chunk.content === "string" ? chunk.content : "";
+    report += text;
+  }
+
+  // 发射 state_update 自定义事件，通知前端报告生成完成
+  await dispatchCustomEvent("state_update", {
+    stateType: "report",
+    data: report,
+  });
 
   return { report, curAction: "report" };
 }

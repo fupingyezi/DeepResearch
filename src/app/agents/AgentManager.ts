@@ -1,7 +1,8 @@
 import { BaseAgentServer } from "./BaseAgentServer";
+import { AgentEvent } from "@/types/agentEvent";
 
 /**
- * Agent类型枚举
+ * Agent 类型枚举
  */
 export enum AgentType {
   BASIC = "basic",
@@ -10,25 +11,79 @@ export enum AgentType {
 }
 
 /**
- * Agent工厂函数类型
+ * Agent 工厂函数类型
  */
 type AgentFactory = () => BaseAgentServer;
 
 /**
- * Agent管理器
- * 单例模式，负责Agent实例的创建和管理
+ * 事件总线监听器类型
+ */
+type EventBusListener = (event: AgentEvent) => void;
+
+/**
+ * EventBus - 共享事件总线
+ *
+ * 支持 Agent 间通过事件通信
+ */
+export class EventBus {
+  private listeners: Map<string, Set<EventBusListener>> = new Map();
+
+  /**
+   * 订阅事件
+   * @param eventType 事件类型（或 '*' 订阅所有事件）
+   * @param listener 监听器回调
+   */
+  on(eventType: string, listener: EventBusListener): void {
+    if (!this.listeners.has(eventType)) {
+      this.listeners.set(eventType, new Set());
+    }
+    this.listeners.get(eventType)!.add(listener);
+  }
+
+  /**
+   * 取消订阅
+   */
+  off(eventType: string, listener: EventBusListener): void {
+    this.listeners.get(eventType)?.delete(listener);
+  }
+
+  /**
+   * 发布事件
+   */
+  emit(event: AgentEvent): void {
+    // 通知特定事件类型的监听器
+    this.listeners.get(event.eventType)?.forEach((listener) => listener(event));
+    // 通知通配符监听器
+    this.listeners.get("*")?.forEach((listener) => listener(event));
+  }
+
+  /**
+   * 清除所有监听器
+   */
+  clear(): void {
+    this.listeners.clear();
+  }
+}
+
+/**
+ * AgentManager
+ *
+ * 单例模式，负责 Agent 实例的创建、管理和事件总线。
+ * 支持动态注册/注销 Agent，提供基于事件的 Agent 间通信能力。
  */
 export class AgentManager {
   private static instance: AgentManager;
   private agents: Map<AgentType, BaseAgentServer> = new Map();
   private factories: Map<AgentType, AgentFactory> = new Map();
+  /** 共享事件总线 */
+  private eventBus: EventBus;
 
   private constructor() {
-    // 私有构造函数，防止外部实例化
+    this.eventBus = new EventBus();
   }
 
   /**
-   * 获取AgentManager单例
+   * 获取 AgentManager 单例
    */
   static getInstance(): AgentManager {
     if (!AgentManager.instance) {
@@ -38,30 +93,73 @@ export class AgentManager {
   }
 
   /**
-   * 注册Agent工厂函数
-   * @param type Agent类型
-   * @param factory 工厂函数
+   * 获取共享事件总线
    */
-  registerFactory(type: AgentType, factory: AgentFactory): void {
-    this.factories.set(type, factory);
+  getEventBus(): EventBus {
+    return this.eventBus;
   }
 
   /**
-   * 获取Agent实例
+   * 注册 Agent（v2 动态注册）
+   *
+   * @param type Agent 类型
+   * @param factory 工厂函数
+   */
+  registerAgent(type: AgentType, factory: AgentFactory): void {
+    this.factories.set(type, factory);
+    // 如果已有旧实例，清除缓存以便下次获取时使用新工厂
+    this.agents.delete(type);
+  }
+
+  /**
+   * 注销 Agent
+   *
+   * @param type Agent 类型
+   */
+  unregisterAgent(type: AgentType): void {
+    this.factories.delete(type);
+    this.agents.delete(type);
+  }
+
+  /**
+   * @deprecated 使用 registerAgent 替代
+   * 注册 Agent 工厂函数（保留以支持渐进式迁移）
+   */
+  registerFactory(type: AgentType, factory: AgentFactory): void {
+    this.registerAgent(type, factory);
+  }
+
+  /**
+   * 获取 Agent 实例
    * 如果实例不存在则创建，否则返回缓存的实例
-   * @param type Agent类型
-   * @returns Agent实例
+   *
+   * @param type Agent 类型
+   * @returns Agent 实例
    */
   getAgent(type: AgentType): BaseAgentServer {
     if (!this.agents.has(type)) {
       const factory = this.factories.get(type);
       if (!factory) {
         throw new Error(
-          `Unknown agent type: ${type}. Please register the factory first.`,
+          `Unknown agent type: ${type}. Please register the agent first.`,
         );
       }
       this.agents.set(type, factory());
     }
     return this.agents.get(type)!;
+  }
+
+  /**
+   * 检查 Agent 是否已注册
+   */
+  hasAgent(type: AgentType): boolean {
+    return this.factories.has(type);
+  }
+
+  /**
+   * 获取所有已注册的 Agent 类型
+   */
+  getRegisteredTypes(): AgentType[] {
+    return Array.from(this.factories.keys());
   }
 }

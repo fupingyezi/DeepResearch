@@ -1,5 +1,6 @@
 import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
+import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import { searchWebTool } from "../tools";
 import ResearchStateAnnotation from "./workState";
 import { parseSearchResult } from "@/utils/handleStateUpdate";
@@ -72,6 +73,21 @@ export async function taskHandler(state: typeof ResearchStateAnnotation.State) {
         }
       : t,
   );
+
+  // 发射 task_progress 自定义事件，通知前端任务进度更新
+  const updatedTask = updatedTasks.find(
+    (t) => t.taskId === tasksWaitProcess.taskId,
+  );
+  if (updatedTask) {
+    await dispatchCustomEvent("task_progress", {
+      taskId: updatedTask.taskId,
+      description: updatedTask.description,
+      status: updatedTask.status,
+      needSearch: updatedTask.needSearch,
+      searchResult: updatedTask.searchResult,
+      result: updatedTask.result,
+    });
+  }
 
   return {
     tasks: updatedTasks,

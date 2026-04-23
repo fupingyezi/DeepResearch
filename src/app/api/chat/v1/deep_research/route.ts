@@ -1,3 +1,8 @@
+/**
+ * @deprecated v1 路由，请使用 /api/chat/v2 统一路由替代。
+ * 此路由保留以支持渐进式迁移，后续版本将移除。
+ */
+
 import { handleStateUpdate } from "@/utils/handleStateUpdate";
 import { createSSEStream } from "@/app/api/utils/createSSEStream";
 import { AgentManager, AgentType, DeepResearchAgentServer } from "@/app/agents";

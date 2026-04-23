@@ -12,15 +12,41 @@ import ResearchStateAnnotation from "./workState";
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
+/**
+ * DeepResearch 工作流节点名称常量
+ * 用于 EventStreamAdapter 识别 node_enter/node_exit 事件
+ */
+export const DEEP_RESEARCH_NODE_NAMES = [
+  "supervisor",
+  "simpleAnalyser",
+  "taskDecomposer",
+  "taskHandler",
+  "reportGenerationAssitant",
+  "humanDecision",
+];
+
 async function createDeepResearchWorkflow() {
   const checkpointer = await getCheckpointer();
   const workflow = new StateGraph(ResearchStateAnnotation)
-    .addNode("supervisor", supervisor)
-    .addNode("simpleAnalyser", simpleAnalyser)
-    .addNode("taskDecomposer", taskDecomposer)
-    .addNode("taskHandler", taskHandler)
-    .addNode("reportGenerationAssitant", reportGenerationAssitant)
-    .addNode("humanDecision", humanDecision)
+    // 为每个节点添加 metadata.tags 标注，以便 streamEvents 精确识别
+    .addNode("supervisor", supervisor, {
+      metadata: { tags: ["deep_research", "supervisor"] },
+    })
+    .addNode("simpleAnalyser", simpleAnalyser, {
+      metadata: { tags: ["deep_research", "simpleAnalyser"] },
+    })
+    .addNode("taskDecomposer", taskDecomposer, {
+      metadata: { tags: ["deep_research", "taskDecomposer"] },
+    })
+    .addNode("taskHandler", taskHandler, {
+      metadata: { tags: ["deep_research", "taskHandler"] },
+    })
+    .addNode("reportGenerationAssitant", reportGenerationAssitant, {
+      metadata: { tags: ["deep_research", "reportGenerationAssitant"] },
+    })
+    .addNode("humanDecision", humanDecision, {
+      metadata: { tags: ["deep_research", "humanDecision"] },
+    })
 
     .addEdge(START, "supervisor")
 
@@ -45,7 +71,6 @@ async function createDeepResearchWorkflow() {
     )
 
     .addEdge("simpleAnalyser", "supervisor")
-    // .addEdge("taskDecomposer", "supervisor")
     .addEdge("taskHandler", "supervisor")
     .addEdge("reportGenerationAssitant", "supervisor")
 

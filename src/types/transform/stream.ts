@@ -1,5 +1,13 @@
+/**
+ * @deprecated 请使用 AgentEventStream（来自 @/types/agentEvent）替代。
+ * 此类型保留以支持 v1 路由的渐进式迁移。
+ */
 export type ApiStream = AsyncGenerator<ApiStreamChunk>;
 
+/**
+ * @deprecated 请使用 AgentEvent（来自 @/types/agentEvent）替代。
+ * 此类型保留以支持 v1 路由的渐进式迁移。
+ */
 export type ApiStreamChunk =
   | ApiStreamTextChunk
   | ApiStreamUsageChunk

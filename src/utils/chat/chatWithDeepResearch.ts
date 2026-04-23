@@ -8,7 +8,8 @@ export const chatWithDeepResearch = async (
   params: chatWithDeepResearchProps
 ) => {
   const handler = new StreamChatHandler({
-    apiEndpoint: "/api/chat/v1/deep_research",
+    apiEndpoint: "/api/chat/v2",
+    agentType: "deep_research",
     mode: "deepResearch",
     isResume: params.isResume,
     callingMode: params.callingMode,

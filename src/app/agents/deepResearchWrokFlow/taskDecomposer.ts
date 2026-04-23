@@ -1,5 +1,6 @@
 import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
+import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import ResearchStateAnnotation from "./workState";
 import { taskType } from "@/types";
 
@@ -58,6 +59,12 @@ export async function taskDecomposer(
         searchResult: [],
       }),
     );
+
+    // 发射 state_update 自定义事件，通知前端任务分解完成
+    await dispatchCustomEvent("state_update", {
+      stateType: "tasks_initial",
+      data: tasks,
+    });
 
     return { tasks: tasks, needsHumanReview: true, curAction: "taskDecompose" };
   } else {

@@ -1,25 +1,27 @@
-import { ApiStream, ApiStreamChunk } from "@/types/transform/stream";
-import { StreamChunkTransformer } from "@/lib/stream";
 import { BaseAgentServer, AgentConfig } from "./BaseAgentServer";
 import { createAgent, ReactAgent } from "langchain";
 import { buildLLM } from "@/lib";
+import {
+  AgentEventStream,
+  AgentEventType,
+  createAgentEvent,
+  ErrorEvent,
+  LifecycleEvent,
+} from "@/types/agentEvent";
 
 /**
  * ChatAgentServer - 处理基础聊天对话的 Agent
+ *
+ * 使用 streamEvents API 获取事件流，通过 StreamProcessor 转换为统一 AgentEvent
  */
 export class ChatAgentServer extends BaseAgentServer {
   private AgentInstance: ReactAgent | undefined;
 
   constructor(config: AgentConfig) {
-    super(config);
-    this.buildAgent();
-    this.transformer = new StreamChunkTransformer({
-      enableToolCalls: true,
-      enableUsageTracking: true,
-      enableReasoning: false,
-      enableGrounding: false,
-      streamMode: "messages",
+    super(config, {
+      streamMode: "events",
     });
+    this.buildAgent();
   }
 
   buildAgent() {
@@ -30,55 +32,76 @@ export class ChatAgentServer extends BaseAgentServer {
       tools: this.config.tools,
       checkpointer: this.config.checkpointer,
     });
-    console.log("AgentInstance:", this.AgentInstance);
+    console.log("ChatAgentServer AgentInstance built");
   }
 
   /**
-   * 创建消息流
-   * @param systemPrompt - 系统提示词（可覆盖配置中的默认值）
+   * 创建消息流（v2 事件驱动）
+   *
    * @param messages - 消息历史数组
    * @param metadata - 元数据，包含 sessionId 等信息
-   * @returns ApiStream - 异步生成器，产生 ApiStreamChunk
+   * @returns AgentEventStream - 异步生成器，产生 AgentEvent
    */
   async *createMessage(
     messages: any[],
     metadata?: { [key: string]: any },
-  ): ApiStream {
+  ): AgentEventStream {
     try {
       if (!this.AgentInstance) {
-        yield {
-          type: "error",
-          error: "AgentNotInitialized",
-          message: "Chat agent instance is not initialized",
-        } as ApiStreamChunk;
+        yield createAgentEvent<ErrorEvent>(
+          AgentEventType.ERROR,
+          this.getAgentId(),
+          {
+            errorCode: "AgentNotInitialized",
+            errorMessage: "Chat agent instance is not initialized",
+            recoverable: false,
+          },
+        );
         return;
       }
 
       const sessionId = metadata?.sessionId;
 
-      const stream = await this.AgentInstance.stream(
-        { messages: messages },
+      // 发射生命周期 start 事件
+      yield createAgentEvent<LifecycleEvent>(
+        AgentEventType.LIFECYCLE,
+        this.getAgentId(),
+        { stage: "start", timestamp: Date.now() },
+        { sessionId },
+      );
+
+      // 使用 StreamProcessor 处理 streamEvents
+      yield* this.streamProcessor.processStreamEvents(
+        this.AgentInstance,
+        { messages },
         {
-          streamMode: "messages",
           configurable: { thread_id: sessionId },
+          metadata: { sessionId, ...metadata },
         },
       );
 
-      yield* this.transformer?.transformLangChainStream(stream, {
-        sessionId,
-        metadata,
-      }) || [];
+      // 发射生命周期 done 事件
+      yield createAgentEvent<LifecycleEvent>(
+        AgentEventType.LIFECYCLE,
+        this.getAgentId(),
+        { stage: "done", timestamp: Date.now() },
+        { sessionId },
+      );
     } catch (error: any) {
       console.error("=== ChatAgentServer.createMessage 发生错误 ===");
       console.error("错误名称:", error.name);
       console.error("错误消息:", error.message);
-      console.error("错误堆栈:", error.stack);
 
-      yield {
-        type: "error",
-        error: error.name || "UnknownError",
-        message: error.message || "An error occurred during message processing",
-      } as ApiStreamChunk;
+      yield createAgentEvent<ErrorEvent>(
+        AgentEventType.ERROR,
+        this.getAgentId(),
+        {
+          errorCode: error.name || "UnknownError",
+          errorMessage:
+            error.message || "An error occurred during message processing",
+          recoverable: false,
+        },
+      );
     }
   }
 }

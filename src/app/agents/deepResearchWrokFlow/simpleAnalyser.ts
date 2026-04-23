@@ -1,5 +1,6 @@
 import { createAgent } from "langchain";
 import { buildLLM } from "@/lib/llm";
+import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import ResearchStateAnnotation from "./workState";
 
 export async function simpleAnalyser(
@@ -39,6 +40,15 @@ ${state.input}
 
   try {
     const result = JSON.parse(rawContent as string);
+
+    // 发射 state_update 自定义事件，通知前端简单分析完成
+    await dispatchCustomEvent("state_update", {
+      stateType: "simple_analysis",
+      data: {
+        simpleAnalysis: result.simpleAnalysis.trim(),
+        researchTarget: result.researchTarget.trim(),
+      },
+    });
 
     return {
       researchTarget: result.researchTarget.trim(),

@@ -5,7 +5,8 @@ export const chatWithChatAssistant = async (
   params: chatWithChatAssistantProps
 ) => {
   const handler = new StreamChatHandler({
-    apiEndpoint: "/api/chat/basic_agents",
+    apiEndpoint: "/api/chat/v2",
+    agentType: "basic",
     mode: "chat",
     hasFiles: params.hasFiles,
     uploadedFiles: params.uploadedFiles,
@@ -20,6 +21,7 @@ export const chatWithChatAssistant = async (
     setCurrentSessionId: params.setCurrentSessionId,
     setCurrentMessages: params.setCurrentMessages,
     setAbortController: params.setAbortController,
+    setCurrentDeepResearchId: () => {},
   });
 
   await handler.execute();
