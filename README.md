@@ -50,8 +50,7 @@
 │   ├── app/                # Next.js App Router
 │   │   ├── api/            # API 路由
 │   │   │   ├── chat/
-│   │   │   │   ├── v1/     # v1 兼容路由（deprecated）
-│   │   │   │   └── v2/     # v2 当前主版本路由
+│   │   │   │   └── v2/     # 统一路由（支持 basic/search/deep_research）
 │   │   │   ├── conversations/  # 会话管理 API
 │   │   │   └── files/      # 文件上传/删除 API
 │   │   ├── layout.tsx      # 根布局
@@ -68,7 +67,7 @@
 │   │   ├── db/             # 数据库配置
 │   │   ├── llm/            # LLM API 构建
 │   │   ├── storage/        # 文件存储（MinIO）
-│   │   └── stream/         # 流处理（Chunk 转换、SSE 构建）
+│   │   └── stream/         # 流处理（AgentEvent SSE 构建）
 │   ├── store/              # Zustand 状态管理
 │   ├── types/              # TypeScript 类型定义
 │   └── utils/              # 前端工具函数
@@ -82,8 +81,6 @@
 ├── package.json            # 项目依赖
 └── tsconfig.json           # TypeScript 配置
 ```
-
-> **注意**：v1 路由（`/api/chat/v1/basic_agents`、`/api/chat/v1/search_agents`、`/api/chat/v1/deep_research`）已标记为 deprecated，前端统一使用 `/api/chat/v2` 路由。
 
 ## 🚀 快速开始
 

@@ -16,8 +16,7 @@ import {
 
 export interface StreamChatConfig {
   apiEndpoint: string;
-  /** v2 模式下的 agentType，用于统一路由 */
-  agentType?: "basic" | "search" | "deep_research";
+  agentType: "basic" | "search" | "deep_research";
   mode: "chat" | "search" | "deepResearch";
   callingMode: "direct" | "reEditCall" | "recall" | "resume";
   inputValue: string;
@@ -213,10 +212,7 @@ export class StreamChatHandler {
         isResume: this.config.isResume,
       };
 
-      // v2 模式下添加 agentType 参数
-      if (this.config.agentType) {
-        requestBody.agentType = this.config.agentType;
-      }
+      requestBody.agentType = this.config.agentType;
 
       const response = await fetch(this.config.apiEndpoint, {
         method: "POST",
@@ -246,65 +242,9 @@ export class StreamChatHandler {
   private async processStream(
     reader: ReadableStreamDefaultReader<Uint8Array>
   ): Promise<void> {
-    // v2 模式：使用 EventConsumer 统一处理
-    if (this.config.agentType) {
-      await this.processStreamV2(reader);
-      return;
-    }
-
-    // v1 兼容模式：保留原有逻辑
-    let streamCompleted = false;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = new TextDecoder().decode(value);
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-
-            if (this.config.onStreamData) {
-              this.accumulatedContent = this.config.onStreamData(
-                data,
-                this.accumulatedContent
-              );
-            } else {
-              this.accumulatedContent = this.defaultStreamDataHandler(data);
-            }
-
-            this.updateMessages();
-
-            if (data.type === "done") {
-              console.log("Stream completed");
-              streamCompleted = true;
-              break;
-            }
-
-            if (data.type === "error") {
-              console.error("Stream error:", data.content);
-              streamCompleted = true;
-              break;
-            }
-          } catch (parseError) {
-            console.error("JSON解析错误:", parseError);
-          }
-        }
-      }
-
-      if (streamCompleted) {
-        break;
-      }
-    }
+    await this.processStreamV2(reader);
   }
 
-  /**
-   * v2 事件驱动模式的流处理
-   * 使用 EventConsumer 统一处理所有事件类型
-   */
   private async processStreamV2(
     reader: ReadableStreamDefaultReader<Uint8Array>
   ): Promise<void> {
@@ -373,7 +313,7 @@ export class StreamChatHandler {
       AgentEventType.LIFECYCLE,
       createLifecycleHandler({
         onDone: () => {
-          console.log("v2 Stream completed");
+          console.log("Stream completed");
         },
       }),
     );
@@ -382,20 +322,12 @@ export class StreamChatHandler {
     consumer.registerHandler(
       AgentEventType.ERROR,
       createErrorHandler((payload) => {
-        console.error("v2 Stream error:", payload.errorMessage);
+        console.error("Stream error:", payload.errorMessage);
       }),
     );
 
     // 使用 EventConsumer 消费 SSE 流
     await consumer.consumeSSEStream(reader);
-  }
-
-  // 默认流式信息处理
-  private defaultStreamDataHandler(data: any): string {
-    if (data.type === "content" && data.content) {
-      return this.accumulatedContent + data.content;
-    }
-    return this.accumulatedContent;
   }
 
   // 更新UI
