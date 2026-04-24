@@ -157,10 +157,6 @@ export class AgentManager {
     return Array.from(this.factories.keys());
   }
 
-  // ============================================================
-  // Sub-agent 注册管理（Harness 架构）
-  // ============================================================
-
   /**
    * 注册 Sub-agent 配置
    *

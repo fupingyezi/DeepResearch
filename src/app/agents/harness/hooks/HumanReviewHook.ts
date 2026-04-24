@@ -1,11 +1,8 @@
 /**
  * HumanReviewHook - 人工审核钩子
  *
- * 将现有的 humanDecision 节点功能迁移为 Harness PreExecute Hook。
  * 在 Sub-agent 执行前检查是否需要人工审核，
  * 当需要时发射 HumanInterruptEvent 并暂停执行。
- *
- * 迁移自 deepResearchWrokFlow/humanDecision.ts
  */
 
 import { interrupt } from "@langchain/langgraph";

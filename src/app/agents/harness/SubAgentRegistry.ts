@@ -124,10 +124,6 @@ export class SubAgentRegistry implements ISubAgentRegistry {
     this.registry.clear();
   }
 
-  // ============================================================
-  // 私有方法
-  // ============================================================
-
   /**
    * 创建占位 Tool（当 toolFactory 未设置时使用）
    */

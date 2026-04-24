@@ -16,10 +16,6 @@ import {
   CHAT_SYSTEM_PROMPT,
 } from "@/app/agents";
 
-// ============================================================
-// 注册所有 Agent
-// ============================================================
-
 const agentManager = AgentManager.getInstance();
 
 agentManager.registerAgent(AgentType.BASIC, () => {
@@ -46,19 +42,11 @@ agentManager.registerAgent(AgentType.DEEP_RESEARCH, () => {
   });
 });
 
-// ============================================================
-// agentType 字符串到 AgentType 枚举的映射
-// ============================================================
-
 const AGENT_TYPE_MAP: Record<string, AgentType> = {
   basic: AgentType.BASIC,
   search: AgentType.SEARCH,
   deep_research: AgentType.DEEP_RESEARCH,
 };
-
-// ============================================================
-// POST 处理器
-// ============================================================
 
 export async function POST(request: NextRequest) {
   try {

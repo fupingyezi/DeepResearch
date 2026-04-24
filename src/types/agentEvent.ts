@@ -5,10 +5,6 @@
  * 前后端可以用同一套逻辑处理所有类型的 Agent 事件流。
  */
 
-// ============================================================
-// 事件类型枚举
-// ============================================================
-
 /**
  * Agent 事件类型枚举
  * 通过 TypeScript 可辨识联合类型（Discriminated Union）实现类型安全
@@ -43,10 +39,6 @@ export enum AgentEventType {
   /** Harness 生命周期事件 */
   HARNESS_LIFECYCLE = "harness_lifecycle",
 }
-
-// ============================================================
-// 各事件类型的 Payload 接口
-// ============================================================
 
 /** LLM 流式文本 payload */
 export interface LlmStreamPayload {
@@ -205,10 +197,6 @@ export interface HarnessLifecyclePayload {
   errorMessage?: string;
 }
 
-// ============================================================
-// AgentEvent 可辨识联合类型
-// ============================================================
-
 /** 事件元数据 */
 export interface AgentEventMetadata {
   /** 会话 ID */
@@ -313,10 +301,6 @@ export interface HarnessLifecycleEvent extends BaseAgentEvent {
   payload: HarnessLifecyclePayload;
 }
 
-// ============================================================
-// 统一 AgentEvent 联合类型
-// ============================================================
-
 /**
  * 统一 Agent 事件类型（可辨识联合类型）
  *
@@ -350,16 +334,8 @@ export type AgentEvent =
   | SubAgentDispatchEvent
   | HarnessLifecycleEvent;
 
-// ============================================================
-// AgentEvent 异步生成器类型别名
-// ============================================================
-
 /** Agent 事件流类型 */
 export type AgentEventStream = AsyncGenerator<AgentEvent>;
-
-// ============================================================
-// 工具函数：创建事件的辅助方法
-// ============================================================
 
 /**
  * 创建 AgentEvent 的工厂函数

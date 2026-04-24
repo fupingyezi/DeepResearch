@@ -22,10 +22,6 @@ import {
   ToolCallResultPayload,
 } from "@/types/agentEvent";
 
-// ============================================================
-// Handler 类型定义
-// ============================================================
-
 /** 事件处理器回调类型 */
 export type EventHandler<T = any> = (
   payload: T,
@@ -34,10 +30,6 @@ export type EventHandler<T = any> = (
 
 /** 事件处理器注册表类型 */
 type HandlerRegistry = Map<string, Set<EventHandler>>;
-
-// ============================================================
-// 内置 Handler 实现
-// ============================================================
 
 /**
  * LlmStreamHandler - 处理 LLM 流式文本
@@ -180,10 +172,6 @@ export function createToolCallHandler(handlers: {
     resultHandler: (payload) => handlers.onToolResult?.(payload),
   };
 }
-
-// ============================================================
-// EventConsumer 核心类
-// ============================================================
 
 /**
  * EventConsumer - 统一事件消费器
