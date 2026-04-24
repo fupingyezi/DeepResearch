@@ -91,5 +91,9 @@ export {
   type NodeEnterEvent,
   type NodeExitEvent,
   type TaskProgressEvent,
+  type SubAgentDispatchPayload,
+  type SubAgentDispatchEvent,
+  type HarnessLifecyclePayload,
+  type HarnessLifecycleEvent,
   createAgentEvent,
 } from "./agentEvent";

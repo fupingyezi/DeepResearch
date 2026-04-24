@@ -26,6 +26,8 @@ import {
   TaskProgressEvent,
   StateUpdateEvent,
   HumanInterruptEvent,
+  SubAgentDispatchEvent,
+  HarnessLifecycleEvent,
 } from "@/types/agentEvent";
 import { EventFilterConfig } from "./EventFilterConfig";
 
@@ -400,6 +402,8 @@ export class EventStreamAdapter {
    * - task_progress: 任务进度更新
    * - state_update: 状态变更
    * - human_interrupt: 人工中断
+   * - sub_agent_dispatch: Sub-agent 调度事件
+   * - harness_lifecycle: Harness 生命周期事件
    */
   private handleCustomEvent(lcEvent: LangChainStreamEvent): AgentEvent[] {
     const eventName = lcEvent.name;
@@ -444,6 +448,40 @@ export class EventStreamAdapter {
             {
               question: eventData?.question || "",
               details: eventData?.details,
+            },
+            this.config.metadata,
+          ),
+        ];
+
+      case "sub_agent_dispatch":
+        return [
+          createAgentEvent<SubAgentDispatchEvent>(
+            AgentEventType.SUB_AGENT_DISPATCH,
+            this.config.agentId,
+            {
+              subAgentName: eventData?.subAgentName || "",
+              task: eventData?.task || "",
+              status: eventData?.status || "dispatched",
+              result: eventData?.result,
+              errorMessage: eventData?.errorMessage,
+              durationMs: eventData?.durationMs,
+            },
+            this.config.metadata,
+          ),
+        ];
+
+      case "harness_lifecycle":
+        return [
+          createAgentEvent<HarnessLifecycleEvent>(
+            AgentEventType.HARNESS_LIFECYCLE,
+            this.config.agentId,
+            {
+              harnessId: eventData?.harnessId || "",
+              phase: eventData?.phase || "execute",
+              status: eventData?.status || "start",
+              depth: eventData?.depth || 0,
+              timestamp: eventData?.timestamp || Date.now(),
+              errorMessage: eventData?.errorMessage,
             },
             this.config.metadata,
           ),

@@ -4,10 +4,6 @@ import { AgentEventEmitter } from "./modules/AgentEventEmitter";
 import { StreamProcessor } from "./modules/StreamProcessor";
 import { EventFilterConfig } from "./eventStream/EventFilterConfig";
 
-// 保留旧的 ApiStream 类型导入以支持渐进式迁移
-import { ApiStream } from "@/types/transform/stream";
-import { StreamChunkTransformer } from "@/lib/stream";
-
 /**
  * Agent 配置接口
  */
@@ -58,15 +54,6 @@ export interface AgentHandler {
 }
 
 /**
- * @deprecated 旧版 Handler 接口，保留以支持渐进式迁移
- */
-export interface BaseAgentHandler {
-  createMessage(messages: any[], metadata?: { [key: string]: any }): ApiStream;
-  buildAgent(): void | Promise<void>;
-  getConfig(): AgentConfig;
-}
-
-/**
  * BaseAgentServer - 组合模式 Agent 基类
  *
  * 核心能力通过可插拔模块提供：
@@ -83,9 +70,6 @@ export abstract class BaseAgentServer implements AgentHandler {
   protected emitter: AgentEventEmitter;
   /** 流处理器模块 */
   protected streamProcessor: StreamProcessor;
-
-  /** @deprecated 旧版 transformer，保留以支持渐进式迁移 */
-  protected transformer: StreamChunkTransformer | undefined;
 
   constructor(
     config: AgentConfig,

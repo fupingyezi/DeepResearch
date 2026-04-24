@@ -1,5 +1,7 @@
 import { BaseAgentServer } from "./BaseAgentServer";
 import { AgentEvent } from "@/types/agentEvent";
+import { SubAgentConfig } from "./harness/subagent";
+import { SubAgentRegistry } from "./harness/SubAgentRegistry";
 
 /**
  * Agent 类型枚举
@@ -122,14 +124,6 @@ export class AgentManager {
   }
 
   /**
-   * @deprecated 使用 registerAgent 替代
-   * 注册 Agent 工厂函数（保留以支持渐进式迁移）
-   */
-  registerFactory(type: AgentType, factory: AgentFactory): void {
-    this.registerAgent(type, factory);
-  }
-
-  /**
    * 获取 Agent 实例
    * 如果实例不存在则创建，否则返回缓存的实例
    *
@@ -161,5 +155,30 @@ export class AgentManager {
    */
   getRegisteredTypes(): AgentType[] {
     return Array.from(this.factories.keys());
+  }
+
+  // ============================================================
+  // Sub-agent 注册管理（Harness 架构）
+  // ============================================================
+
+  /**
+   * 注册 Sub-agent 配置
+   *
+   * 将 Sub-agent 配置注册到 SubAgentRegistry，
+   * Lead Agent 可通过 function calling 动态调度这些 Sub-agent。
+   *
+   * @param config Sub-agent 配置
+   */
+  registerSubAgent(config: SubAgentConfig): void {
+    SubAgentRegistry.getInstance().register(config);
+  }
+
+  /**
+   * 获取 Sub-agent 注册表
+   *
+   * @returns SubAgentRegistry 实例
+   */
+  getSubAgentRegistry(): SubAgentRegistry {
+    return SubAgentRegistry.getInstance();
   }
 }

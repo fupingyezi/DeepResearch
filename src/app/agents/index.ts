@@ -26,8 +26,45 @@ export type {
   EventFilterConfig,
 } from "./eventStream";
 
-// 工作流常量
-export { DEEP_RESEARCH_NODE_NAMES } from "./deepResearchWrokFlow";
-
 // 提示词
 export { CHAT_SYSTEM_PROMPT } from "./prompts";
+
+// ============================================================
+// Harness 架构模块（新）
+// ============================================================
+
+// Harness 核心类
+export {
+  AgentHarness,
+  HooksManager,
+  SubAgentRegistry,
+  SubAgentDispatcher,
+  LeadAgentHarness,
+} from "./harness";
+
+// Harness 类型
+export {
+  HarnessLifecycle,
+  HookScope,
+  HookFailureStrategy,
+  HookPhase,
+} from "./harness";
+export type {
+  HarnessConfig,
+  HarnessContext,
+  HarnessExecutionResult,
+  HarnessExecutionMetrics,
+  SubAgentConfig,
+  ISubAgentRegistry,
+  HarnessHook,
+  PreExecuteHook,
+  PreToolUseHook,
+  PostToolUseHook,
+  PostExecuteHook,
+} from "./harness";
+
+// Harness Hooks 实现
+export { HumanReviewHook, createHumanReviewHook } from "./harness";
+
+// Sub-agent 配置加载
+export { loadAllSubAgents } from "./harness";

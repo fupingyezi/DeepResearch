@@ -38,6 +38,10 @@ export enum AgentEventType {
   NODE_EXIT = "node_exit",
   /** 任务进度更新 */
   TASK_PROGRESS = "task_progress",
+  /** Sub-agent 调度事件 */
+  SUB_AGENT_DISPATCH = "sub_agent_dispatch",
+  /** Harness 生命周期事件 */
+  HARNESS_LIFECYCLE = "harness_lifecycle",
 }
 
 // ============================================================
@@ -169,6 +173,38 @@ export interface TaskProgressPayload {
   result?: string;
 }
 
+/** Sub-agent 调度 payload */
+export interface SubAgentDispatchPayload {
+  /** Sub-agent 名称 */
+  subAgentName: string;
+  /** 任务描述 */
+  task: string;
+  /** 调度状态 */
+  status: "dispatched" | "running" | "completed" | "failed";
+  /** 执行结果（完成时） */
+  result?: string;
+  /** 错误信息（失败时） */
+  errorMessage?: string;
+  /** 执行耗时（毫秒） */
+  durationMs?: number;
+}
+
+/** Harness 生命周期 payload */
+export interface HarnessLifecyclePayload {
+  /** Harness 实例 ID */
+  harnessId: string;
+  /** 生命周期阶段 */
+  phase: "initialize" | "execute" | "cleanup";
+  /** 阶段状态 */
+  status: "start" | "complete" | "error";
+  /** 嵌套深度（0 = Lead Agent） */
+  depth: number;
+  /** 时间戳 */
+  timestamp: number;
+  /** 错误信息（error 状态时） */
+  errorMessage?: string;
+}
+
 // ============================================================
 // AgentEvent 可辨识联合类型
 // ============================================================
@@ -265,6 +301,18 @@ export interface TaskProgressEvent extends BaseAgentEvent {
   payload: TaskProgressPayload;
 }
 
+/** Sub-agent 调度事件 */
+export interface SubAgentDispatchEvent extends BaseAgentEvent {
+  eventType: AgentEventType.SUB_AGENT_DISPATCH;
+  payload: SubAgentDispatchPayload;
+}
+
+/** Harness 生命周期事件 */
+export interface HarnessLifecycleEvent extends BaseAgentEvent {
+  eventType: AgentEventType.HARNESS_LIFECYCLE;
+  payload: HarnessLifecyclePayload;
+}
+
 // ============================================================
 // 统一 AgentEvent 联合类型
 // ============================================================
@@ -298,7 +346,9 @@ export type AgentEvent =
   | LifecycleEvent
   | NodeEnterEvent
   | NodeExitEvent
-  | TaskProgressEvent;
+  | TaskProgressEvent
+  | SubAgentDispatchEvent
+  | HarnessLifecycleEvent;
 
 // ============================================================
 // AgentEvent 异步生成器类型别名
