@@ -53,6 +53,7 @@ interface LangChainStreamEvent {
     output?: any;
     /** 增量数据（stream 事件） */
     chunk?: any;
+    [key: string]: any;
   };
   /** 事件元数据 */
   metadata?: Record<string, any>;
@@ -202,28 +203,24 @@ export class EventStreamAdapter {
     const { event, name, data } = lcEvent;
 
     switch (event) {
-      // ---- LLM 相关事件 ----
       case "on_chat_model_stream":
         return this.handleLlmStream(lcEvent);
 
       case "on_chat_model_end":
         return this.handleLlmComplete(lcEvent);
 
-      // ---- 工具相关事件 ----
       case "on_tool_start":
         return this.handleToolStart(lcEvent);
 
       case "on_tool_end":
         return this.handleToolEnd(lcEvent);
 
-      // ---- Chain/Graph 相关事件（用于节点进入/退出） ----
       case "on_chain_start":
         return this.handleChainStart(lcEvent);
 
       case "on_chain_end":
         return this.handleChainEnd(lcEvent);
 
-      // ---- 自定义事件（LangGraph dispatchCustomEvent） ----
       case "on_custom_event":
         return this.handleCustomEvent(lcEvent);
 

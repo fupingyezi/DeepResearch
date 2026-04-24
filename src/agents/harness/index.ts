@@ -53,7 +53,7 @@ export { SubAgentDispatcher } from "./SubAgentDispatcher";
 export { LeadAgentHarness } from "./LeadAgentHarness";
 
 // Hooks 实现
-export { HumanReviewHook, createHumanReviewHook } from "./hooks";
+export { HumanReviewHook, createHumanReviewHook } from "./hooks/HumanReviewHook";
 
 // Sub-agent 配置加载
 export { loadAllSubAgents } from "./subagents";

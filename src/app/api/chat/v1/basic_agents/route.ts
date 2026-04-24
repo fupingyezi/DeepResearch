@@ -5,17 +5,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { SSEEvent } from "@/types";
-import { createSSEStream } from "../../utils/createSSEStream";
+import { createSSEStream } from "@/lib/stream/createSSEStream";
 // import { query } from "@/lib/db";
 import {
   AgentManager,
   AgentType,
   ChatAgentServer,
   CHAT_SYSTEM_PROMPT,
-} from "@/app/agents";
+} from "@/agents";
 
 const agentManager = AgentManager.getInstance();
-agentManager.registerFactory(AgentType.BASIC, () => {
+agentManager.registerAgent(AgentType.BASIC, () => {
   return new ChatAgentServer({
     model: "qwen-plus",
     systemPrompt: CHAT_SYSTEM_PROMPT,

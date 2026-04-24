@@ -5,11 +5,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { SSEEvent } from "@/types";
-import { createSSEStream } from "../../utils/createSSEStream";
-import { AgentManager, AgentType, SearchAgentServer } from "@/app/agents";
+import { createSSEStream } from "@/lib/stream/createSSEStream";
+import { AgentManager, AgentType, SearchAgentServer } from "@/agents";
 
 const agentManager = AgentManager.getInstance();
-agentManager.registerFactory(AgentType.SEARCH, () => {
+agentManager.registerAgent(AgentType.SEARCH, () => {
   return new SearchAgentServer({
     model: "qwen-flash",
     systemPrompt:

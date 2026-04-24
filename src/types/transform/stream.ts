@@ -1,6 +1,16 @@
 /**
  * @deprecated 请使用 AgentEventStream（来自 @/types/agentEvent）替代。
  * 此类型保留以支持 v1 路由的渐进式迁移。
+ *
+ * 当前仍有以下文件引用此模块：
+ * - src/lib/stream/StreamChunkTransformer.ts
+ * - src/lib/stream/trackers/UsageTracker.ts
+ * - src/lib/stream/processors/UsageChunkProcessor.ts
+ * - src/lib/stream/processors/GroundingChunkProcessor.ts
+ * - src/lib/stream/processors/TextChunkProcessor.ts
+ * - src/lib/stream/processors/ReasoningChunkProcessor.ts
+ * - src/lib/stream/processors/ChunkProcessor.ts
+ * - src/lib/stream/processors/ToolCallChunkProcessor.ts
  */
 export type ApiStream = AsyncGenerator<ApiStreamChunk>;
 

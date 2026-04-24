@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createAgentEventSSEStream } from "../../utils/createAgentEventSSEStream";
+import { createAgentEventSSEStream } from "@/lib/stream/createAgentEventSSEStream";
 import {
   AgentManager,
   AgentType,
@@ -14,7 +14,7 @@ import {
   SearchAgentServer,
   DeepResearchAgentServer,
   CHAT_SYSTEM_PROMPT,
-} from "@/app/agents";
+} from "@/agents";
 
 const agentManager = AgentManager.getInstance();
 

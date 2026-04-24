@@ -4,12 +4,13 @@
  */
 
 import { handleStateUpdate } from "@/utils/handleStateUpdate";
-import { createSSEStream } from "@/app/api/utils/createSSEStream";
-import { AgentManager, AgentType, DeepResearchAgentServer } from "@/app/agents";
+import { createSSEStream } from "@/lib/stream/createSSEStream";
+import { AgentManager, AgentType, DeepResearchAgentServer } from "@/agents";
+import { AgentEventType } from "@/types";
 
 // 注册Agent工厂函数
 const agentManager = AgentManager.getInstance();
-agentManager.registerFactory(AgentType.DEEP_RESEARCH, () => {
+agentManager.registerAgent(AgentType.DEEP_RESEARCH, () => {
   return new DeepResearchAgentServer({
     model: "qwen-max",
     systemPrompt:
@@ -45,11 +46,11 @@ export async function POST(request: Request) {
       deepResearchId,
       isResume,
     })) {
-      if (chunk.type === "state") {
-        const updateState = handleStateUpdate(lastState, chunk.state);
+      if (chunk.eventType === AgentEventType.STATE_UPDATE) {
+        const updateState = handleStateUpdate(lastState, (chunk as any).payload?.data);
         if (updateState) {
           enqueue(updateState);
-          lastState = chunk.state;
+          lastState = (chunk as any).payload?.data;
         }
       }
     }
