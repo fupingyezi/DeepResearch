@@ -19,9 +19,9 @@ import {
   ErrorEvent,
   HarnessLifecycleEvent,
 } from "@/types/agent-event";
-import { StreamProcessor } from "@/agents/modules/stream-processor";
-import { EventStreamAdapter } from "@/agents/event-stream/event-stream-adapter";
-import { AgentEventEmitter } from "@/agents/modules/agent-event-emitter";
+import { StreamProcessor } from "../runtime/stream-processor";
+import { EventStreamAdapter } from "../runtime/event-stream-adapter";
+import { AgentEventEmitter } from "../runtime/agent-event-emitter";
 import {
   HarnessConfig,
   HarnessContext,
@@ -59,6 +59,8 @@ export class AgentHarness {
   constructor(config: HarnessConfig, parentContextId?: string, depth: number = 0) {
     this.config = config;
     this.hooksManager = new HooksManager();
+
+    // 直接使用内部 runtime 实现
     this.emitter = new AgentEventEmitter(config.agentId);
     this.streamProcessor = new StreamProcessor({
       agentId: config.agentId,
@@ -227,7 +229,7 @@ export class AgentHarness {
 
       const eventStream = this.agentInstance.streamEvents(agentInput, streamOptions);
 
-      // 创建适配器处理事件流
+      // 直接使用内部 runtime 的 EventStreamAdapter
       const adapter = new EventStreamAdapter({
         agentId: this.config.agentId,
         metadata: this.context.metadata,

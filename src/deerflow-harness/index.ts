@@ -36,6 +36,18 @@ export type {
   ISubAgentRegistry,
 } from "./agents";
 
+// === Runtime 模块（事件流转换核心实现） ===
+export {
+  EventStreamAdapter,
+  StreamProcessor,
+  AgentEventEmitter,
+} from "./runtime";
+export type {
+  EventStreamAdapterConfig,
+  StreamProcessorConfig,
+  EventFilterConfig,
+} from "./runtime";
+
 // === Models 模块 ===
 export {
   createChatModel,
