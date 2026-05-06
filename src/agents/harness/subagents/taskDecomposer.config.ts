@@ -33,8 +33,8 @@ export const taskDecomposerConfig: SubAgentConfig = {
   输出的子任务数为2~5个；
   仅输出符合上述格式的 JSON，不要包含任何额外文本、解释或注释。`,
   model: {
-    provider: "qwen",
-    model: "qwen-flash",
+    name: "qwen",
+model: "qwen3.6-plus",
   },
   tools: [],
   timeout: 30_000,

@@ -21,8 +21,8 @@ export const simpleAnalyserConfig: SubAgentConfig = {
   "simpleAnalysis": "开场白"
 }返回，不得返回其他东西，不要包含任何解释、注释或 Markdown。`,
   model: {
-    provider: "qwen",
-    model: "qwen-flash",
+    name: "qwen",
+model: "qwen3.6-plus",
     maxTokens: 200,
     temperature: 0.1,
   },

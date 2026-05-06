@@ -40,8 +40,8 @@ export const reportGeneratorConfig: SubAgentConfig = {
 - 语言应准确、简洁、专业，符合学术或行业报告规范
 - 输出将被传入支持 $...$ 和 $$...$$ 的 ReactMarkdown 渲染器，请严格遵守上述格式规则`,
   model: {
-    provider: "qwen",
-    model: "qwen-flash",
+    name: "qwen",
+model: "qwen3.6-plus",
   },
   tools: [],
   timeout: 60_000,

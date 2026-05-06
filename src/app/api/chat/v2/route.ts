@@ -20,7 +20,7 @@ const agentManager = AgentManager.getInstance();
 
 agentManager.registerAgent(AgentType.BASIC, () => {
   return new ChatAgentServer({
-    model: "qwen-plus",
+model: "qwen3.6-plus",
     systemPrompt: CHAT_SYSTEM_PROMPT,
     streaming: true,
   });

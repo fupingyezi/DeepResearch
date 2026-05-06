@@ -231,7 +231,6 @@ export class StreamChatHandler {
       }
 
       await this.processStream(reader);
-      reader.releaseLock();
     } catch (error) {
       await this.handleError(error);
     } finally {
@@ -265,22 +264,44 @@ export class StreamChatHandler {
         AgentEventType.STATE_UPDATE,
         createStateUpdateHandler({
           onSimpleAnalysis: (data) => {
-            this.config.onStreamData?.({
+            const newContent = this.config.onStreamData?.({
               type: "start_analyse",
               payload: data,
             }, this.accumulatedContent);
+            if (newContent !== undefined) {
+              this.accumulatedContent = newContent;
+              this.updateMessages();
+            }
           },
           onTasksInitial: (data) => {
-            this.config.onStreamData?.({
+            const newContent = this.config.onStreamData?.({
               type: "tasks_initial",
               payload: data,
             }, this.accumulatedContent);
+            if (newContent !== undefined) {
+              this.accumulatedContent = newContent;
+              this.updateMessages();
+            }
+          },
+          onTaskUpdate: (data) => {
+            const newContent = this.config.onStreamData?.({
+              type: "task_update",
+              payload: data,
+            }, this.accumulatedContent);
+            if (newContent !== undefined) {
+              this.accumulatedContent = newContent;
+              this.updateMessages();
+            }
           },
           onReport: (data) => {
-            this.config.onStreamData?.({
+            const newContent = this.config.onStreamData?.({
               type: "report",
               payload: data,
             }, this.accumulatedContent);
+            if (newContent !== undefined) {
+              this.accumulatedContent = newContent;
+              this.updateMessages();
+            }
           },
         }),
       );
@@ -289,10 +310,14 @@ export class StreamChatHandler {
       consumer.registerHandler(
         AgentEventType.TASK_PROGRESS,
         createTaskProgressHandler((payload) => {
-          this.config.onStreamData?.({
+          const newContent = this.config.onStreamData?.({
             type: "task_update",
             payload: payload,
           }, this.accumulatedContent);
+          if (newContent !== undefined) {
+            this.accumulatedContent = newContent;
+            this.updateMessages();
+          }
         }),
       );
 
@@ -300,10 +325,14 @@ export class StreamChatHandler {
       consumer.registerHandler(
         AgentEventType.HUMAN_INTERRUPT,
         createHumanInterruptHandler((payload) => {
-          this.config.onStreamData?.({
+          const newContent = this.config.onStreamData?.({
             type: "interrupt",
             payload: payload,
           }, this.accumulatedContent);
+          if (newContent !== undefined) {
+            this.accumulatedContent = newContent;
+            this.updateMessages();
+          }
         }),
       );
     }

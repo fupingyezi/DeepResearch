@@ -216,6 +216,9 @@ export class EventConsumer {
   /**
    * 消费 SSE 流
    *
+   * 使用 buffer 机制处理跨 chunk 的不完整数据行，
+   * 确保大事件（如 STATE_UPDATE）不会因 TCP 分包而丢失。
+   *
    * @param reader - ReadableStreamDefaultReader
    * @returns Promise<void>
    */
@@ -223,35 +226,58 @@ export class EventConsumer {
     reader: ReadableStreamDefaultReader<Uint8Array>,
   ): Promise<void> {
     this.completed = false;
+    let buffer = "";
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = new TextDecoder().decode(value);
-        const lines = chunk.split("\n");
+        buffer += new TextDecoder().decode(value);
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              this.dispatchEvent(data as AgentEvent);
+        // 按双换行符分割完整的 SSE 消息块
+        const messages = buffer.split("\n\n");
+        // 最后一个元素可能是不完整的，保留在 buffer 中
+        buffer = messages.pop() || "";
 
-              // 检查是否为 lifecycle done 事件
-              if (
-                data.eventType === AgentEventType.LIFECYCLE &&
-                data.payload?.stage === "done"
-              ) {
-                this.completed = true;
+        for (const message of messages) {
+          const lines = message.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                this.dispatchEvent(data as AgentEvent);
+
+                // 检查是否为 lifecycle done 事件
+                if (
+                  data.eventType === AgentEventType.LIFECYCLE &&
+                  data.payload?.stage === "done"
+                ) {
+                  this.completed = true;
+                }
+              } catch (parseError) {
+                console.error("EventConsumer JSON 解析错误:", parseError);
               }
-            } catch (parseError) {
-              console.error("EventConsumer JSON 解析错误:", parseError);
             }
           }
         }
 
         if (this.completed) break;
+      }
+
+      // 处理 buffer 中可能残留的最后一条消息
+      if (buffer.trim()) {
+        const lines = buffer.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              this.dispatchEvent(data as AgentEvent);
+            } catch {
+              // 最后的残留数据解析失败，忽略
+            }
+          }
+        }
       }
     } finally {
       reader.releaseLock();

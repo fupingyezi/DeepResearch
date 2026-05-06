@@ -50,16 +50,6 @@ export function createAgentEventSSEStream(
           // 直接将 AgentEvent 序列化为 SSE data 行
           if (!safeEnqueue(event)) break;
         }
-
-        // 流正常结束，发送 done 信号
-        if (!aborted) {
-          safeEnqueue({
-            eventType: "lifecycle",
-            timestamp: Date.now(),
-            agentId: "system",
-            payload: { stage: "done", timestamp: Date.now() },
-          });
-        }
       } catch (error: any) {
         if (!aborted) {
           safeEnqueue({

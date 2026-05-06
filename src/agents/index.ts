@@ -29,22 +29,14 @@ export type {
 // 提示词
 export { CHAT_SYSTEM_PROMPT } from "./prompts";
 
-// Harness 核心类
+// Harness 核心类（从 deerflow-harness 包 re-export）
 export {
   AgentHarness,
-  HooksManager,
   SubAgentRegistry,
   SubAgentDispatcher,
   LeadAgentHarness,
-} from "./harness";
-
-// Harness 类型
-export {
   HarnessLifecycle,
-  HookScope,
-  HookFailureStrategy,
-  HookPhase,
-} from "./harness";
+} from "@deerflow-harness/agents";
 export type {
   HarnessConfig,
   HarnessContext,
@@ -52,15 +44,24 @@ export type {
   HarnessExecutionMetrics,
   SubAgentConfig,
   ISubAgentRegistry,
+} from "@deerflow-harness/agents";
+
+// Harness Middleware（Hooks）
+export {
+  HooksManager,
+  HookScope,
+  HookFailureStrategy,
+  HookPhase,
+  HumanReviewHook,
+  createHumanReviewHook,
+} from "@deerflow-harness/middleware";
+export type {
   HarnessHook,
   PreExecuteHook,
   PreToolUseHook,
   PostToolUseHook,
   PostExecuteHook,
-} from "./harness";
-
-// Harness Hooks 实现
-export { HumanReviewHook, createHumanReviewHook } from "./harness";
+} from "@deerflow-harness/middleware";
 
 // Sub-agent 配置加载
-export { loadAllSubAgents } from "./harness";
+export { loadAllSubAgents } from "@deerflow-harness/config";

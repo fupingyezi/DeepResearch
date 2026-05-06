@@ -1,4 +1,4 @@
-import { LLMOptions } from "@/lib";
+import { CreateModelOptions } from "@deerflow-harness/models";
 import { AgentEventStream, AgentEvent } from "@/types/agentEvent";
 import { AgentEventEmitter } from "./modules/AgentEventEmitter";
 import { StreamProcessor } from "./modules/StreamProcessor";
@@ -7,7 +7,7 @@ import { EventFilterConfig } from "./eventStream/EventFilterConfig";
 /**
  * Agent 配置接口
  */
-export interface AgentConfig extends LLMOptions {
+export interface AgentConfig extends CreateModelOptions {
   systemPrompt: string;
   tools?: any[];
   checkpointer?: any;

@@ -1,6 +1,6 @@
 import { BaseAgentServer, AgentConfig } from "./BaseAgentServer";
 import { createAgent, ReactAgent } from "langchain";
-import { buildLLM } from "@/lib";
+import { createChatModel } from "@deerflow-harness/models";
 import {
   AgentEventStream,
   AgentEventType,
@@ -24,8 +24,13 @@ export class ChatAgentServer extends BaseAgentServer {
     this.buildAgent();
   }
 
-  buildAgent() {
-    const model = buildLLM("qwen", this.config);
+  async buildAgent() {
+    const model = await createChatModel("qwen", {
+      model: this.config.model,
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      streaming: this.config.streaming,
+    });
     this.AgentInstance = createAgent({
       model: model,
       systemPrompt: this.config.systemPrompt,

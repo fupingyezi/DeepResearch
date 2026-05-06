@@ -28,7 +28,7 @@ export interface SubAgentConfig {
    * 不指定时继承 Lead Agent 的模型配置
    */
   model?: {
-    provider: string;
+    name: string;
     model: string;
     maxTokens?: number;
     temperature?: number;

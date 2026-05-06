@@ -99,8 +99,18 @@ export class EventStreamAdapter {
   async *adaptStreamEvents(
     langchainEventStream: AsyncIterable<LangChainStreamEvent>,
   ): AsyncGenerator<AgentEvent> {
+    let rawEventCount = 0;
     try {
       for await (const lcEvent of langchainEventStream) {
+        rawEventCount++;
+        // 调试日志：直接打印 LangChain 原始事件对象
+        if (rawEventCount <= 30) {
+          const raw = JSON.stringify(lcEvent, null, 0);
+          console.log(`[EventStreamAdapter] 📥 RAW LC事件 #${rawEventCount} (len=${raw.length}):`, raw.slice(0, 1500));
+        } else if (rawEventCount === 31) {
+          console.log(`[EventStreamAdapter] ... 后续事件省略日志输出 ...`);
+        }
+
         // 先输出所有注入的自定义事件
         yield* this.flushInjectedEvents();
 
@@ -118,6 +128,7 @@ export class EventStreamAdapter {
 
       // 流结束后，输出剩余的注入事件
       yield* this.flushInjectedEvents();
+      console.log(`[EventStreamAdapter] 📊 LC事件流结束，共处理 ${rawEventCount} 个原始事件`);
     } catch (error: any) {
       yield createAgentEvent<ErrorEvent>(
         AgentEventType.ERROR,
@@ -231,10 +242,21 @@ export class EventStreamAdapter {
 
   /**
    * 处理 LLM 流式输出事件
+   *
+   * 支持多种 AIMessageChunk 格式：
+   * 1. chunk 为字符串（简单文本）
+   * 2. chunk.content 为字符串（标准格式）
+   * 3. chunk.content 为 ContentBlock[]（多模态/思考模型）
+   * 4. chunk.additional_kwargs.reasoning_content（qwen 思考模型通过 OpenAI 兼容接口）
    */
   private handleLlmStream(lcEvent: LangChainStreamEvent): AgentEvent[] {
-    const chunk = lcEvent.data?.chunk;
+    let chunk = lcEvent.data?.chunk;
     if (!chunk) return [];
+
+    // 处理 LangChain 序列化格式：{ lc: 1, type: "constructor", kwargs: { ... } }
+    if (chunk.lc === 1 && chunk.type === "constructor" && chunk.kwargs) {
+      chunk = chunk.kwargs;
+    }
 
     // LangChain AIMessageChunk 的内容提取
     let text = "";
@@ -242,7 +264,7 @@ export class EventStreamAdapter {
 
     if (typeof chunk === "string") {
       text = chunk;
-    } else if (chunk.content !== undefined) {
+    } else if (chunk.content !== undefined || chunk.additional_kwargs) {
       // AIMessageChunk.content 可能是 string 或 ContentBlock[]
       if (typeof chunk.content === "string") {
         text = chunk.content;
@@ -254,6 +276,12 @@ export class EventStreamAdapter {
             reasoning = (reasoning || "") + (block.text || block.thinking || "");
           }
         }
+      }
+
+      // 支持 qwen 思考模型：reasoning_content 在 additional_kwargs 中
+      // DashScope OpenAI 兼容接口返回的思考内容在此字段
+      if (chunk.additional_kwargs?.reasoning_content) {
+        reasoning = (reasoning || "") + chunk.additional_kwargs.reasoning_content;
       }
     }
 

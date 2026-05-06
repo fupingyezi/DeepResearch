@@ -11,7 +11,7 @@ import { searchWebTool } from "../../tools";
 export const taskHandlerConfig: SubAgentConfig = {
   name: "taskHandler",
   description:
-    "信息处理助手：负责针对单个子任务进行分析与执行，采用 ReAct 推理模式。可使用搜索工具获取网络信息。当需要执行具体的研究子任务（如搜索信息、分析数据）时调用此 Sub-agent。输入应包含任务描述和相关上下文。",
+    "信息处理助手：负责针对单个子任务进行分析与执行，采用 ReAct 推理模式。可使用搜索工具获取网络信息。当需要执行具体的研究子任务（如搜索信息、分析数据）时调用此 Sub-agent。输入的 task 参数格式要求：必须以 JSON 格式传入，包含 taskId（任务编号）和 description（任务描述）字段，例如：{\"taskId\": \"1\", \"description\": \"搜索xxx相关信息\"}。",
   systemPrompt: `你是一个深度研究系统中的信息处理助手，采用 ReAct（Reasoning + Acting）推理模式。你的核心职责是：针对当前分配的子任务（task）进行分析与执行。
 
 你的处理逻辑应遵循以下原则：
@@ -31,8 +31,8 @@ export const taskHandlerConfig: SubAgentConfig = {
 
 最终输出仅为处理后的文本结果，适配支持 $...$ 和 $$...$$ 的 ReactMarkdown 渲染器。`,
   model: {
-    provider: "qwen",
-    model: "qwen-flash",
+    name: "qwen",
+model: "qwen3.6-plus",
   },
   tools: [searchWebTool],
   timeout: 60_000,

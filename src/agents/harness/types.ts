@@ -32,9 +32,9 @@ export interface HarnessConfig {
   agentId: string;
   /** Agent 系统提示词 */
   systemPrompt: string;
-  /** LLM 模型配置（provider + model 名称） */
+  /** LLM 模型配置（name 对应 models.config.ts 中的模型名称） */
   model?: {
-    provider: string;
+    name: string;
     model: string;
     maxTokens?: number;
     temperature?: number;

@@ -10,7 +10,7 @@
  */
 
 import { createAgent, ReactAgent } from "langchain";
-import { buildLLM } from "@/lib";
+import { createChatModel } from "@/lib";
 import {
   AgentEvent,
   AgentEventType,
@@ -33,6 +33,7 @@ import {
   DEFAULT_RECURSION_LIMIT,
 } from "./types";
 import { HooksManager } from "./HooksManager";
+import { SubAgentDispatcher } from "./SubAgentDispatcher";
 
 /**
  * AgentHarness - Agent 运行时容器
@@ -53,6 +54,7 @@ export class AgentHarness {
   protected streamProcessor: StreamProcessor;
   protected abortController: AbortController | null = null;
   protected metrics: HarnessExecutionMetrics;
+  protected subAgentDispatcher: SubAgentDispatcher | null = null;
 
   constructor(config: HarnessConfig, parentContextId?: string, depth: number = 0) {
     this.config = config;
@@ -91,6 +93,14 @@ export class AgentHarness {
   }
 
   /**
+   * 设置关联的 SubAgentDispatcher
+   * 用于在 execute() 中消费 dispatcher 的 pendingEvents 队列
+   */
+  setSubAgentDispatcher(dispatcher: SubAgentDispatcher): void {
+    this.subAgentDispatcher = dispatcher;
+  }
+
+  /**
    * 初始化阶段：创建 Agent 实例，绑定工具沙箱
    */
   async initialize(): Promise<void> {
@@ -102,25 +112,22 @@ export class AgentHarness {
     try {
       // 构建 LLM 实例
       const modelConfig = this.config.model || {
-        provider: "qwen",
-        model: "qwen-flash",
+        name: "qwen",
+        model: "qwen3.6-plus",
       };
 
-      const model = buildLLM(modelConfig.provider as any, {
+      const model = await createChatModel(modelConfig.name || "qwen", {
         model: modelConfig.model,
         maxTokens: modelConfig.maxTokens,
         temperature: modelConfig.temperature,
       });
 
-      // 绑定工具沙箱：仅允许配置中声明的工具
+      // 工具沙箱：仅允许配置中声明的工具
       const tools = this.config.tools || [];
-
-      // 如果有工具，绑定到模型上
-      const boundModel = tools.length > 0 ? model.bindTools(tools) : model;
 
       // 创建 Agent 实例
       this.agentInstance = createAgent({
-        model: boundModel,
+        model: model,
         systemPrompt: this.config.systemPrompt,
         tools: tools.length > 0 ? tools : undefined,
       });
@@ -192,9 +199,16 @@ export class AgentHarness {
       }
 
       // 准备输入
-      const agentInput = typeof input === "string"
-        ? { messages: input }
-        : input;
+      // ReactAgent 期望 messages 为消息数组格式: [{ role: "human", content: "..." }]
+      let agentInput: any;
+      if (typeof input === "string") {
+        agentInput = { messages: [{ role: "human", content: input }] };
+      } else if (input && typeof input.messages === "string") {
+        // 如果传入的是 { messages: "字符串" }，转换为数组格式
+        agentInput = { messages: [{ role: "human", content: input.messages }] };
+      } else {
+        agentInput = input;
+      }
 
       // 使用 streamEvents 处理事件流
       const streamOptions = {
@@ -217,7 +231,15 @@ export class AgentHarness {
         metadata: this.context.metadata,
       });
 
+      console.log(`[AgentHarness] 🚀 开始处理事件流 (agentId: ${this.config.agentId})`);
+      let eventCount = 0;
+
       for await (const agentEvent of adapter.adaptStreamEvents(eventStream)) {
+        eventCount++;
+        // 调试日志：输出每个事件的类型（仅前20个事件）
+        if (eventCount <= 20) {
+          console.log(`[AgentHarness] 📨 事件 #${eventCount}: ${agentEvent.eventType}${agentEvent.eventType === "llm_stream" ? ` (text: "${(agentEvent.payload as any).text?.slice(0, 30)}...")` : ""}`);
+        }
         // 检查是否已超时
         if (this.abortController.signal.aborted) {
           yield createAgentEvent<ErrorEvent>(
@@ -236,6 +258,27 @@ export class AgentHarness {
         this.collectMetrics(agentEvent);
 
         yield agentEvent;
+
+        // 消费 SubAgentDispatcher 的 pendingEvents 队列
+        // 当 dispatchCustomEvent 在 Tool 上下文中失败时，事件会被暂存到队列中
+        if (this.subAgentDispatcher?.hasPendingEvents()) {
+          const pendingEvents = this.subAgentDispatcher.flushPendingEvents();
+          for (const pendingEvent of pendingEvents) {
+            this.collectMetrics(pendingEvent);
+            yield pendingEvent;
+          }
+        }
+      }
+
+      console.log(`[AgentHarness] ✅ 事件流处理完成 (agentId: ${this.config.agentId}, 共 ${eventCount} 个事件)`);
+
+      // 流结束后，再次检查是否有残留的 pendingEvents
+      if (this.subAgentDispatcher?.hasPendingEvents()) {
+        const pendingEvents = this.subAgentDispatcher.flushPendingEvents();
+        for (const pendingEvent of pendingEvents) {
+          this.collectMetrics(pendingEvent);
+          yield pendingEvent;
+        }
       }
 
       // 执行 postExecute Hooks

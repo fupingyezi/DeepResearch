@@ -5,8 +5,8 @@ import {
   createAgentEvent,
   ErrorEvent,
 } from "@/types/agentEvent";
-import { LeadAgentHarness } from "./harness/LeadAgentHarness";
-import { loadAllSubAgents } from "./harness/subagents";
+import { LeadAgentHarness } from "@deerflow-harness/agents";
+import { loadAllSubAgents } from "@deerflow-harness/config";
 
 /**
  * DeepResearchAgentServer - 处理深度研究工作流的 Agent

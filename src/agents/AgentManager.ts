@@ -1,7 +1,7 @@
 import { BaseAgentServer } from "./BaseAgentServer";
 import { AgentEvent } from "@/types/agentEvent";
-import { SubAgentConfig } from "./harness/subagent";
-import { SubAgentRegistry } from "./harness/SubAgentRegistry";
+import { SubAgentConfig } from "@deerflow-harness/agents";
+import { SubAgentRegistry } from "@deerflow-harness/agents";
 
 /**
  * Agent 类型枚举
