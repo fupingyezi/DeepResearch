@@ -1,12 +1,12 @@
-import useConversationStore from "./conversationStore";
-import useDeepResearchProcessStore from "./deepResearchProcessStore";
-import useChatSelectStore from "./chatSelectorStore";
-import useFileUploadStore from "./fileUploadStore";
+import useConversationStore from "./conversation-store";
+import useDeepResearchProcessStore from "./deep-research-process-store";
+import useChatSelectStore from "./chat-selector-store";
+import useFileUploadStore from "./file-upload-store";
 
-import type { ConversationState } from "./conversationStore";
-import type { DeepResearchProcessState } from "./deepResearchProcessStore";
-import type { ChatSelectState, agentMode } from "./chatSelectorStore";
-import type { UploadedFileInfo } from "./fileUploadStore";
+import type { ConversationState } from "./conversation-store";
+import type { DeepResearchProcessState } from "./deep-research-process-store";
+import type { ChatSelectState, agentMode } from "./chat-selector-store";
+import type { UploadedFileInfo } from "./file-upload-store";
 
 export {
   useConversationStore,

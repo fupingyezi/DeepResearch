@@ -1,3 +1,3 @@
-import { searchWebTool } from "./searchWebTool";
+import { searchWebTool } from "./search-web-tool";
 
 export { searchWebTool };

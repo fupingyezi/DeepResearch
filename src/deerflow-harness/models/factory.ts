@@ -9,8 +9,8 @@
 
 import { ModelConfig, CreateModelOptions, ModelNotFoundError } from "./types";
 import { modelConfigs } from "./models.config";
-import { resolveEnvValue } from "./resolveEnv";
-import { resolveClass } from "./classResolver";
+import { resolveEnvValue } from "./resolve-env";
+import { resolveClass } from "./class-resolver";
 import { applyPatches } from "./patches";
 
 /**

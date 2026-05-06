@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createAgentEventSSEStream } from "@/lib/stream/createAgentEventSSEStream";
+import { createAgentEventSSEStream } from "@/lib/stream/create-agent-event-sse-stream";
 import {
   AgentManager,
   AgentType,

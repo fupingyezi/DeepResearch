@@ -21,14 +21,14 @@ import type {
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
-} from "./ChatInfoDefine";
+} from "./chat-info-define";
 
 //函数参数相关
 import type {
   chatWithChatAssistantProps,
   chatWithDeepResearchProps,
   reChatWithAssistantProps,
-} from "./ChatUtilsParams";
+} from "./chat-utils-params";
 
 export {
   FileItemsProps,
@@ -94,4 +94,4 @@ export {
   type HarnessLifecyclePayload,
   type HarnessLifecycleEvent,
   createAgentEvent,
-} from "./agentEvent";
+} from "./agent-event";

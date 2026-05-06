@@ -16,4 +16,4 @@ export {
   taskDecomposerConfig,
   taskHandlerConfig,
   reportGeneratorConfig,
-} from "./subagents";
+} from "./sub-agents";

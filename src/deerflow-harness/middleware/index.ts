@@ -25,7 +25,7 @@ export type {
 } from "./hooks";
 
 // Hooks 管理器
-export { HooksManager } from "./HooksManager";
+export { HooksManager } from "./hooks-manager";
 
 // Hooks 实现
-export { HumanReviewHook, createHumanReviewHook } from "./HumanReviewHook";
+export { HumanReviewHook, createHumanReviewHook } from "./human-review-hook";

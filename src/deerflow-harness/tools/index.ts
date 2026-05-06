@@ -6,4 +6,4 @@
  * @module deerflow-harness/tools
  */
 
-export { searchWebTool } from "./searchWebTool";
+export { searchWebTool } from "./search-web-tool";

@@ -46,14 +46,14 @@ export type {
 } from "./subagent";
 
 // 核心实现类
-export { AgentHarness } from "./AgentHarness";
-export { HooksManager } from "./HooksManager";
-export { SubAgentRegistry } from "./SubAgentRegistry";
-export { SubAgentDispatcher } from "./SubAgentDispatcher";
-export { LeadAgentHarness } from "./LeadAgentHarness";
+export { AgentHarness } from "./agent-harness";
+export { HooksManager } from "./hooks-manager";
+export { SubAgentRegistry } from "./sub-agent-registry";
+export { SubAgentDispatcher } from "./sub-agent-dispatcher";
+export { LeadAgentHarness } from "./lead-agent-harness";
 
 // Hooks 实现
-export { HumanReviewHook, createHumanReviewHook } from "./hooks/HumanReviewHook";
+export { HumanReviewHook, createHumanReviewHook } from "./hooks/human-review-hook";
 
 // Sub-agent 配置加载
 export { loadAllSubAgents } from "./subagents";

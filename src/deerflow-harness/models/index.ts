@@ -8,6 +8,6 @@
  */
 
 export { createChatModel } from "./factory";
-export { loadAndValidateConfig } from "./configLoader";
+export { loadAndValidateConfig } from "./config-loader";
 export type { ModelConfig, CreateModelOptions } from "./types";
 export { ModelResolveError, ModelNotFoundError, ConfigurationError } from "./types";

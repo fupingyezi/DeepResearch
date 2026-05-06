@@ -1,8 +1,8 @@
-import { chatWithChatAssistant } from "./chatWithChatAssistant";
-import { chatWithDeepResearch } from "./chatWithDeepResearch";
-import { chatWithSearhAssistant } from "./chatWithSearchAssistant";
-import { StreamChatConfig, StreamChatHandler } from "./streamChatHandler";
-import { reChatWithAssistant } from "./reChatAssistant";
+import { chatWithChatAssistant } from "./chat-with-chat-assistant";
+import { chatWithDeepResearch } from "./chat-with-deep-research";
+import { chatWithSearhAssistant } from "./chat-with-search-assistant";
+import { StreamChatConfig, StreamChatHandler } from "./stream-chat-handler";
+import { reChatWithAssistant } from "./re-chat-assistant";
 
 export type { StreamChatConfig };
 

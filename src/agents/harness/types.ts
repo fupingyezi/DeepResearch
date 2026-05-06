@@ -5,7 +5,7 @@
  * 包括配置、上下文、生命周期和执行结果。
  */
 
-import { AgentEventMetadata } from "@/types/agentEvent";
+import { AgentEventMetadata } from "@/types/agent-event";
 import { HarnessHook } from "./hooks";
 
 /**

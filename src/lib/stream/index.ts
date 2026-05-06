@@ -1,1 +1,1 @@
-export { createAgentEventSSEStream } from "./createAgentEventSSEStream";
+export { createAgentEventSSEStream } from "./create-agent-event-sse-stream";

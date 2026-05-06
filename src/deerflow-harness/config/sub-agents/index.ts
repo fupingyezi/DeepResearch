@@ -5,7 +5,7 @@
  * 新增 Sub-agent 只需在此目录下创建 .config.ts 文件并在此处导入。
  */
 
-import { SubAgentRegistry } from "../sub-agent-registry";
+import { SubAgentRegistry } from "../../agents/sub-agent-registry";
 import { simpleAnalyserConfig } from "./simple-analyser.config";
 import { taskDecomposerConfig } from "./task-decomposer.config";
 import { taskHandlerConfig } from "./task-handler.config";

@@ -1,4 +1,4 @@
-import ChatWindow from "@/components/ChatWindow/ChatWindow";
+import ChatWindow from "@/components/chat-window/chat-window";
 
 export default function Home() {
   return (

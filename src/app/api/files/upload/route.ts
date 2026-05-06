@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { uploadFile, ensureBucket } from "@/lib";
-import { extractTextFromFile } from "@/lib/fileParser";
+import { extractTextFromFile } from "@/lib/file-parser";
 
 export async function POST(request: NextRequest) {
   let uploadedKey: string | null = null;

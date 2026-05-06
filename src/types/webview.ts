@@ -1,6 +1,6 @@
 import React, { ReactNode } from "react";
-import { ChatMessageType } from "./ChatInfoDefine";
-import { UploadedFile } from "./ChatInfoDefine";
+import { ChatMessageType } from "./chat-info-define";
+import { UploadedFile } from "./chat-info-define";
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;

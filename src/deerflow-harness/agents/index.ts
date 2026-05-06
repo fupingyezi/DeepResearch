@@ -30,7 +30,7 @@ export type {
 } from "./subagent";
 
 // 核心实现类
-export { AgentHarness } from "./AgentHarness";
-export { SubAgentRegistry } from "./SubAgentRegistry";
-export { SubAgentDispatcher } from "./SubAgentDispatcher";
-export { LeadAgentHarness } from "./LeadAgentHarness";
+export { AgentHarness } from "./agent-harness";
+export { SubAgentRegistry } from "./sub-agent-registry";
+export { SubAgentDispatcher } from "./sub-agent-dispatcher";
+export { LeadAgentHarness } from "./lead-agent-harness";
