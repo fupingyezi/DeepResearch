@@ -3,6 +3,5 @@ export * from "./db";
 export * from "./storage";
 export { extractTextFromFile } from "./file-parser";
 
-// 兼容层：从 deerflow-harness/models re-export LLM 相关 API
-export { createChatModel, loadAndValidateConfig, ModelResolveError, ModelNotFoundError, ConfigurationError } from "@deerflow-harness/models";
-export type { ModelConfig, CreateModelOptions } from "@deerflow-harness/models";
+export { createChatModel } from "@deerflow-harness/models";
+export type { ModelConfig } from "@deerflow-harness/types";

@@ -42,3 +42,6 @@ next-env.d.ts
 
 # kiro
 .kiro
+
+# codebuddy
+.codebuddy

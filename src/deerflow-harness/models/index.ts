@@ -1,13 +1,14 @@
-/**
- * Models Module — deerflow-harness
- *
- * 基于反射配置的统一 LLM 模型工厂。
- * 通过配置文件声明模型，运行时动态加载，零硬编码依赖。
- *
- * @module deerflow-harness/models
- */
+import { ModelConfig } from '../types';
+import { ChatOpenAI } from '@langchain/openai';
 
-export { createChatModel } from "./factory";
-export { loadAndValidateConfig } from "./config-loader";
-export type { ModelConfig, CreateModelOptions } from "./types";
-export { ModelResolveError, ModelNotFoundError, ConfigurationError } from "./types";
+export function createChatModel(config: ModelConfig) {
+  return new ChatOpenAI({
+    model: config?.modelName ?? 'qwen3.6-plus',
+    apiKey: config?.apiKey ?? process.env.OPENAI_QWEN_API_KEY,
+    configuration: {
+      baseURL: config?.baseUrl ?? process.env.OPENAI_QWEN_BASE_URL,
+    },
+    streaming: config?.streaming ?? true,
+    temperature: config?.temperature ?? 0.7,
+  });
+}
