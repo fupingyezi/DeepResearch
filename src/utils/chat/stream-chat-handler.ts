@@ -2,17 +2,12 @@ import { ChatMessageType, ChatSessionType } from "@/types";
 import { UUIDTypes, v4 as uuidv4 } from "uuid";
 import apiClient from "../request/api";
 import { deepResearchResultType } from "@/types";
-import { AgentEventType } from "@/types/agent-event";
 import { processStatusType } from "@/store/deep-research-process-store";
+
 import {
-  EventConsumer,
-  createLlmStreamHandler,
-  createStateUpdateHandler,
-  createTaskProgressHandler,
-  createHumanInterruptHandler,
-  createLifecycleHandler,
-  createErrorHandler,
-} from "./event-consumer";
+  createAgentEventStream,
+  ClientAgentEventType,
+} from "@/runtime";
 
 export interface StreamChatConfig {
   apiEndpoint: string;
@@ -200,7 +195,7 @@ export class StreamChatHandler {
       .content as string;
   }
 
-  // 执行SSE
+  // 执行 SSE：基于 runtime 的 createAgentEventStream（async generator）
   private async executeStreamRequest(): Promise<void> {
     try {
       const requestBody: Record<string, any> = {
@@ -210,27 +205,10 @@ export class StreamChatHandler {
         uploadedFiles: this.config.uploadedFiles || [],
         deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
         isResume: this.config.isResume,
+        agentType: this.config.agentType,
       };
 
-      requestBody.agentType = this.config.agentType;
-
-      const response = await fetch(this.config.apiEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-        signal: this.abortController!.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Response body is not readable");
-      }
-
-      await this.processStream(reader);
+      await this.processStreamV2(requestBody);
     } catch (error) {
       await this.handleError(error);
     } finally {
@@ -238,125 +216,100 @@ export class StreamChatHandler {
     }
   }
 
-  private async processStream(
-    reader: ReadableStreamDefaultReader<Uint8Array>
-  ): Promise<void> {
-    await this.processStreamV2(reader);
-  }
-
+  /**
+   * 消费后端 ClientAgentEvent 流
+   *
+   * 直接使用 `createAgentEventStream`（async generator）+ switch 处理事件，
+   * 不再依赖任何中间 EventConsumer / handler 工厂。
+   */
   private async processStreamV2(
-    reader: ReadableStreamDefaultReader<Uint8Array>
+    requestBody: Record<string, any>,
   ): Promise<void> {
-    const consumer = new EventConsumer();
+    const stream = createAgentEventStream({
+      endpoint: this.config.apiEndpoint,
+      body: requestBody,
+      signal: this.abortController!.signal,
+    });
 
-    // 注册 LLM 流式文本处理器
-    consumer.registerHandler(
-      AgentEventType.LLM_STREAM,
-      createLlmStreamHandler((text) => {
-        this.accumulatedContent += text;
+    const dispatchStreamData = (
+      type: string,
+      payload: unknown,
+    ) => {
+      const newContent = this.config.onStreamData?.(
+        { type, payload },
+        this.accumulatedContent,
+      );
+      if (newContent !== undefined) {
+        this.accumulatedContent = newContent;
         this.updateMessages();
-      }),
-    );
+      }
+    };
 
-    // 注册状态更新处理器（用于 DeepResearch）
-    if (this.config.onStreamData) {
-      consumer.registerHandler(
-        AgentEventType.STATE_UPDATE,
-        createStateUpdateHandler({
-          onSimpleAnalysis: (data) => {
-            const newContent = this.config.onStreamData?.({
-              type: "start_analyse",
-              payload: data,
-            }, this.accumulatedContent);
-            if (newContent !== undefined) {
-              this.accumulatedContent = newContent;
-              this.updateMessages();
-            }
-          },
-          onTasksInitial: (data) => {
-            const newContent = this.config.onStreamData?.({
-              type: "tasks_initial",
-              payload: data,
-            }, this.accumulatedContent);
-            if (newContent !== undefined) {
-              this.accumulatedContent = newContent;
-              this.updateMessages();
-            }
-          },
-          onTaskUpdate: (data) => {
-            const newContent = this.config.onStreamData?.({
-              type: "task_update",
-              payload: data,
-            }, this.accumulatedContent);
-            if (newContent !== undefined) {
-              this.accumulatedContent = newContent;
-              this.updateMessages();
-            }
-          },
-          onReport: (data) => {
-            const newContent = this.config.onStreamData?.({
-              type: "report",
-              payload: data,
-            }, this.accumulatedContent);
-            if (newContent !== undefined) {
-              this.accumulatedContent = newContent;
-              this.updateMessages();
-            }
-          },
-        }),
-      );
+    for await (const event of stream) {
+      switch (event.eventType) {
+        case ClientAgentEventType.STREAM_CHUNK: {
+          this.accumulatedContent += event.payload.text;
+          this.updateMessages();
+          break;
+        }
 
-      // 注册任务进度处理器
-      consumer.registerHandler(
-        AgentEventType.TASK_PROGRESS,
-        createTaskProgressHandler((payload) => {
-          const newContent = this.config.onStreamData?.({
-            type: "task_update",
-            payload: payload,
-          }, this.accumulatedContent);
-          if (newContent !== undefined) {
-            this.accumulatedContent = newContent;
-            this.updateMessages();
-          }
-        }),
-      );
+        case ClientAgentEventType.STATE_UPDATE: {
+          if (!this.config.onStreamData) break;
+          const { stateType, data } = event.payload;
+          // simple_analysis → start_analyse；其余按 stateType 直接转发
+          const dispatchType =
+            stateType === "simple_analysis" ? "start_analyse" : stateType;
+          dispatchStreamData(dispatchType, data);
+          break;
+        }
 
-      // 注册人工中断处理器
-      consumer.registerHandler(
-        AgentEventType.HUMAN_INTERRUPT,
-        createHumanInterruptHandler((payload) => {
-          const newContent = this.config.onStreamData?.({
-            type: "interrupt",
-            payload: payload,
-          }, this.accumulatedContent);
-          if (newContent !== undefined) {
-            this.accumulatedContent = newContent;
-            this.updateMessages();
-          }
-        }),
-      );
+        case ClientAgentEventType.TASK_PROGRESS: {
+          if (!this.config.onStreamData) break;
+          dispatchStreamData("task_update", event.payload);
+          break;
+        }
+
+        case ClientAgentEventType.HUMAN_INTERRUPT: {
+          if (!this.config.onStreamData) break;
+          dispatchStreamData("interrupt", event.payload);
+          break;
+        }
+
+        case ClientAgentEventType.TOOL_CALL:
+        case ClientAgentEventType.TOOL_RESULT: {
+          // 工具调用展示能力暂未在 StreamChatHandler 中使用，先忽略
+          break;
+        }
+
+        case ClientAgentEventType.ERROR: {
+          console.error(
+            "[StreamChatHandler] stream error:",
+            event.payload.errorMessage,
+          );
+          // 抛出以走 handleError 分支
+          throw Object.assign(
+            new Error(event.payload.errorMessage),
+            { name: event.payload.errorCode },
+          );
+        }
+
+        case ClientAgentEventType.START:
+        case ClientAgentEventType.HEARTBEAT:
+          // start / heartbeat 仅作保活，不需 UI 处理
+          break;
+
+        case ClientAgentEventType.END: {
+          console.log("[StreamChatHandler] stream completed");
+          return;
+        }
+
+        default: {
+          // exhaustive check
+          const _never: never = event;
+          void _never;
+        }
+      }
     }
-
-    // 注册生命周期处理器
-    consumer.registerHandler(
-      AgentEventType.LIFECYCLE,
-      createLifecycleHandler({
-        onDone: () => {
-          console.log("Stream completed");
-        },
-      }),
-    );
-
-    // 注册错误处理器
-    consumer.registerHandler(
-      AgentEventType.ERROR,
-      createErrorHandler((payload) => {
-        console.error("Stream error:", payload.errorMessage);
-      }),
-    );
-
-    // 使用 EventConsumer 消费 SSE 流
-    await consumer.consumeSSEStream(reader);
   }
 
   // 更新UI
@@ -371,7 +324,7 @@ export class StreamChatHandler {
 
   //处理中断和错误
   private async handleError(error: any): Promise<void> {
-    if (error.name === "AbortError") {
+    if (error.name === "AbortError" || error.name === "AGENT_STREAM_ABORTED") {
       console.log("Chat was Interrupted by user");
       if (this.config.onStreamComplete) {
         //自定义结束处理
@@ -454,7 +407,6 @@ export class StreamChatHandler {
         );
       }
     }
-    // console.log("deepresearch:", this.deepResearchResult);
 
     try {
       if (this.config.callingMode === "direct") {

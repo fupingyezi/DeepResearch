@@ -1,43 +1,33 @@
-/**
- * 统一事件协议类型系统
- *
- * 所有 Agent（Chat、Search、DeepResearch）产生的输出都遵循此统一事件协议格式，
- * 前后端可以用同一套逻辑处理所有类型的 Agent 事件流。
- */
-
-/**
- * Agent 事件类型枚举
- * 通过 TypeScript 可辨识联合类型（Discriminated Union）实现类型安全
- */
+/** 事件类型 */
 export enum AgentEventType {
   /** LLM 文本流式输出 */
-  LLM_STREAM = "llm_stream",
+  LLM_STREAM = 'llm_stream',
   /** LLM 输出完成 */
-  LLM_COMPLETE = "llm_complete",
+  LLM_COMPLETE = 'llm_complete',
   /** 工具调用开始 */
-  TOOL_CALL_START = "tool_call_start",
+  TOOL_CALL_START = 'tool_call_start',
   /** 工具调用结果 */
-  TOOL_CALL_RESULT = "tool_call_result",
+  TOOL_CALL_RESULT = 'tool_call_result',
   /** 状态变更 */
-  STATE_UPDATE = "state_update",
+  STATE_UPDATE = 'state_update',
   /** 人工中断 */
-  HUMAN_INTERRUPT = "human_interrupt",
+  HUMAN_INTERRUPT = 'human_interrupt',
   /** 人工恢复 */
-  HUMAN_RESUME = "human_resume",
+  HUMAN_RESUME = 'human_resume',
   /** 错误 */
-  ERROR = "error",
+  ERROR = 'error',
   /** 生命周期事件（start / done） */
-  LIFECYCLE = "lifecycle",
+  LIFECYCLE = 'lifecycle',
   /** 工作流节点进入 */
-  NODE_ENTER = "node_enter",
+  NODE_ENTER = 'node_enter',
   /** 工作流节点退出 */
-  NODE_EXIT = "node_exit",
+  NODE_EXIT = 'node_exit',
   /** 任务进度更新 */
-  TASK_PROGRESS = "task_progress",
+  TASK_PROGRESS = 'task_progress',
   /** Sub-agent 调度事件 */
-  SUB_AGENT_DISPATCH = "sub_agent_dispatch",
+  SUB_AGENT_DISPATCH = 'sub_agent_dispatch',
   /** Harness 生命周期事件 */
-  HARNESS_LIFECYCLE = "harness_lifecycle",
+  HARNESS_LIFECYCLE = 'harness_lifecycle',
 }
 
 /** LLM 流式文本 payload */
@@ -89,12 +79,12 @@ export interface ToolCallResultPayload {
 export interface StateUpdatePayload {
   /** 状态变更的子类型，用于前端精确分发 */
   stateType:
-    | "simple_analysis"
-    | "tasks_initial"
-    | "task_update"
-    | "report"
-    | "research_target"
-    | "custom";
+    | 'simple_analysis'
+    | 'tasks_initial'
+    | 'task_update'
+    | 'report'
+    | 'research_target'
+    | 'custom';
   /** 状态数据 */
   data: any;
 }
@@ -128,7 +118,7 @@ export interface ErrorPayload {
 /** 生命周期 payload */
 export interface LifecyclePayload {
   /** 生命周期阶段 */
-  stage: "start" | "done";
+  stage: 'start' | 'done';
   /** 时间戳 */
   timestamp: number;
 }
@@ -172,7 +162,7 @@ export interface SubAgentDispatchPayload {
   /** 任务描述 */
   task: string;
   /** 调度状态 */
-  status: "dispatched" | "running" | "completed" | "failed";
+  status: 'dispatched' | 'running' | 'completed' | 'failed';
   /** 执行结果（完成时） */
   result?: string;
   /** 错误信息（失败时） */
@@ -186,9 +176,9 @@ export interface HarnessLifecyclePayload {
   /** Harness 实例 ID */
   harnessId: string;
   /** 生命周期阶段 */
-  phase: "initialize" | "execute" | "cleanup";
+  phase: 'initialize' | 'execute' | 'cleanup';
   /** 阶段状态 */
-  status: "start" | "complete" | "error";
+  status: 'start' | 'complete' | 'error';
   /** 嵌套深度（0 = Lead Agent） */
   depth: number;
   /** 时间戳 */
@@ -311,12 +301,6 @@ export interface HarnessLifecycleEvent extends BaseAgentEvent {
  *   console.log(event.payload.text);
  * }
  * ```
- *
- * 扩展新事件类型时，只需：
- * 1. 在 AgentEventType 枚举中添加新值
- * 2. 定义新的 Payload 接口
- * 3. 定义新的 Event 接口（extends BaseAgentEvent）
- * 4. 将新 Event 接口添加到此联合类型中
  */
 export type AgentEvent =
   | LlmStreamEvent
@@ -345,9 +329,9 @@ export type AgentEventStream = AsyncGenerator<AgentEvent>;
  * @param metadata 可选元数据
  */
 export function createAgentEvent<T extends AgentEvent>(
-  eventType: T["eventType"],
+  eventType: T['eventType'],
   agentId: string,
-  payload: T["payload"],
+  payload: T['payload'],
   metadata?: AgentEventMetadata,
 ): T {
   return {

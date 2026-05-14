@@ -31,3 +31,5 @@ export interface ClientOptions {
 export type AgentConfigKey = string;
 
 export type StreamEventType = 'values' | 'messages' | 'custom' | 'end';
+
+export * from './agent-event';

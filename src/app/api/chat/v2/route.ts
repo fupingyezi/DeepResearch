@@ -1,13 +1,12 @@
 /**
- * v2 统一 API 路由 — 最小可运行版本
+ * v2 统一 API 路由
  *
  * 通过 DeerFlowClient.stream() 处理所有请求，
  * 输出统一 AgentEvent 格式的 SSE 流。
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createAgentEventSSEStream } from '@/lib/stream/create-agent-event-sse-stream';
-import { DeerFlowClient } from '@/deerflow-harness';
+import { DeerFlowClient, createSseStream } from '@/deerflow-harness';
 
 /**
  * 单例 DeerFlowClient
@@ -32,10 +31,7 @@ export async function POST(request: NextRequest) {
     const { input, sessionId } = body;
 
     if (!input) {
-      return NextResponse.json(
-        { error: 'Missing input' },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: 'Missing input' }, { status: 400 });
     }
 
     const deerflow = getClient();
@@ -43,7 +39,7 @@ export async function POST(request: NextRequest) {
       sessionId,
     });
 
-    const readableStream = createAgentEventSSEStream(request, eventStream);
+    const readableStream = createSseStream(request, eventStream);
 
     return new Response(readableStream, {
       headers: {
@@ -54,9 +50,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Error in v2 chat API:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
