@@ -5,6 +5,7 @@ import { BaseCheckpointSaver } from '@langchain/langgraph';
 import { ThreadStateAnnotation } from './thread-state';
 import { RuntimeFeatures, DEFAULT_FEATURES } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
+import { taskTool } from '../tools';
 import {
   threadDataMiddleware,
   uploadsMiddleware,
@@ -59,16 +60,29 @@ export function createBaseAgent(opts: CreateAgentOptions) {
   }
 
   let effectiveMiddlewares: AgentMiddleware[] = [];
+  let effectiveTools: StructuredToolInterface[] = tools;
 
   if (middlewares) {
     effectiveMiddlewares = middlewares;
   } else {
     const feat = features ? features : DEFAULT_FEATURES;
-    effectiveMiddlewares = assembleFromFeatures(feat, {
+    const { chain, extraTools } = assembleFromFeatures(feat, {
       planMode: opts.planMode,
       extraMiddlewares,
       provider,
-    }).chain;
+    });
+    effectiveMiddlewares = chain;
+    if (extraTools.length > 0) {
+      // 去重合并：按工具 name，避免 caller 已显式传入同名工具时重复注册
+      const seen = new Set<string>();
+      effectiveTools = [];
+      for (const t of [...tools, ...extraTools]) {
+        const n = (t as { name?: string }).name;
+        if (n && seen.has(n)) continue;
+        if (n) seen.add(n);
+        effectiveTools.push(t);
+      }
+    }
   }
 
   // 统一为所有中间件包一层调用日志（受 env MW_TRACE 控制，默认开启）。
@@ -78,10 +92,15 @@ export function createBaseAgent(opts: CreateAgentOptions) {
       .map((m) => (m as { name?: string }).name ?? '?')
       .join(', ')}`,
   );
+  console.log(
+    `[agent] tools bound to LLM (${effectiveTools.length}): ${effectiveTools
+      .map((t) => (t as { name?: string }).name ?? '?')
+      .join(', ')}`,
+  );
 
   return createAgent({
     model,
-    tools,
+    tools: effectiveTools,
     stateSchema: ThreadStateAnnotation,
     ...(systemPrompt ? { systemPrompt } : {}),
     ...(checkpointer ? { checkpointer } : {}),
@@ -119,6 +138,11 @@ export function assembleFromFeatures(
 
   // [13] ClarificationMiddleware (始终最后)
   chain.push(clarificationMiddleware);
+
+  // subagent 工具化注入lead Agent
+  if (features.subagent === true) {
+    extraTools.push(taskTool as StructuredToolInterface);
+  }
 
   return { chain, extraTools };
 }

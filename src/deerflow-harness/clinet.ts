@@ -73,10 +73,18 @@ export class DeerFlowClient {
       systemPrompt: this.systemPrompt,
       checkpointer: this.checkpointer,
       provider,
+      features: {
+        subagent: this.options.subagentEnabled === true,
+      },
     });
 
     this.agentConfigKey = key;
-    console.log(`[DeerFlowClient] Agent created/rebuilt (name=${this.options.agentName})`);
+    const builtinNames = this.tools.map((t) => (t as { name?: string }).name ?? '?').join(', ');
+    console.log(
+      `[DeerFlowClient] Agent created/rebuilt (name=${this.options.agentName}, ` +
+        `subagentEnabled=${this.options.subagentEnabled === true}, ` +
+        `caller-tools=[${builtinNames}])`,
+    );
   }
 
   /**
@@ -121,9 +129,10 @@ export class DeerFlowClient {
       // streamMode:
       //  - "messages": AI token / tool_call 分片
       //  - "updates":  节点 state delta，承载 ToolMessage
+      //  - "custom":   工具内部通过 LangGraph writer 推送的自定义事件（subagent task_*）
       const stream = await this.agent!.stream(input, {
         ...config,
-        streamMode: ['messages', 'updates'],
+        streamMode: ['messages', 'updates', 'custom'],
       });
 
       // OpenAI 兼容流：tool_call 的 args 按 index 分片到达，需累加后再 emit。
@@ -209,8 +218,97 @@ export class DeerFlowClient {
         );
       };
 
+      // 把 task-tool 通过 LangGraph custom writer 推送的 task_* payload 转成 AgentEvent
+      const handleCustomPayload = function* (raw: any) {
+        if (!raw || typeof raw !== 'object') return;
+        const t = raw.type;
+        const taskId: string = raw.task_id ?? '';
+        const meta = { sessionId: effectiveThreadId, ...metadata };
+
+        switch (t) {
+          case 'task_started':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_STARTED,
+                agentId,
+                {
+                  taskId,
+                  description: raw.description,
+                  subagentType: raw.subagent_type,
+                },
+                meta,
+              ),
+            );
+            return;
+          case 'task_running':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_RUNNING,
+                agentId,
+                {
+                  taskId,
+                  message: raw.message,
+                  messageIndex: raw.message_index ?? 0,
+                  totalMessages: raw.total_messages ?? 0,
+                },
+                meta,
+              ),
+            );
+            return;
+          case 'task_completed':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_COMPLETED,
+                agentId,
+                { taskId, result: raw.result ?? null },
+                meta,
+              ),
+            );
+            return;
+          case 'task_failed':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_FAILED,
+                agentId,
+                { taskId, error: raw.error ?? null },
+                meta,
+              ),
+            );
+            return;
+          case 'task_cancelled':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_CANCELLED,
+                agentId,
+                { taskId, error: raw.error ?? null },
+                meta,
+              ),
+            );
+            return;
+          case 'task_timed_out':
+            yield emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_TIMED_OUT,
+                agentId,
+                { taskId, error: raw.error ?? null },
+                meta,
+              ),
+            );
+            return;
+          default:
+            // 未识别的 custom payload 直接忽略，避免污染前端事件流
+            if (debug) console.log('[custom payload ignored]', raw);
+            return;
+        }
+      };
+
       for await (const chunk of stream) {
         const [mode, payload] = chunk as [string, any];
+
+        if (mode === 'custom') {
+          yield* handleCustomPayload(payload);
+          continue;
+        }
 
         if (mode === 'messages') {
           const [msgChunk] = payload as [any, any];

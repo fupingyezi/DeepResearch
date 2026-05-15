@@ -56,3 +56,5 @@ export interface AgentState {
   messages: Message[];
   [key: string]: any;
 }
+
+export * from './subagent';

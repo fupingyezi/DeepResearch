@@ -16,11 +16,14 @@ let client: DeerFlowClient | null = null;
 
 function getClient(): DeerFlowClient {
   if (!client) {
-    client = new DeerFlowClient({
-      modelName: process.env.OPENAI_MODEL_NAME ?? 'qwen3.6-plus',
-      apiKey: process.env.OPENAI_QWEN_API_KEY,
-      baseUrl: process.env.OPENAI_QWEN_BASE_URL,
-    });
+    client = new DeerFlowClient(
+      {
+        modelName: process.env.OPENAI_MODEL_NAME ?? 'qwen3.6-plus',
+        apiKey: process.env.OPENAI_QWEN_API_KEY,
+        baseUrl: process.env.OPENAI_QWEN_BASE_URL,
+      },
+      { subagentEnabled: true },
+    );
   }
   return client;
 }

@@ -28,6 +28,18 @@ export enum AgentEventType {
   SUB_AGENT_DISPATCH = 'sub_agent_dispatch',
   /** Harness 生命周期事件 */
   HARNESS_LIFECYCLE = 'harness_lifecycle',
+  /** Subagent task 已启动 */
+  TASK_STARTED = 'task_started',
+  /** Subagent task 运行中（每条 AI 消息一次） */
+  TASK_RUNNING = 'task_running',
+  /** Subagent task 已成功完成 */
+  TASK_COMPLETED = 'task_completed',
+  /** Subagent task 执行失败 */
+  TASK_FAILED = 'task_failed',
+  /** Subagent task 被取消 */
+  TASK_CANCELLED = 'task_cancelled',
+  /** Subagent task 超时 */
+  TASK_TIMED_OUT = 'task_timed_out',
 }
 
 /** LLM 流式文本 payload */
@@ -187,6 +199,55 @@ export interface HarnessLifecyclePayload {
   errorMessage?: string;
 }
 
+/** Subagent task 启动 payload */
+export interface TaskStartedPayload {
+  /** Task 唯一 ID（建议用 tool_call_id 或 traceId） */
+  taskId: string;
+  /** 任务简短描述（lead agent 调用时透传） */
+  description?: string;
+  /** subagent 类型名 */
+  subagentType?: string;
+}
+
+/** Subagent task 运行中（增量 AI 消息）payload */
+export interface TaskRunningPayload {
+  taskId: string;
+  /** 当前增量 AI 消息（结构化 JSON，前端可按需展示） */
+  message: unknown;
+  /** 当前是第几条（从 1 开始） */
+  messageIndex: number;
+  /** 截至目前累计的消息数 */
+  totalMessages: number;
+}
+
+/** Subagent task 完成 payload */
+export interface TaskCompletedPayload {
+  taskId: string;
+  /** 文本结果（subagent 最终输出）；可能为 null */
+  result: string | null;
+}
+
+/** Subagent task 失败 payload */
+export interface TaskFailedPayload {
+  taskId: string;
+  /** 错误描述 */
+  error: string | null;
+}
+
+/** Subagent task 取消 payload */
+export interface TaskCancelledPayload {
+  taskId: string;
+  /** 取消原因（可选） */
+  error?: string | null;
+}
+
+/** Subagent task 超时 payload */
+export interface TaskTimedOutPayload {
+  taskId: string;
+  /** 错误描述（可选） */
+  error?: string | null;
+}
+
 /** 事件元数据 */
 export interface AgentEventMetadata {
   /** 会话 ID */
@@ -291,6 +352,42 @@ export interface HarnessLifecycleEvent extends BaseAgentEvent {
   payload: HarnessLifecyclePayload;
 }
 
+/** Subagent task 启动事件 */
+export interface TaskStartedEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_STARTED;
+  payload: TaskStartedPayload;
+}
+
+/** Subagent task 运行中事件 */
+export interface TaskRunningEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_RUNNING;
+  payload: TaskRunningPayload;
+}
+
+/** Subagent task 完成事件 */
+export interface TaskCompletedEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_COMPLETED;
+  payload: TaskCompletedPayload;
+}
+
+/** Subagent task 失败事件 */
+export interface TaskFailedEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_FAILED;
+  payload: TaskFailedPayload;
+}
+
+/** Subagent task 取消事件 */
+export interface TaskCancelledEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_CANCELLED;
+  payload: TaskCancelledPayload;
+}
+
+/** Subagent task 超时事件 */
+export interface TaskTimedOutEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TASK_TIMED_OUT;
+  payload: TaskTimedOutPayload;
+}
+
 /**
  * 统一 Agent 事件类型（可辨识联合类型）
  *
@@ -316,7 +413,13 @@ export type AgentEvent =
   | NodeExitEvent
   | TaskProgressEvent
   | SubAgentDispatchEvent
-  | HarnessLifecycleEvent;
+  | HarnessLifecycleEvent
+  | TaskStartedEvent
+  | TaskRunningEvent
+  | TaskCompletedEvent
+  | TaskFailedEvent
+  | TaskCancelledEvent
+  | TaskTimedOutEvent;
 
 /** Agent 事件流类型 */
 export type AgentEventStream = AsyncGenerator<AgentEvent>;

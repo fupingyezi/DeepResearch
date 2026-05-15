@@ -117,6 +117,45 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
         errorMessage: event.payload.errorMessage,
       });
 
+    case AgentEventType.TASK_STARTED:
+      return createClientAgentEvent(ClientAgentEventType.TASK_STARTED, agentId, {
+        taskId: event.payload.taskId,
+        description: event.payload.description,
+        subagentType: event.payload.subagentType,
+      });
+
+    case AgentEventType.TASK_RUNNING:
+      return createClientAgentEvent(ClientAgentEventType.TASK_RUNNING, agentId, {
+        taskId: event.payload.taskId,
+        message: event.payload.message,
+        messageIndex: event.payload.messageIndex,
+        totalMessages: event.payload.totalMessages,
+      });
+
+    case AgentEventType.TASK_COMPLETED:
+      return createClientAgentEvent(ClientAgentEventType.TASK_COMPLETED, agentId, {
+        taskId: event.payload.taskId,
+        result: event.payload.result,
+      });
+
+    case AgentEventType.TASK_FAILED:
+      return createClientAgentEvent(ClientAgentEventType.TASK_FAILED, agentId, {
+        taskId: event.payload.taskId,
+        error: event.payload.error,
+      });
+
+    case AgentEventType.TASK_CANCELLED:
+      return createClientAgentEvent(ClientAgentEventType.TASK_CANCELLED, agentId, {
+        taskId: event.payload.taskId,
+        error: event.payload.error,
+      });
+
+    case AgentEventType.TASK_TIMED_OUT:
+      return createClientAgentEvent(ClientAgentEventType.TASK_TIMED_OUT, agentId, {
+        taskId: event.payload.taskId,
+        error: event.payload.error,
+      });
+
     case AgentEventType.ERROR:
       return createClientAgentEvent(ClientAgentEventType.ERROR, agentId, {
         errorCode: event.payload.errorCode,

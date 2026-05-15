@@ -5,7 +5,7 @@ import { AIMessage } from '@langchain/core/messages';
  * QwenToolCallRecoveryMiddleware
  *
  * 在 model 调用出口观察并修复 Qwen/DashScope 返回的 AIMessage：
- *  1. 当 `tool_calls` 为空但 `additional_kwargs.tool_calls` 有内容时，
+ * 当 `tool_calls` 为空但 `additional_kwargs.tool_calls` 有内容时，
  *     解析 raw payload 并回填到规范化字段。
  */
 

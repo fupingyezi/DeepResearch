@@ -13,6 +13,12 @@ export enum ClientAgentEventType {
   NODE_EXIT = 'node_exit',
   SUB_AGENT_DISPATCH = 'sub_agent_dispatch',
   HARNESS_LIFECYCLE = 'harness_lifecycle',
+  TASK_STARTED = 'task_started',
+  TASK_RUNNING = 'task_running',
+  TASK_COMPLETED = 'task_completed',
+  TASK_FAILED = 'task_failed',
+  TASK_CANCELLED = 'task_cancelled',
+  TASK_TIMED_OUT = 'task_timed_out',
   ERROR = 'error',
   END = 'end',
   HEARTBEAT = 'heartbeat',
@@ -116,6 +122,34 @@ export interface HarnessLifecyclePayload {
   errorMessage?: string;
 }
 
+export interface TaskStartedClientPayload {
+  taskId: string;
+  description?: string;
+  subagentType?: string;
+}
+export interface TaskRunningClientPayload {
+  taskId: string;
+  message: unknown;
+  messageIndex: number;
+  totalMessages: number;
+}
+export interface TaskCompletedClientPayload {
+  taskId: string;
+  result: string | null;
+}
+export interface TaskFailedClientPayload {
+  taskId: string;
+  error: string | null;
+}
+export interface TaskCancelledClientPayload {
+  taskId: string;
+  error?: string | null;
+}
+export interface TaskTimedOutClientPayload {
+  taskId: string;
+  error?: string | null;
+}
+
 export type EndPayload = Record<string, never>;
 export type HeartbeatPayload = Record<string, never>;
 
@@ -176,6 +210,30 @@ export interface HarnessLifecycleEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.HARNESS_LIFECYCLE;
   payload: HarnessLifecyclePayload;
 }
+export interface TaskStartedClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_STARTED;
+  payload: TaskStartedClientPayload;
+}
+export interface TaskRunningClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_RUNNING;
+  payload: TaskRunningClientPayload;
+}
+export interface TaskCompletedClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_COMPLETED;
+  payload: TaskCompletedClientPayload;
+}
+export interface TaskFailedClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_FAILED;
+  payload: TaskFailedClientPayload;
+}
+export interface TaskCancelledClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_CANCELLED;
+  payload: TaskCancelledClientPayload;
+}
+export interface TaskTimedOutClientEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_TIMED_OUT;
+  payload: TaskTimedOutClientPayload;
+}
 export interface ErrorEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.ERROR;
   payload: ErrorPayload;
@@ -204,6 +262,12 @@ export type ClientAgentEvent =
   | NodeExitEvent
   | SubAgentDispatchEvent
   | HarnessLifecycleEvent
+  | TaskStartedClientEvent
+  | TaskRunningClientEvent
+  | TaskCompletedClientEvent
+  | TaskFailedClientEvent
+  | TaskCancelledClientEvent
+  | TaskTimedOutClientEvent
   | ErrorEvent
   | EndEvent
   | HeartbeatEvent;
