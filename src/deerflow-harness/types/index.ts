@@ -1,6 +1,8 @@
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { BaseCheckpointSaver } from '@langchain/langgraph';
+import { AgentMiddleware, createAgent } from 'langchain';
+import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 
 export interface ModelConfig {
   modelName: string;
@@ -24,6 +26,12 @@ export interface ClientOptions {
   availableSkills?: string[];
 }
 
+export interface AssembelOptions {
+  name?: string;
+  planMode?: boolean;
+  extraMiddlewares?: AgentMiddleware[];
+}
+
 /**
  * 缓存键类型 — 用于判断 agent 是否需要重建。
  * 只有"影响 agent 形态"的参数才纳入 key。
@@ -33,3 +41,10 @@ export type AgentConfigKey = string;
 export type StreamEventType = 'values' | 'messages' | 'custom' | 'end';
 
 export * from './agent-event';
+
+export type Message = HumanMessage | ToolMessage | AIMessage | { type: string; content: string };
+
+export interface AgentState {
+  messages: Message[];
+  [key: string]: any;
+}
