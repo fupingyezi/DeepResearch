@@ -2,11 +2,17 @@
 export enum ClientAgentEventType {
   START = 'start',
   STREAM_CHUNK = 'stream_chunk',
+  LLM_COMPLETE = 'llm_complete',
   TOOL_CALL = 'tool_call',
   TOOL_RESULT = 'tool_result',
   STATE_UPDATE = 'state_update',
   TASK_PROGRESS = 'task_progress',
   HUMAN_INTERRUPT = 'human_interrupt',
+  HUMAN_RESUME = 'human_resume',
+  NODE_ENTER = 'node_enter',
+  NODE_EXIT = 'node_exit',
+  SUB_AGENT_DISPATCH = 'sub_agent_dispatch',
+  HARNESS_LIFECYCLE = 'harness_lifecycle',
   ERROR = 'error',
   END = 'end',
   HEARTBEAT = 'heartbeat',
@@ -67,6 +73,49 @@ export interface ErrorPayload {
   recoverable: boolean;
 }
 
+export interface LlmCompletePayload {
+  fullText?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+    totalCost?: number;
+  };
+}
+
+export interface HumanResumePayload {
+  decision: string;
+  resumeTarget?: string;
+}
+
+export interface NodeEnterPayload {
+  nodeName: string;
+  inputSummary?: Record<string, unknown>;
+}
+
+export interface NodeExitPayload {
+  nodeName: string;
+  outputDelta?: Record<string, unknown>;
+}
+
+export interface SubAgentDispatchPayload {
+  subAgentName: string;
+  task: string;
+  status: 'dispatched' | 'running' | 'completed' | 'failed';
+  result?: string;
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+export interface HarnessLifecyclePayload {
+  harnessId: string;
+  phase: 'initialize' | 'execute' | 'cleanup';
+  status: 'start' | 'complete' | 'error';
+  depth: number;
+  timestamp: number;
+  errorMessage?: string;
+}
+
 export type EndPayload = Record<string, never>;
 export type HeartbeatPayload = Record<string, never>;
 
@@ -82,6 +131,10 @@ export interface StartEvent extends BaseClientAgentEvent {
 export interface StreamChunkEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.STREAM_CHUNK;
   payload: StreamChunkPayload;
+}
+export interface LlmCompleteEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.LLM_COMPLETE;
+  payload: LlmCompletePayload;
 }
 export interface ToolCallEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.TOOL_CALL;
@@ -103,6 +156,26 @@ export interface HumanInterruptEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.HUMAN_INTERRUPT;
   payload: HumanInterruptPayload;
 }
+export interface HumanResumeEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.HUMAN_RESUME;
+  payload: HumanResumePayload;
+}
+export interface NodeEnterEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.NODE_ENTER;
+  payload: NodeEnterPayload;
+}
+export interface NodeExitEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.NODE_EXIT;
+  payload: NodeExitPayload;
+}
+export interface SubAgentDispatchEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.SUB_AGENT_DISPATCH;
+  payload: SubAgentDispatchPayload;
+}
+export interface HarnessLifecycleEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.HARNESS_LIFECYCLE;
+  payload: HarnessLifecyclePayload;
+}
 export interface ErrorEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.ERROR;
   payload: ErrorPayload;
@@ -120,11 +193,17 @@ export interface HeartbeatEvent extends BaseClientAgentEvent {
 export type ClientAgentEvent =
   | StartEvent
   | StreamChunkEvent
+  | LlmCompleteEvent
   | ToolCallEvent
   | ToolResultEvent
   | StateUpdateEvent
   | TaskProgressEvent
   | HumanInterruptEvent
+  | HumanResumeEvent
+  | NodeEnterEvent
+  | NodeExitEvent
+  | SubAgentDispatchEvent
+  | HarnessLifecycleEvent
   | ErrorEvent
   | EndEvent
   | HeartbeatEvent;

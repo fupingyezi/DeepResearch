@@ -13,6 +13,7 @@ export interface RuntimeFeatures {
   vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
   guardrail?: FeatureToggle; // 不允许 true
+  qwenToolCallRecovery?: FeatureToggle;
 }
 
 export const DEFAULT_FEATURES: RuntimeFeatures = {

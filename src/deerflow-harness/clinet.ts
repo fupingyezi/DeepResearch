@@ -3,7 +3,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { BaseCheckpointSaver } from '@langchain/langgraph';
 
-import { createChatModel } from './models';
+import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
 import { SYSTEM_PROMPT } from './agents/lead-agent';
 import { searchWebTool } from './tools';
@@ -60,17 +60,19 @@ export class DeerFlowClient {
     const key = buildConfigKey(this.modelConfig, this.options);
 
     if (this.agent !== null && this.agentConfigKey === key) {
-      return; // cache hit
+      return;
     }
 
     // cache miss → 重建
     const model = createChatModel(this.modelConfig);
+    const provider = inferProvider(this.modelConfig);
 
     this.agent = createBaseAgent({
       model,
       tools: this.tools,
       systemPrompt: this.systemPrompt,
       checkpointer: this.checkpointer,
+      provider,
     });
 
     this.agentConfigKey = key;
@@ -116,67 +118,145 @@ export class DeerFlowClient {
         },
       };
 
-      // 4. 调用 agent.stream() — streamMode "messages" 提供逐 token 流
+      // streamMode:
+      //  - "messages": AI token / tool_call 分片
+      //  - "updates":  节点 state delta，承载 ToolMessage
       const stream = await this.agent!.stream(input, {
         ...config,
-        streamMode: 'messages',
+        streamMode: ['messages', 'updates'],
       });
 
-      for await (const [msgChunk, _metadata] of stream) {
-        // AI message chunk → LLM_STREAM
-        if (msgChunk._getType() === 'ai') {
-          const content = typeof msgChunk.content === 'string' ? msgChunk.content : '';
+      // OpenAI 兼容流：tool_call 的 args 按 index 分片到达，需累加后再 emit。
+      type ToolCallAcc = {
+        toolCallId: string;
+        toolName: string;
+        argsBuffer: string;
+        startEmitted: boolean;
+      };
+      const toolCallsByIndex = new Map<number, ToolCallAcc>();
+      const toolCallsById = new Map<string, ToolCallAcc>();
+      const debug = process.env.NODE_ENV !== 'production';
 
-          if (content) {
-            yield emit(
-              createAgentEvent<AgentEvent>(
-                AgentEventType.LLM_STREAM,
-                agentId,
-                { text: content },
-                { sessionId: effectiveThreadId, ...metadata },
-              ),
-            );
-          }
+      const emitToolCallStart = (acc: ToolCallAcc) => {
+        if (acc.startEmitted || !acc.toolCallId || !acc.toolName) return null;
+        acc.startEmitted = true;
+        return emit(
+          createAgentEvent<AgentEvent>(
+            AgentEventType.TOOL_CALL_START,
+            agentId,
+            {
+              toolCallId: acc.toolCallId,
+              toolName: acc.toolName,
+              arguments: acc.argsBuffer || '{}',
+            },
+            { sessionId: effectiveThreadId, ...metadata },
+          ),
+        );
+      };
 
-          // 检查 tool_calls（AI 发起工具调用）
-          const toolCalls = (msgChunk as any).tool_calls;
-          if (toolCalls && Array.isArray(toolCalls)) {
-            for (const tc of toolCalls) {
-              yield emit(
-                createAgentEvent<AgentEvent>(
-                  AgentEventType.TOOL_CALL_START,
-                  agentId,
-                  {
-                    toolCallId: tc.id ?? '',
-                    toolName: tc.name ?? '',
-                    arguments: JSON.stringify(tc.args ?? {}),
-                  },
-                  { sessionId: effectiveThreadId, ...metadata },
-                ),
-              );
-            }
-          }
-        }
-
-        // Tool message → TOOL_CALL_RESULT
-        if (msgChunk._getType() === 'tool') {
+      const handleAiChunk = function* (msgChunk: any) {
+        const content = typeof msgChunk.content === 'string' ? msgChunk.content : '';
+        if (content) {
           yield emit(
             createAgentEvent<AgentEvent>(
-              AgentEventType.TOOL_CALL_RESULT,
+              AgentEventType.LLM_STREAM,
               agentId,
-              {
-                toolCallId: (msgChunk as any).tool_call_id ?? '',
-                toolName: (msgChunk as any).name ?? '',
-                result: msgChunk.content,
-                success: true,
-              },
+              { text: content },
               { sessionId: effectiveThreadId, ...metadata },
             ),
           );
         }
+
+        const tcChunks = msgChunk.tool_call_chunks as
+          | Array<{ index?: number; id?: string; name?: string; args?: string }>
+          | undefined;
+        if (!tcChunks?.length) return;
+        for (const piece of tcChunks) {
+          const idx = piece.index ?? 0;
+          let acc = toolCallsByIndex.get(idx);
+          if (!acc) {
+            acc = { toolCallId: '', toolName: '', argsBuffer: '', startEmitted: false };
+            toolCallsByIndex.set(idx, acc);
+          }
+          if (piece.id) {
+            acc.toolCallId = piece.id;
+            toolCallsById.set(piece.id, acc);
+          }
+          if (piece.name) acc.toolName = piece.name;
+          if (typeof piece.args === 'string') acc.argsBuffer += piece.args;
+        }
+      };
+
+      const handleToolMessage = function* (msg: any) {
+        const toolCallId = msg.tool_call_id ?? '';
+        const acc = toolCallsById.get(toolCallId);
+        if (acc) {
+          const startEvt = emitToolCallStart(acc);
+          if (startEvt) yield startEvt;
+        }
+        yield emit(
+          createAgentEvent<AgentEvent>(
+            AgentEventType.TOOL_CALL_RESULT,
+            agentId,
+            {
+              toolCallId,
+              toolName: msg.name ?? '',
+              result: msg.content,
+              success: true,
+            },
+            { sessionId: effectiveThreadId, ...metadata },
+          ),
+        );
+      };
+
+      for await (const chunk of stream) {
+        const [mode, payload] = chunk as [string, any];
+
+        if (mode === 'messages') {
+          const [msgChunk] = payload as [any, any];
+          // ToolMessage 统一走 updates 分支，避免双重 emit
+          if (msgChunk?._getType?.() === 'ai') {
+            yield* handleAiChunk(msgChunk);
+          }
+          continue;
+        }
+
+        if (mode !== 'updates' || !payload || typeof payload !== 'object') continue;
+
+        for (const nodeName of Object.keys(payload)) {
+          const msgs = payload[nodeName]?.messages;
+
+          if (debug) {
+            const summary = Array.isArray(msgs)
+              ? msgs
+                  .map((m: any) => {
+                    const tt = m?._getType?.() ?? '?';
+                    if (tt === 'ai') {
+                      const tcs = (m?.tool_calls ?? []).map((tc: any) => `${tc.name}#${tc.id}`);
+                      return `ai(tool_calls=[${tcs.join(',')}])`;
+                    }
+                    if (tt === 'tool') return `tool(id=${m?.tool_call_id},status=${m?.status ?? 'ok'})`;
+                    return tt;
+                  })
+                  .join(', ')
+              : '(no messages)';
+            console.log(`[node update] ${nodeName} → ${summary}`);
+          }
+
+          if (!Array.isArray(msgs)) continue;
+          for (const msg of msgs) {
+            if (msg?._getType?.() === 'tool') yield* handleToolMessage(msg);
+          }
+        }
       }
 
-      // 5. LLM_COMPLETE（前端会被降级为 heartbeat）
+      // 兜底：模型只出 tool_call 但未触发 tool node 的极端情况
+      for (const acc of toolCallsByIndex.values()) {
+        const startEvt = emitToolCallStart(acc);
+        if (startEvt) yield startEvt;
+      }
+
+      // 流正常结束：标记 LLM 调用完成
       yield emit(
         createAgentEvent<AgentEvent>(
           AgentEventType.LLM_COMPLETE,

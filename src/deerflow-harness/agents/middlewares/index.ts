@@ -31,6 +31,9 @@ export { viewImageMiddleware } from './view-image-middleware';
 export { subagentLimitMiddleware } from './subagent-limit-middleware';
 export { loopDetectionMiddleware } from './loop-detection-middleware';
 export { clarificationMiddleware } from './clarification-middleware';
+export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
+export { withCallLog, withCallLogAll } from './with-call-log';
+export type { WithCallLogOptions } from './with-call-log';
 
 import { threadDataMiddleware } from './thread-data-middleware';
 import { uploadsMiddleware } from './uploads-middleware';

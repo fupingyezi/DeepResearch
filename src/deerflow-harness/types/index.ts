@@ -4,10 +4,16 @@ import { BaseCheckpointSaver } from '@langchain/langgraph';
 import { AgentMiddleware, createAgent } from 'langchain';
 import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 
+/**
+ * Provider 标识。用于针对不同 OpenAI 兼容后端选择适配策略。
+ */
+export type ModelProvider = 'openai' | 'qwen' | 'deepseek' | 'moonshot' | 'unknown';
+
 export interface ModelConfig {
   modelName: string;
   baseUrl?: string;
   apiKey?: string;
+  provider?: ModelProvider;
   streaming?: boolean;
   temperature?: number;
 }
@@ -30,6 +36,8 @@ export interface AssembelOptions {
   name?: string;
   planMode?: boolean;
   extraMiddlewares?: AgentMiddleware[];
+  /** 当前 model 的 provider，用于 feature 自动判断（如 qwenToolCallRecovery）。 */
+  provider?: ModelProvider;
 }
 
 /**

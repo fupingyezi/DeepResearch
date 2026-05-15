@@ -1,20 +1,14 @@
 /**
  * toClientAgentEvent
  *
- * event AgentEvent → ClientAgentEvent 的边界映射纯函数。
+ * AgentEvent → ClientAgentEvent 的边界映射纯函数
  *
- * 映射规则：
  * - LIFECYCLE{stage:"start"} → START
  * - LIFECYCLE{stage:"done"}  → END
- * - LLM_STREAM               → STREAM_CHUNK
- * - TOOL_CALL_START          → TOOL_CALL
- * - TOOL_CALL_RESULT         → TOOL_RESULT
- * - STATE_UPDATE             → STATE_UPDATE（透传）
- * - TASK_PROGRESS            → TASK_PROGRESS（透传）
- * - HUMAN_INTERRUPT          → HUMAN_INTERRUPT（透传）
- * - ERROR                    → ERROR（透传）
- * - 其余（LLM_COMPLETE / HUMAN_RESUME / NODE_* / SUB_AGENT_* / HARNESS_*）
- *   → HEARTBEAT（仅保留 timestamp + agentId，不携带业务 payload）
+ * - 其他事件类型             → 同名客户端事件（payload 透传）
+ *
+ * 若新增 AgentEventType 但未在此处加 case，TypeScript 的 exhaustive 检查
+ * （`never` 兜底）会在编译期报错。
  */
 
 import { AgentEventType, type AgentEvent } from '../../types/agent-event';
@@ -29,9 +23,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
 
   switch (event.eventType) {
     case AgentEventType.LIFECYCLE: {
-      const stage = event.payload.stage;
-      if (stage === 'start') {
-        // 透传 metadata.sessionId（若有）
+      if (event.payload.stage === 'start') {
         const sessionId = (event.metadata?.sessionId as string | undefined) ?? undefined;
         return createClientAgentEvent(
           ClientAgentEventType.START,
@@ -42,22 +34,26 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
       return createClientAgentEvent(ClientAgentEventType.END, agentId, {} as Record<string, never>);
     }
 
-    case AgentEventType.LLM_STREAM: {
+    case AgentEventType.LLM_STREAM:
       return createClientAgentEvent(ClientAgentEventType.STREAM_CHUNK, agentId, {
         text: event.payload.text,
         reasoning: event.payload.reasoning,
       });
-    }
 
-    case AgentEventType.TOOL_CALL_START: {
+    case AgentEventType.LLM_COMPLETE:
+      return createClientAgentEvent(ClientAgentEventType.LLM_COMPLETE, agentId, {
+        fullText: event.payload.fullText,
+        usage: event.payload.usage,
+      });
+
+    case AgentEventType.TOOL_CALL_START:
       return createClientAgentEvent(ClientAgentEventType.TOOL_CALL, agentId, {
         toolCallId: event.payload.toolCallId,
         toolName: event.payload.toolName,
         arguments: event.payload.arguments,
       });
-    }
 
-    case AgentEventType.TOOL_CALL_RESULT: {
+    case AgentEventType.TOOL_CALL_RESULT:
       return createClientAgentEvent(ClientAgentEventType.TOOL_RESULT, agentId, {
         toolCallId: event.payload.toolCallId,
         toolName: event.payload.toolName,
@@ -65,48 +61,75 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
         success: event.payload.success,
         errorMessage: event.payload.errorMessage,
       });
-    }
 
-    case AgentEventType.STATE_UPDATE: {
+    case AgentEventType.STATE_UPDATE:
       return createClientAgentEvent(ClientAgentEventType.STATE_UPDATE, agentId, {
         stateType: event.payload.stateType,
         data: event.payload.data,
       });
-    }
 
-    case AgentEventType.TASK_PROGRESS: {
+    case AgentEventType.TASK_PROGRESS:
       return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         ...event.payload,
       });
-    }
 
-    case AgentEventType.HUMAN_INTERRUPT: {
+    case AgentEventType.HUMAN_INTERRUPT:
       return createClientAgentEvent(ClientAgentEventType.HUMAN_INTERRUPT, agentId, {
         question: event.payload.question,
         details: event.payload.details,
       });
-    }
 
-    case AgentEventType.ERROR: {
+    case AgentEventType.HUMAN_RESUME:
+      return createClientAgentEvent(ClientAgentEventType.HUMAN_RESUME, agentId, {
+        decision: event.payload.decision,
+        resumeTarget: event.payload.resumeTarget,
+      });
+
+    case AgentEventType.NODE_ENTER:
+      return createClientAgentEvent(ClientAgentEventType.NODE_ENTER, agentId, {
+        nodeName: event.payload.nodeName,
+        inputSummary: event.payload.inputSummary,
+      });
+
+    case AgentEventType.NODE_EXIT:
+      return createClientAgentEvent(ClientAgentEventType.NODE_EXIT, agentId, {
+        nodeName: event.payload.nodeName,
+        outputDelta: event.payload.outputDelta,
+      });
+
+    case AgentEventType.SUB_AGENT_DISPATCH:
+      return createClientAgentEvent(ClientAgentEventType.SUB_AGENT_DISPATCH, agentId, {
+        subAgentName: event.payload.subAgentName,
+        task: event.payload.task,
+        status: event.payload.status,
+        result: event.payload.result,
+        errorMessage: event.payload.errorMessage,
+        durationMs: event.payload.durationMs,
+      });
+
+    case AgentEventType.HARNESS_LIFECYCLE:
+      return createClientAgentEvent(ClientAgentEventType.HARNESS_LIFECYCLE, agentId, {
+        harnessId: event.payload.harnessId,
+        phase: event.payload.phase,
+        status: event.payload.status,
+        depth: event.payload.depth,
+        timestamp: event.payload.timestamp,
+        errorMessage: event.payload.errorMessage,
+      });
+
+    case AgentEventType.ERROR:
       return createClientAgentEvent(ClientAgentEventType.ERROR, agentId, {
         errorCode: event.payload.errorCode,
         errorMessage: event.payload.errorMessage,
         recoverable: event.payload.recoverable,
       });
-    }
 
-    // 全部降级为 HEARTBEAT
-    case AgentEventType.LLM_COMPLETE:
-    case AgentEventType.HUMAN_RESUME:
-    case AgentEventType.NODE_ENTER:
-    case AgentEventType.NODE_EXIT:
-    case AgentEventType.SUB_AGENT_DISPATCH:
-    case AgentEventType.HARNESS_LIFECYCLE:
-    default:
-      return createClientAgentEvent(
-        ClientAgentEventType.HEARTBEAT,
-        agentId,
-        {} as Record<string, never>,
+    default: {
+      // exhaustive 检查：若 AgentEventType 新增成员但未在此 switch 处理，
+      const _exhaustive: never = event;
+      throw new Error(
+        `[toClientAgentEvent] unhandled event type: ${(_exhaustive as AgentEvent).eventType}`,
       );
+    }
   }
 }
