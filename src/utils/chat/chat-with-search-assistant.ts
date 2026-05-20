@@ -5,7 +5,6 @@ export const chatWithSearhAssistant = async (
   params: chatWithChatAssistantProps
 ) => {
   const handler = new StreamChatHandler({
-    apiEndpoint: "/api/chat/v2",
     agentType: "search",
     mode: "search",
     callingMode: params.callingMode,

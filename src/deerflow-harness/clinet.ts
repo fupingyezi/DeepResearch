@@ -10,6 +10,7 @@ import { searchWebTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
 import { toClientAgentEvent, type ClientAgentEventStream } from './runtime/sse';
+import { getContext } from './runtime/context';
 
 function buildConfigKey(modelConfig: ModelConfig, opts: ClientOptions): AgentConfigKey {
   return JSON.stringify([
@@ -95,7 +96,8 @@ export class DeerFlowClient {
     threadId?: string,
     metadata?: Record<string, unknown>,
   ): ClientAgentEventStream {
-    const effectiveThreadId = threadId ?? uuidv4();
+    // 显式参数优先；其次从 ALS 兜底；最后 fallback 到新 uuid
+    const effectiveThreadId = threadId ?? getContext()?.thread_id ?? uuidv4();
     const agentId = this.options.agentName ?? 'lead';
 
     /** 内部辅助：构造 internal AgentEvent 并即时映射输出 */

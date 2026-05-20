@@ -10,7 +10,11 @@ import {
 } from "@/runtime";
 
 export interface StreamChatConfig {
-  apiEndpoint: string;
+  /**
+   * @deprecated v3 thread service 接管后，此字段不再被使用，保留仅为向后兼容。
+   * 实际请求路径为 /api/threads/:tid/runs 与 /api/threads/:tid/runs/:rid/stream。
+   */
+  apiEndpoint?: string;
   agentType: "basic" | "search" | "deep_research";
   mode: "chat" | "search" | "deepResearch";
   callingMode: "direct" | "reEditCall" | "recall" | "resume";
@@ -77,7 +81,7 @@ export class StreamChatHandler {
     await this.executeStreamRequest();
   }
 
-  // 处理session逻辑，没有session创建session
+  // 处理session逻辑：没有 chat_session 则创建；并以同一 UUID 在 thread service 侧幂等创建 thread。
   private async handleSession(): Promise<void> {
     this.sessionId = this.config.sessionId || "";
 
@@ -104,6 +108,20 @@ export class StreamChatHandler {
         console.error("Failed to create session:", error);
         throw error;
       }
+    }
+
+    // thread service 幂等建 thread —— sessionId 直接作为 thread_id
+    // 失败时直接抛出：thread 不存在会导致下一步 submitRun 报 404，提早暴露根因。
+    try {
+      await apiClient.post("/threads", {
+        thread_id: this.sessionId,
+        assistant_id: this.config.agentType,
+        display_name: this.config.inputValue.slice(0, 15) || "New thread",
+        metadata: { agentType: this.config.agentType },
+      });
+    } catch (error) {
+      console.error("Failed to ensure thread:", error);
+      throw error;
     }
   }
 
@@ -195,11 +213,10 @@ export class StreamChatHandler {
       .content as string;
   }
 
-  // 执行 SSE：基于 runtime 的 createAgentEventStream（async generator）
+  // 执行 SSE：v3 thread service 三段式 —— submitRun → SSE subscribe
   private async executeStreamRequest(): Promise<void> {
     try {
-      const requestBody: Record<string, any> = {
-        input: this.config.inputValue,
+      const metadata: Record<string, any> = {
         sessionId: this.sessionId,
         hasFiles: this.config.hasFiles,
         uploadedFiles: this.config.uploadedFiles || [],
@@ -208,7 +225,20 @@ export class StreamChatHandler {
         agentType: this.config.agentType,
       };
 
-      await this.processStreamV2(requestBody);
+      // 1) 提交 run
+      const runRes = await apiClient.post(
+        `/threads/${this.sessionId}/runs`,
+        { input: this.config.inputValue, metadata },
+      );
+      const runId: string | undefined = runRes?.run_id;
+      if (!runId) {
+        throw new Error("submitRun failed: missing run_id in response");
+      }
+
+      // 2) 订阅 SSE
+      await this.processSseStream(
+        `/api/threads/${this.sessionId}/runs/${runId}/stream`,
+      );
     } catch (error) {
       await this.handleError(error);
     } finally {
@@ -217,17 +247,12 @@ export class StreamChatHandler {
   }
 
   /**
-   * 消费后端 ClientAgentEvent 流
-   *
-   * 直接使用 `createAgentEventStream`（async generator）+ switch 处理事件，
-   * 不再依赖任何中间 EventConsumer / handler 工厂。
+   * 消费后端 ClientAgentEvent 流（GET SSE 订阅 thread service 的 stream-bridge）
    */
-  private async processStreamV2(
-    requestBody: Record<string, any>,
-  ): Promise<void> {
+  private async processSseStream(streamUrl: string): Promise<void> {
     const stream = createAgentEventStream({
-      endpoint: this.config.apiEndpoint,
-      body: requestBody,
+      endpoint: streamUrl,
+      method: "GET",
       signal: this.abortController!.signal,
     });
 

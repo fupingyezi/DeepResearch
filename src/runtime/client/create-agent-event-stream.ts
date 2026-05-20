@@ -18,10 +18,12 @@ import {
 import { createSseFrameParser } from './sse-frame-parser';
 
 export interface AgentEventStreamOptions {
-  /** 后端 SSE endpoint（例如 `/api/chat/v2`） */
+  /** 后端 SSE endpoint（例如 `/api/threads/:tid/runs/:rid/stream`） */
   endpoint: string;
+  /** HTTP 方法，默认 POST。GET 时 body 会被忽略。 */
+  method?: 'GET' | 'POST';
   /** POST body（会被 JSON.stringify 后发送） */
-  body: unknown;
+  body?: unknown;
   /** 中断信号 */
   signal?: AbortSignal;
   /** 自定义 headers，会与默认的 Content-Type 合并 */
@@ -57,19 +59,20 @@ function makeErrorEvent(
 export async function* createAgentEventStream(
   opts: AgentEventStreamOptions,
 ): ClientAgentEventStream {
-  const { endpoint, body, signal, headers } = opts;
+  const { endpoint, body, signal, headers, method = 'POST' } = opts;
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
-      method: 'POST',
+    const init: RequestInit = {
+      method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         ...headers,
       },
-      body: JSON.stringify(body),
       signal,
-    });
+    };
+    if (method === 'POST') init.body = JSON.stringify(body);
+    response = await fetch(endpoint, init);
   } catch (err) {
     // AbortError 不视为异常，但仍以 ERROR 事件统一通知消费者
     const message = err instanceof Error ? err.message : String(err);

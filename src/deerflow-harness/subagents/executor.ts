@@ -4,6 +4,7 @@ import { StructuredToolInterface } from '@langchain/core/tools';
 
 import { createBaseAgent } from '../agents/factory';
 import { createChatModel, inferProvider } from '../models';
+import { getContext } from '../runtime/context';
 import { SubagentEvent } from '../types';
 import { SubagentConfig } from './config';
 
@@ -82,11 +83,17 @@ export class SubagentExecutor {
 
       // 5) 主循环：消费 LangGraph stream
       const input = { messages: [new HumanMessage(prompt)] };
-      const stream = await agent.stream(input, {
+      // 若处于 thread 上下文中，把 thread_id 透传给子图，让父子共用同一 checkpoint thread
+      const ctxThreadId = getContext()?.thread_id;
+      const streamOpts: Record<string, unknown> = {
         signal: internalCtl.signal,
         streamMode: ['messages', 'updates'],
         recursionLimit: Math.max(2, config.maxTurns) * 2,
-      });
+      };
+      if (ctxThreadId) {
+        streamOpts.configurable = { thread_id: ctxThreadId };
+      }
+      const stream = await agent.stream(input, streamOpts);
 
       let aiMessageCount = 0;
       let finalText: string | null = null;

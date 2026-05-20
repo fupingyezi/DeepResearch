@@ -54,7 +54,6 @@ export const toolErrorHandlingMiddleware = createMiddleware({
       const toolCallId = String(request.toolCall.id || MISSING_TOOL_CALL_ID);
       const { className, detail } = describeError(err);
 
-      // 与 Python 版日志语义一致：携带工具名 + tool_call id
       console.error(
         `[ToolErrorHandlingMiddleware] Tool execution failed: name=${toolName} id=${toolCallId} (${className}: ${detail})`,
       );

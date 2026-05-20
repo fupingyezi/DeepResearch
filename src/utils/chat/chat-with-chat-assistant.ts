@@ -5,7 +5,6 @@ export const chatWithChatAssistant = async (
   params: chatWithChatAssistantProps
 ) => {
   const handler = new StreamChatHandler({
-    apiEndpoint: "/api/chat/v2",
     agentType: "basic",
     mode: "chat",
     hasFiles: params.hasFiles,
