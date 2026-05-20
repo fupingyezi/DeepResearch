@@ -15,6 +15,7 @@ export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent } from './type
 export {
   createSseStream,
   toClientAgentEvent,
+  createClientAgentEvent,
   ClientAgentEventType,
   type ClientAgentEvent,
   type ClientAgentEventStream,

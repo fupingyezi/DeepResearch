@@ -110,19 +110,6 @@ export class StreamChatHandler {
       }
     }
 
-    // thread service 幂等建 thread —— sessionId 直接作为 thread_id
-    // 失败时直接抛出：thread 不存在会导致下一步 submitRun 报 404，提早暴露根因。
-    try {
-      await apiClient.post("/threads", {
-        thread_id: this.sessionId,
-        assistant_id: this.config.agentType,
-        display_name: this.config.inputValue.slice(0, 15) || "New thread",
-        metadata: { agentType: this.config.agentType },
-      });
-    } catch (error) {
-      console.error("Failed to ensure thread:", error);
-      throw error;
-    }
   }
 
   // 处理中断逻辑
@@ -213,7 +200,7 @@ export class StreamChatHandler {
       .content as string;
   }
 
-  // 执行 SSE：v3 thread service 三段式 —— submitRun → SSE subscribe
+  // 执行 SSE：v3 chat 合并端点 —— 一次 POST 即拿到事件流（服务端在内部完成 createThread + submitRun + subscribe）
   private async executeStreamRequest(): Promise<void> {
     try {
       const metadata: Record<string, any> = {
@@ -225,20 +212,12 @@ export class StreamChatHandler {
         agentType: this.config.agentType,
       };
 
-      // 1) 提交 run
-      const runRes = await apiClient.post(
-        `/threads/${this.sessionId}/runs`,
-        { input: this.config.inputValue, metadata },
-      );
-      const runId: string | undefined = runRes?.run_id;
-      if (!runId) {
-        throw new Error("submitRun failed: missing run_id in response");
-      }
-
-      // 2) 订阅 SSE
-      await this.processSseStream(
-        `/api/threads/${this.sessionId}/runs/${runId}/stream`,
-      );
+      await this.processSseStream(`/api/v3/chat/${this.sessionId}`, {
+        input: this.config.inputValue,
+        agentType: this.config.agentType,
+        displayName: this.config.inputValue.slice(0, 15) || "New thread",
+        metadata,
+      });
     } catch (error) {
       await this.handleError(error);
     } finally {
@@ -247,12 +226,16 @@ export class StreamChatHandler {
   }
 
   /**
-   * 消费后端 ClientAgentEvent 流（GET SSE 订阅 thread service 的 stream-bridge）
+   * 消费后端 ClientAgentEvent 流（POST SSE 订阅 v3 chat 合并端点）
    */
-  private async processSseStream(streamUrl: string): Promise<void> {
+  private async processSseStream(
+    streamUrl: string,
+    body: Record<string, unknown>,
+  ): Promise<void> {
     const stream = createAgentEventStream({
       endpoint: streamUrl,
-      method: "GET",
+      method: "POST",
+      body,
       signal: this.abortController!.signal,
     });
 
