@@ -1,13 +1,10 @@
-import { ChatMessageType, ChatSessionType } from "@/types";
-import { UUIDTypes, v4 as uuidv4 } from "uuid";
-import apiClient from "../request/api";
-import { deepResearchResultType } from "@/types";
-import { processStatusType } from "@/store/deep-research-process-store";
+import { ChatMessageType, ChatSessionType } from '@/types';
+import { UUIDTypes, v4 as uuidv4 } from 'uuid';
+import apiClient from '../request/api';
+import { deepResearchResultType } from '@/types';
+import { processStatusType } from '@/store/deep-research-process-store';
 
-import {
-  createAgentEventStream,
-  ClientAgentEventType,
-} from "@/runtime";
+import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 
 export interface StreamChatConfig {
   /**
@@ -15,9 +12,9 @@ export interface StreamChatConfig {
    * 实际请求路径为 /api/threads/:tid/runs 与 /api/threads/:tid/runs/:rid/stream。
    */
   apiEndpoint?: string;
-  agentType: "basic" | "search" | "deep_research";
-  mode: "chat" | "search" | "deepResearch";
-  callingMode: "direct" | "reEditCall" | "recall" | "resume";
+  agentType: 'basic' | 'search' | 'deep_research';
+  mode: 'chat' | 'search' | 'deepResearch';
+  callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
   inputValue: string;
   isResume?: boolean; // 研究human中断恢复模式
   sessionId?: UUIDTypes;
@@ -50,7 +47,7 @@ export interface StreamChatConfig {
   // 获取深度研究结果
   getDeepResearchResult?: (
     sessionId: UUIDTypes,
-    messageId: number
+    messageId: number,
   ) => deepResearchResultType | undefined;
 
   getDeepResearchStatus?: () => processStatusType;
@@ -59,27 +56,27 @@ export interface StreamChatConfig {
 export class StreamChatHandler {
   private config: StreamChatConfig;
   private abortController: AbortController | null = null;
-  private accumulatedContent = ""; //新的ai消息
-  private sessionId: UUIDTypes = "";
+  private accumulatedContent = ''; //新的ai消息
+  private sessionId: UUIDTypes = '';
   private assistantMessageId: number = 0;
   private initialUpdateMessages: ChatMessageType[] = [];
   private deepResearchResult: deepResearchResultType | undefined = undefined;
+  private lastPushedContent: string | null = null;
 
   constructor(config: StreamChatConfig) {
     this.config = config;
   }
 
   async execute(): Promise<void> {
-    if (this.config.inputValue === "" && this.config.isResume === undefined)
-      return;
+    if (this.config.inputValue === '' && this.config.isResume === undefined) return;
 
     await this.handleSession();
 
     this.setupAbortController();
 
-    if (this.config.callingMode === "direct") {
+    if (this.config.callingMode === 'direct') {
       this.initializeMessages();
-    } else if (this.config.callingMode === "resume") {
+    } else if (this.config.callingMode === 'resume') {
       this.resumeMessages();
     } else {
       this.reInitializeMessages();
@@ -90,7 +87,7 @@ export class StreamChatHandler {
 
   // 处理session逻辑：没有 chat_session 则创建；并以同一 UUID 在 thread service 侧幂等创建 thread。
   private async handleSession(): Promise<void> {
-    this.sessionId = this.config.sessionId || "";
+    this.sessionId = this.config.sessionId || '';
 
     if (!this.sessionId) {
       this.sessionId = uuidv4();
@@ -103,7 +100,7 @@ export class StreamChatHandler {
       };
 
       try {
-        const res = await apiClient.post("/conversations/create_session", {
+        const res = await apiClient.post('/conversations/create_session', {
           chat_session: chat_session,
         });
 
@@ -112,11 +109,10 @@ export class StreamChatHandler {
           this.config.setCurrentSessionId(chat_session.id);
         }
       } catch (error) {
-        console.error("Failed to create session:", error);
+        console.error('Failed to create session:', error);
         throw error;
       }
     }
-
   }
 
   // 处理中断逻辑
@@ -131,7 +127,7 @@ export class StreamChatHandler {
     const newUserMessage: ChatMessageType = {
       id: this.config.currentMessages.length + 1,
       sessionId: this.sessionId,
-      role: "user",
+      role: 'user',
       content: this.config.inputValue,
       mode: this.config.mode,
     };
@@ -144,15 +140,13 @@ export class StreamChatHandler {
       {
         id: this.assistantMessageId,
         sessionId: this.sessionId,
-        role: "assistant",
-        content: "",
+        role: 'assistant',
+        content: '',
         mode: this.config.mode,
       } as ChatMessageType,
     ];
 
-    this.config.setCurrentMessages(
-      JSON.parse(JSON.stringify(this.initialUpdateMessages))
-    );
+    this.config.setCurrentMessages(JSON.parse(JSON.stringify(this.initialUpdateMessages)));
     this.config.setShouldAutoScroll(true);
   }
 
@@ -160,18 +154,18 @@ export class StreamChatHandler {
   private reInitializeMessages(): void {
     const len = this.config.currentMessages.length;
 
-    if (this.config.callingMode === "recall") {
+    if (this.config.callingMode === 'recall') {
       this.initialUpdateMessages = [
         ...this.config.currentMessages.slice(0, len - 1),
         {
           ...this.config.currentMessages[len - 1],
-          content: "",
+          content: '',
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: "failed",
+          researchStatus: 'failed',
         },
       ];
-    } else if (this.config.callingMode === "reEditCall") {
+    } else if (this.config.callingMode === 'reEditCall') {
       this.initialUpdateMessages = [
         ...this.config.currentMessages.slice(0, len - 2),
         {
@@ -179,22 +173,20 @@ export class StreamChatHandler {
           content: this.config.inputValue,
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: "failed",
+          researchStatus: 'failed',
         },
         {
           ...this.config.currentMessages[len - 1],
-          content: "",
+          content: '',
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: "failed",
+          researchStatus: 'failed',
         },
       ];
     }
 
     this.assistantMessageId = len;
-    this.config.setCurrentMessages(
-      JSON.parse(JSON.stringify(this.initialUpdateMessages))
-    );
+    this.config.setCurrentMessages(JSON.parse(JSON.stringify(this.initialUpdateMessages)));
     this.config.setShouldAutoScroll(true);
   }
 
@@ -203,8 +195,7 @@ export class StreamChatHandler {
     const len = this.config.currentMessages.length;
     this.initialUpdateMessages = this.config.currentMessages;
     this.assistantMessageId = len;
-    this.accumulatedContent = this.config.currentMessages[len - 1]
-      .content as string;
+    this.accumulatedContent = this.config.currentMessages[len - 1].content as string;
   }
 
   // 执行 SSE：v3 chat 合并端点 —— 一次 POST 即拿到事件流（服务端在内部完成 createThread + submitRun + subscribe）
@@ -225,7 +216,7 @@ export class StreamChatHandler {
       await this.processSseStream(`/api/v3/chat/${this.sessionId}`, {
         input: this.config.inputValue,
         agentType: this.config.agentType,
-        displayName: this.config.inputValue.slice(0, 15) || "New thread",
+        displayName: this.config.inputValue.slice(0, 15) || 'New thread',
         metadata,
       });
     } catch (error) {
@@ -238,26 +229,22 @@ export class StreamChatHandler {
   /**
    * 消费后端 ClientAgentEvent 流（POST SSE 订阅 v3 chat 合并端点）
    */
-  private async processSseStream(
-    streamUrl: string,
-    body: Record<string, unknown>,
-  ): Promise<void> {
+  private async processSseStream(streamUrl: string, body: Record<string, unknown>): Promise<void> {
     const stream = createAgentEventStream({
       endpoint: streamUrl,
-      method: "POST",
+      method: 'POST',
       body,
       signal: this.abortController!.signal,
     });
 
-    const dispatchStreamData = (
-      type: string,
-      payload: unknown,
-    ) => {
-      const newContent = this.config.onStreamData?.(
-        { type, payload },
-        this.accumulatedContent,
-      );
-      if (newContent !== undefined) {
+    const dispatchStreamData = (type: string, payload: unknown) => {
+      const newContent = this.config.onStreamData?.({ type, payload }, this.accumulatedContent);
+      // onStreamData 约定：返回 string 表示"应当作为新的 accumulatedContent"。
+      // 大量 STATE_UPDATE 回调实际并不修改正文，只是顺手 `return accumulatedContent`，
+      // 这里用值比较过滤掉这种"自反返回"，避免每帧都白白触发 setCurrentMessages。
+      // 真正的幂等终点在 updateMessages() 内（lastPushedContent 指纹），
+      // 这里属于第一道更便宜的剪枝。
+      if (typeof newContent === 'string' && newContent !== this.accumulatedContent) {
         this.accumulatedContent = newContent;
         this.updateMessages();
       }
@@ -275,21 +262,20 @@ export class StreamChatHandler {
           if (!this.config.onStreamData) break;
           const { stateType, data } = event.payload;
           // simple_analysis → start_analyse；其余按 stateType 直接转发
-          const dispatchType =
-            stateType === "simple_analysis" ? "start_analyse" : stateType;
+          const dispatchType = stateType === 'simple_analysis' ? 'start_analyse' : stateType;
           dispatchStreamData(dispatchType, data);
           break;
         }
 
         case ClientAgentEventType.TASK_PROGRESS: {
           if (!this.config.onStreamData) break;
-          dispatchStreamData("task_update", event.payload);
+          dispatchStreamData('task_update', event.payload);
           break;
         }
 
         case ClientAgentEventType.HUMAN_INTERRUPT: {
           if (!this.config.onStreamData) break;
-          dispatchStreamData("interrupt", event.payload);
+          dispatchStreamData('interrupt', event.payload);
           break;
         }
 
@@ -300,15 +286,11 @@ export class StreamChatHandler {
         }
 
         case ClientAgentEventType.ERROR: {
-          console.error(
-            "[StreamChatHandler] stream error:",
-            event.payload.errorMessage,
-          );
+          console.error('[StreamChatHandler] stream error:', event.payload.errorMessage);
           // 抛出以走 handleError 分支
-          throw Object.assign(
-            new Error(event.payload.errorMessage),
-            { name: event.payload.errorCode },
-          );
+          throw Object.assign(new Error(event.payload.errorMessage), {
+            name: event.payload.errorCode,
+          });
         }
 
         case ClientAgentEventType.START:
@@ -317,7 +299,7 @@ export class StreamChatHandler {
           break;
 
         case ClientAgentEventType.END: {
-          console.log("[StreamChatHandler] stream completed");
+          console.log('[StreamChatHandler] stream completed');
           return;
         }
 
@@ -332,18 +314,26 @@ export class StreamChatHandler {
 
   // 更新UI
   private updateMessages(): void {
+    // 幂等：assistant content 与上次推送相同 → 跳过。
+    // SSE 的 STATE_UPDATE 帧（task_update / report 等）大多不修改正文，
+    // 但旧实现仍会调用 setCurrentMessages，引发 React 整棵消息树重渲染。
+    // 高频场景下叠加 useEffect/订阅链的副作用，会导致 commit 数堆积、
+    // 最终撞到 React "Maximum update depth exceeded" 护栏。
+    if (this.accumulatedContent === this.lastPushedContent) {
+      return;
+    }
+    this.lastPushedContent = this.accumulatedContent;
+
     const updateMessages = this.initialUpdateMessages.map((msg) =>
-      msg.id === this.assistantMessageId
-        ? { ...msg, content: this.accumulatedContent }
-        : msg
+      msg.id === this.assistantMessageId ? { ...msg, content: this.accumulatedContent } : msg,
     );
     this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
   }
 
   //处理中断和错误
   private async handleError(error: any): Promise<void> {
-    if (error.name === "AbortError" || error.name === "AGENT_STREAM_ABORTED") {
-      console.log("Chat was Interrupted by user");
+    if (error.name === 'AbortError' || error.name === 'AGENT_STREAM_ABORTED') {
+      console.log('Chat was Interrupted by user');
       if (this.config.onStreamComplete) {
         //自定义结束处理
         this.config.onStreamComplete({
@@ -353,7 +343,7 @@ export class StreamChatHandler {
         });
       }
     } else {
-      console.error("Stream error:", error);
+      console.error('Stream error:', error);
 
       if (this.config.onStreamError) {
         //自定义错误处理
@@ -362,13 +352,11 @@ export class StreamChatHandler {
         // 默认错误处理
         const updateMessages = this.initialUpdateMessages.map((msg) =>
           msg.id === this.assistantMessageId
-            ? { ...msg, content: "出错了，哎嘿。", researchStatus: "failed" }
-            : msg
+            ? { ...msg, content: '出错了，哎嘿。', researchStatus: 'failed' }
+            : msg,
         );
-        this.accumulatedContent = "出错了，哎嘿。";
-        this.config.setCurrentMessages(
-          JSON.parse(JSON.stringify(updateMessages))
-        );
+        this.accumulatedContent = '出错了，哎嘿。';
+        this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
       }
     }
   }
@@ -378,8 +366,7 @@ export class StreamChatHandler {
     this.config.setAbortController(null);
 
     if (this.accumulatedContent) {
-      if (this.abortController?.signal.aborted)
-        this.accumulatedContent += "\n 消息已被停止。";
+      if (this.abortController?.signal.aborted) this.accumulatedContent += '\n 消息已被停止。';
       await this.saveMessages();
     }
 
@@ -394,54 +381,50 @@ export class StreamChatHandler {
 
   //数据库保存
   private async saveMessages(): Promise<void> {
-    const newUserMessage = this.initialUpdateMessages.findLast(
-      (msg) => msg.role === "user"
-    );
+    const newUserMessage = this.initialUpdateMessages.findLast((msg) => msg.role === 'user');
     const newAssistantMessage: ChatMessageType = {
       id: this.assistantMessageId,
       sessionId: this.sessionId,
-      role: "assistant",
+      role: 'assistant',
       content: this.accumulatedContent,
       mode: this.config.mode,
     };
 
     if (
-      this.config.mode === "deepResearch" &&
+      this.config.mode === 'deepResearch' &&
       this.config.getDeepResearchResult
       // &&this.config.getDeepResearchStatus?.() === "end"
     ) {
       this.deepResearchResult = this.config.getDeepResearchResult(
         this.sessionId,
-        this.assistantMessageId
+        this.assistantMessageId,
       );
       if (this.deepResearchResult) {
         newAssistantMessage.deepResearchResult = this.deepResearchResult;
-        newAssistantMessage.researchStatus = "finished";
+        newAssistantMessage.researchStatus = 'finished';
         const updateMessages = this.initialUpdateMessages.map((msg) =>
-          msg.id === this.assistantMessageId ? newAssistantMessage : msg
+          msg.id === this.assistantMessageId ? newAssistantMessage : msg,
         );
-        this.config.setCurrentMessages(
-          JSON.parse(JSON.stringify(updateMessages))
-        );
+        this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
       }
     }
 
     try {
-      if (this.config.callingMode === "direct") {
-        await apiClient.post("/conversations/add_messages", {
+      if (this.config.callingMode === 'direct') {
+        await apiClient.post('/conversations/add_messages', {
           chat_messages: [newUserMessage, newAssistantMessage],
           hasFiles: this.config.hasFiles,
           uploadedFiles: this.config.uploadedFiles || [],
         });
       } else {
-        await apiClient.post("/conversations/update_messages", {
+        await apiClient.post('/conversations/update_messages', {
           chat_messages: [newUserMessage, newAssistantMessage],
           hasFiles: this.config.hasFiles,
           uploadedFiles: this.config.uploadedFiles || [],
         });
       }
     } catch (error) {
-      console.error("Failed to save messages:", error);
+      console.error('Failed to save messages:', error);
     }
   }
 

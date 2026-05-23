@@ -30,18 +30,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   placeholder,
   className,
 }) => {
-  const conversationStore = useConversationStore();
-  const deepResearchStore = useDeepResearchProcessStore();
+  // 精细订阅：只读 ChatWindow 真正用到的字段。
+  // 之前 `useConversationStore()` / `useDeepResearchProcessStore()` 不传 selector，
+  // 等价于订阅整个 store。SSE 高频更新 currentMessages 时，每个分片都会让
+  // ChatWindow 重新拿到一个**全新的 store 对象引用**，再向下传播 props，
+  // 叠加 useCallback deps 中的 store 整体引用，会让 onSend 引用每帧重建、
+  // ChatInput 跟着重渲染——纯浪费，且会放大 commit 数量增加 React 撞
+  // "Maximum update depth" 护栏的概率。
+  const isChating = useConversationStore((s) => s.isChating);
+  const shouldAutoScroll = useConversationStore((s) => s.shouldAutoScroll);
+  const currentMessages = useConversationStore((s) => s.currentMessages);
+  const setShouldAutoScroll = useConversationStore((s) => s.setShouldAutoScroll);
   const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
 
-  const { isChating, shouldAutoScroll, currentMessages, setShouldAutoScroll } =
-    conversationStore;
-
-  const { resetState } = deepResearchStore;
-
   const handleChangeScroll = useCallback(
-    (shouldAutoScroll: boolean) => {
-      setShouldAutoScroll(shouldAutoScroll);
+    (next: boolean) => {
+      setShouldAutoScroll(next);
     },
     [setShouldAutoScroll]
   );
@@ -49,6 +53,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleSendMessage = useCallback(
     async (inputValue: string, hasFiles?: boolean) => {
       const { selectedAgent } = useChatSelectStore.getState();
+      // 直接 getState() 取最新快照而不是订阅，避免 store 高频变化让
+      // handleSendMessage 引用每帧重建。store 内的状态在用户**点击发送**
+      // 那一刻才被读到，因此一次性快照足够。
+      const conversationStore = useConversationStore.getState();
+      const deepResearchStore = useDeepResearchProcessStore.getState();
       if (selectedAgent === "chat") {
         await chatWithChatAssistant({
           inputValue,
@@ -68,7 +77,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           ...conversationStore,
         });
       } else if (selectedAgent === "deepResearch") {
-        resetState();
+        deepResearchStore.resetState();
         await chatWithDeepResearch({
           inputValue,
           callingMode: "direct",
@@ -77,7 +86,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         });
       }
     },
-    [conversationStore, deepResearchStore, uploadedFiles, clearUploadedFiles]
+    [uploadedFiles, clearUploadedFiles]
   );
 
   return (
@@ -103,3 +112,4 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 };
 
 export default ChatWindow;
+

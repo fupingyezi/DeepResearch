@@ -11,29 +11,42 @@ import useDeepResearchProcessStore from "@/store/deep-research-process-store";
 import { useState, useEffect } from "react";
 
 const DeepResearchProcess = () => {
-  const {
-    isOpenProcessSider,
-    researchTarget,
-    tasks,
-    report,
-    setIsOpenProcessSider,
-    status,
-  } = useDeepResearchProcessStore();
+  // 精细订阅：避免每次 store 任意字段变化都让本组件重渲染（SSE task_update
+  // 高频触发 isOpenProcessSider/tasks 等更新，下面挂的 effect 会被反复唤醒）。
+  const isOpenProcessSider = useDeepResearchProcessStore(
+    (s) => s.isOpenProcessSider
+  );
+  const setIsOpenProcessSider = useDeepResearchProcessStore(
+    (s) => s.setIsOpenProcessSider
+  );
+  const researchTarget = useDeepResearchProcessStore((s) => s.researchTarget);
+  const tasks = useDeepResearchProcessStore((s) => s.tasks);
+  const report = useDeepResearchProcessStore((s) => s.report);
+  const status = useDeepResearchProcessStore((s) => s.status);
+
   const [selectedTab, setSelectedTab] = useState<"process" | "report">(
     "process"
   );
 
+  // report 第一次出现时自动切换到「报告」Tab。
+  // 之前 deps 漏写 selectedTab，effect 在每次 report 引用变化时都会跑，
+  // 高频 SSE 写 store 时容易把 selectedTab 反复设置回 "report" 形成 setState 抖动。
   useEffect(() => {
     if (selectedTab === "process" && report) {
       setSelectedTab("report");
     }
-  }, [report]);
+  }, [report, selectedTab]);
 
+  // 抽屉切换/重置时，若 report 已被清空则回到 process Tab。
+  // 之前 deps 只有 isOpenProcessSider，且体内同时读 selectedTab+report，
+  // 是 React 经典 deps lint 漏配置——本质上只关心抽屉打开瞬间，
+  // 而不是 report 任意变化。这里改用 isOpenProcessSider+report 两个真实依赖，
+  // 但加显式条件 `!report` 保证不会跟上面那条 effect 形成"打 report 后立刻被切回 process"的回路。
   useEffect(() => {
-    if (selectedTab === "report" && !report) {
+    if (isOpenProcessSider && !report && selectedTab === "report") {
       setSelectedTab("process");
     }
-  }, [isOpenProcessSider]);
+  }, [isOpenProcessSider, report, selectedTab]);
 
   if (!isOpenProcessSider) return null;
 
