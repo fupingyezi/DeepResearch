@@ -36,6 +36,15 @@ function ensureMemoryModelFactory(): void {
       // callback handler，主请求 ReadableStream 已关闭后会抛
       // `ERR_INVALID_STATE: Controller is already closed`。
       streaming: false,
+      // memory updater 输出是结构化 JSON（user/history/facts 多段聚合），
+      // 在长对话历史下 4096 tokens 很容易被截断 → JSON 解析失败、整次更新被丢弃。
+      // 给一个明显更宽的上限；真正写入 storage 时还会按 maxFacts 收敛，所以
+      // 不会因为放宽 token 上限而无限膨胀。
+      maxTokens: 8192,
+      // 这一类生成型 JSON 任务对采样多样性不敏感，反而需要更确定的输出，
+      // 降低 temperature/topP 也能减小被截断时输出半截无效 JSON 的概率。
+      temperature: 0.2,
+      topP: 0.8,
     }),
   );
   memoryFactoryRegistered = true;

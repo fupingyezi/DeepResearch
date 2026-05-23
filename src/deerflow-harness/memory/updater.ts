@@ -339,6 +339,46 @@ function extractText(content: any): string {
   return content == null ? '' : String(content);
 }
 
+/**
+ * 尝试从被截断的 JSON 字符串中抢救一个可解析的对象片段。
+ *
+ * 策略：从右往左找最后一个 `}`，按"之前的 `{` 与 `}` 数量平衡"为终点切掉
+ * 后续不完整内容。用于 LLM `finish_reason=length` 时输出尾部缺失的场景。
+ * 不做激进的 JSON 重写——只切到最近一个完整对象边界，避免造出错误数据。
+ */
+function tryRecoverJson(text: string): string | null {
+  const s = text.trim();
+  if (!s.startsWith('{')) return null;
+  let depth = 0;
+  let lastValidEnd = -1;
+  let inStr = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) lastValidEnd = i;
+    }
+  }
+  if (lastValidEnd <= 0) return null;
+  return s.slice(0, lastValidEnd + 1);
+}
+
 export interface UpdateMemoryOptions {
   threadId?: string | null;
   agentName?: string | null;
@@ -404,8 +444,34 @@ export class MemoryUpdater {
       try {
         parsed = JSON.parse(text);
       } catch (e) {
-        console.warn('[memory/updater] Failed to parse LLM JSON:', (e as Error).message);
-        return false;
+        // 兜底：尝试截到最近一个外层闭合大括号再解析一次。Qwen 在 maxTokens
+        // 触顶或 streaming=false 整段返回时偶发会缺最后几个字符（尾部 ", \n}"
+        // 这种），但前面绝大多数字段已经合法。能恢复就恢复，不能就放弃。
+        const fallback = tryRecoverJson(text);
+        if (fallback) {
+          console.warn(
+            '[memory/updater] LLM JSON parse failed, recovered via brace trim:',
+            (e as Error).message,
+            { len: text.length, recoveredLen: fallback.length },
+          );
+          try {
+            parsed = JSON.parse(fallback);
+          } catch (e2) {
+            console.warn(
+              '[memory/updater] LLM JSON recovery still failed:',
+              (e2 as Error).message,
+              { len: text.length, tail: text.slice(-120) },
+            );
+            return false;
+          }
+        } else {
+          console.warn(
+            '[memory/updater] Failed to parse LLM JSON:',
+            (e as Error).message,
+            { len: text.length, tail: text.slice(-120) },
+          );
+          return false;
+        }
       }
 
       let updated = applyUpdates(current, parsed, opts.threadId ?? null);
