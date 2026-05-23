@@ -27,8 +27,7 @@ function hasPendingClarification(messages: readonly BaseMessage[]): boolean {
 
   // 从末尾向前扫到最近一条 AIMessage（含 tool_calls）；途中所有 ToolMessage
   // 都属于该 AIMessage 的回包。如果其中任意一条 name === ask_clarification
-  // 且对应 AIMessage 在历史中只出现一次，即认为 pending（尚未在更后面被
-  // 一轮新的 ai 文本/tool_call 消费）。
+  // 且对应 AIMessage 在历史中只出现一次，即认为 pending（尚未在更后面被一轮新的 ai 文本/tool_call 消费）。
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m instanceof ToolMessage) {

@@ -13,7 +13,7 @@
  * 强制按 `emit_plan → task('research', ...) → emit_report` 工作流执行。
  */
 
-import { buildMemoryContext } from '../../memory';
+import { buildMemoryContext } from '../memory';
 
 const BASE_SYSTEM_PROMPT = `You are a helpful AI research assistant acting as a planner and dispatcher.
 

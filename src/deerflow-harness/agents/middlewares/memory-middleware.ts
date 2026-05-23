@@ -1,13 +1,13 @@
 import { createMiddleware } from 'langchain';
 
-import { getMemoryConfig } from '../../memory/config';
+import { getMemoryConfig } from '../memory/config';
 import {
   detectCorrection,
   detectReinforcement,
   filterMessagesForMemory,
   hasUserAndAi,
-} from '../../memory/message-processing';
-import { getMemoryQueue } from '../../memory/queue';
+} from '../memory/message-processing';
+import { getMemoryQueue } from '../memory/queue';
 import { getContext } from '../../runtime/context';
 
 /**

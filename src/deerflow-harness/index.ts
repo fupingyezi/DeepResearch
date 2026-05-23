@@ -83,7 +83,7 @@ export {
   // facade
   buildMemoryContext,
   type BuildMemoryContextOptions,
-} from './memory';
+} from './agents/memory';
 
 export {
   createSseStream,

@@ -10,11 +10,6 @@ import { v4 as uuidv4 } from "uuid";
  * - 后端字段：{ taskId, status:'started'|'running'|'completed'|'failed'|...,
  *              description?, result?, error?, message?, ...}
  * - 前端 taskType：{ id, taskId, description, status, needSearch?, searchResult?, result? }
- *
- * 关键：只在后端**真的提供了字段**时才回写——`description / result / needSearch /
- * searchResult` 任一缺省一律返回 `undefined`，由 `addTask` 的 spread 合并语义跳过覆盖。
- * 否则 `running` 帧（只带 message/messageIndex）会用空字符串 description 把 plan
- * 阶段写好的任务标题盖掉，造成右栏"任务划分"标题瞬间消失再复现的闪烁。
  */
 function mapTaskProgress(payload: any): taskType {
   const hasResult = typeof payload?.result === 'string' && payload.result.length > 0;

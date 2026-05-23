@@ -262,15 +262,7 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
       // 最终一致性兜底（顺序很重要：先清洗坏掉的 tool_calls，再补 id）：
       //
       // 1) 丢弃 name 缺失/空字符串/'unknown' 的 tool_calls。
-      //    这些通常是 Qwen 流式分片错位或 raw payload 损坏的产物，
-      //    保留下去会让 LangGraph ToolNode 抛
-      //    `Tool "unknown" not found.`，整个 stream 直接 ERROR。
-      //    宁可少调一次工具（模型下一轮会自然回退到文本回答），
-      //    也不要把整次 run 打死。
       // 2) 保证 tool_calls[].id 与 additional_kwargs.tool_calls[].id 都为非空稳定字符串。
-      //    Qwen 兼容 OpenAI 协议时常给 id=""，会导致 ToolNode 产生的
-      //    ToolMessage.tool_call_id 为空、与 AIMessage 不可配对，
-      //    进而触发 graph 死循环（连续 N 次重发同一 tool_call）。
       if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
         const before = msg.tool_calls.length;
         const cleaned = msg.tool_calls.filter((tc: any) => {
@@ -287,9 +279,6 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
         }
         msg.tool_calls = cleaned;
 
-        // raw 侧同步剔除：按 function.name 匹配（同名同位置认为是配对项）。
-        // 这里做最小同步——把 raw 里没有名字的 entry 也清掉，避免 DanglingToolCallMiddleware
-        // 后续再从 raw 兜底拿到一个无名字的占位项。
         const rawArr = msg.additional_kwargs?.tool_calls;
         if (Array.isArray(rawArr) && rawArr.length > 0) {
           msg.additional_kwargs.tool_calls = rawArr.filter((r: any) => {

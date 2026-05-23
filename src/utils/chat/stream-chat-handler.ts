@@ -253,11 +253,6 @@ export class StreamChatHandler {
 
     const dispatchStreamData = (type: string, payload: unknown) => {
       const newContent = this.config.onStreamData?.({ type, payload }, this.accumulatedContent);
-      // onStreamData 约定：返回 string 表示"应当作为新的 accumulatedContent"。
-      // 大量 STATE_UPDATE 回调实际并不修改正文，只是顺手 `return accumulatedContent`，
-      // 这里用值比较过滤掉这种"自反返回"，避免每帧都白白触发 setCurrentMessages。
-      // 真正的幂等终点在 updateMessages() 内（lastPushedContent 指纹），
-      // 这里属于第一道更便宜的剪枝。
       if (typeof newContent === 'string' && newContent !== this.accumulatedContent) {
         this.accumulatedContent = newContent;
         this.updateMessages();
@@ -267,17 +262,6 @@ export class StreamChatHandler {
     for await (const event of stream) {
       switch (event.eventType) {
         case ClientAgentEventType.STREAM_CHUNK: {
-          // STREAM_CHUNK 来源（父图 messages channel）：
-          //   仅承载 **lead-agent 自身** token；subagent 走 task 工具内部子图，
-          //   不会冒泡到这里——subagent 进度通过 TASK_PROGRESS 走右栏。
-          //
-          // deepResearch 模式下分两段处理：
-          //   - emit_report 之前：lead 在 emit_plan / 各 task 委派之间的过渡语，
-          //     与右栏过程视图高度重复，全部屏蔽（避免左气泡"过程倾倒"）。
-          //   - emit_report 之后：prompt 要求 lead "可以再说一两句简短结束语"，
-          //     这段是面向用户的收尾，放行进左气泡。
-          //
-          // chat / search 模式下 STREAM_CHUNK 是左气泡正文唯一来源，必须保留。
           if (this.config.mode === 'deepResearch' && !this.deepResearchReportEmitted) {
             break;
           }
@@ -288,10 +272,6 @@ export class StreamChatHandler {
 
         case ClientAgentEventType.STATE_UPDATE: {
           const { stateType, data } = event.payload;
-          // emit_report 帧充当 deepResearch 模式下 STREAM_CHUNK 的"分水岭"：
-          // 收到这一帧之后，lead 的收尾 token 才允许进入左气泡。
-          // 注意要在 dispatch 之前置位，确保即使 onStreamData 里同步又触发了
-          // STREAM_CHUNK 处理，也能命中放行分支。
           if (this.config.mode === 'deepResearch' && stateType === 'report') {
             this.deepResearchReportEmitted = true;
           }
@@ -349,11 +329,6 @@ export class StreamChatHandler {
 
   // 更新UI
   private updateMessages(): void {
-    // 幂等：assistant content 与上次推送相同 → 跳过。
-    // SSE 的 STATE_UPDATE 帧（task_update / report 等）大多不修改正文，
-    // 但旧实现仍会调用 setCurrentMessages，引发 React 整棵消息树重渲染。
-    // 高频场景下叠加 useEffect/订阅链的副作用，会导致 commit 数堆积、
-    // 最终撞到 React "Maximum update depth exceeded" 护栏。
     if (this.accumulatedContent === this.lastPushedContent) {
       return;
     }
