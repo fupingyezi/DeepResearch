@@ -21,7 +21,7 @@ export const researchConfig: SubagentConfig = {
     '4. 不要假设可以直接访问网页；只能依赖 search_web_tool 返回的片段。',
   ].join('\n'),
   // model 名称使用环境变量；createChatModel 内部会用 OPENAI_QWEN_* env 兜底。
-  model: process.env.SUBAGENT_RESEARCH_MODEL ?? 'qwen3.6-plus',
+  model: process.env.SUBAGENT_RESEARCH_MODEL ?? 'qwen3.7-max',
   maxTurns: 10,
   timeout: 300,
   tools: ['search_web_tool'],

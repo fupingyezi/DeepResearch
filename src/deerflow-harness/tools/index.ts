@@ -5,6 +5,7 @@
  *
  * - 静态工具：直接 export
  * - 动态装载：通过 getAvailableTools(opts) 按需聚合（用于 subagent 内部工具集）
+ * - plan-mode 专用工具集：通过 buildPlanModeTools() 一次性返回
  *
  * @module deerflow-harness/tools
  */
@@ -12,10 +13,20 @@
 import type { StructuredToolInterface } from '@langchain/core/tools';
 
 import { searchWebTool } from './search-web-tool';
-import { taskTool } from './builtins';
+import {
+  taskTool,
+  emitPlanTool,
+  emitReportTool,
+  askClarificationTool,
+} from './builtins';
 
 export { searchWebTool } from './search-web-tool';
-export { taskTool } from './builtins';
+export {
+  taskTool,
+  emitPlanTool,
+  emitReportTool,
+  askClarificationTool,
+} from './builtins';
 
 export interface GetAvailableToolsOptions {
   /** 工具名白名单（按工具的 `name` 属性匹配）；缺省返回所有非 task 工具。 */
@@ -69,4 +80,23 @@ export async function getAvailableTools(
     return wanted.filter((t) => (t as { name?: string }).name !== 'task');
   }
   return wanted;
+}
+
+/**
+ * Plan-mode 专用工具集。
+ *
+ * 包含：
+ * - search_web_tool：lead-agent 也可直接搜索（少数情况）
+ * - emit_plan / emit_report / ask_clarification：plan-mode 专属
+ *
+ * 注意：task 工具由 createBaseAgent.assembleFromFeatures 在 features.subagent
+ * 为 true 时自动注入，本工厂**不**重复返回 task，避免去重逻辑歧义。
+ */
+export function buildPlanModeTools(): StructuredToolInterface[] {
+  return [
+    searchWebTool as StructuredToolInterface,
+    emitPlanTool as StructuredToolInterface,
+    emitReportTool as StructuredToolInterface,
+    askClarificationTool as StructuredToolInterface,
+  ];
 }

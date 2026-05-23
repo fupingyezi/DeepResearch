@@ -28,7 +28,7 @@ function ensureMemoryModelFactory(): void {
   if (memoryFactoryRegistered) return;
   setMemoryModelFactory((modelName) =>
     createChatModel({
-      modelName: modelName ?? process.env.OPENAI_MODEL_NAME ?? 'qwen3.6-plus',
+      modelName: modelName ?? process.env.OPENAI_MODEL_NAME ?? 'qwen3.7-max',
       apiKey: process.env.OPENAI_QWEN_API_KEY,
       baseUrl: process.env.OPENAI_QWEN_BASE_URL,
       // memory updater 是 afterAgent 后台异步任务，不需要 token streaming。
@@ -57,7 +57,7 @@ async function build(): Promise<ThreadService> {
 
   const client = new DeerFlowClient(
     {
-      modelName: process.env.OPENAI_MODEL_NAME ?? 'qwen3.6-plus',
+      modelName: process.env.OPENAI_MODEL_NAME ?? 'qwen3.7-max',
       apiKey: process.env.OPENAI_QWEN_API_KEY,
       baseUrl: process.env.OPENAI_QWEN_BASE_URL,
     },

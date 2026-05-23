@@ -38,9 +38,13 @@ const useConversationStore = create<ConversationState>((set) => ({
       isChating: isChating,
     })),
   setShouldAutoScroll: (shouldAutoScroll) =>
-    set(() => ({
-      shouldAutoScroll: shouldAutoScroll,
-    })),
+    set((state) =>
+      // 值未变时不返回新对象，避免触发不必要的订阅刷新（与 scrollTo 配合时
+      // 会形成「scrollTo→onScroll→setShouldAutoScroll(true)→re-render」的回路）
+      state.shouldAutoScroll === shouldAutoScroll
+        ? {}
+        : { shouldAutoScroll }
+    ),
   intialChatSessions: (chatSessions) =>
     set(() => ({
       chatSessions: chatSessions,

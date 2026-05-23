@@ -31,7 +31,10 @@ export interface DeepResearchProcessState {
   setResearchTargt: (researchTarget: string) => void;
   initialTasks: (tasks: taskType[]) => void;
   setTasks: (tasks: taskType[]) => void;
+  /** 单条更新（按 taskId 匹配；命中则覆盖该项，未命中则忽略） */
   updateTasks: (task: taskType) => void;
+  /** 动态追加（按 taskId 去重；已存在则就地更新） */
+  addTask: (task: taskType) => void;
   updateReport: (report: string) => void;
   setInterruptRequest: (request: INTR) => void;
 }
@@ -61,18 +64,23 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
       }),
     setIsOpenProcessSider: (isOpenProcessSider: boolean) =>
       set((state) => {
+        // 高频帧（task_update）幂等：值未变则不 mutate，避免触发不必要的订阅刷新
+        if (state.isOpenProcessSider === isOpenProcessSider) return;
         state.isOpenProcessSider = isOpenProcessSider;
       }),
     setStatus: (status: processStatusType) =>
-      set(() => ({
-        status: status,
-      })),
+      set((state) =>
+        // 值未变则不返回新对象，避免每帧 stream 都让所有订阅者重渲染
+        state.status === status ? {} : { status }
+      ),
     setResearchTargt: (researchTarget: string) =>
       set((state) => {
+        if (state.researchTarget === researchTarget) return;
         state.researchTarget = researchTarget;
       }),
     setSimpleAnalysis: (simpleAnalysis: string) =>
       set((state) => {
+        if (state.simpleAnalysis === simpleAnalysis) return;
         state.simpleAnalysis = simpleAnalysis;
       }),
     initialTasks: (tasks: taskType[]) =>
@@ -88,6 +96,15 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
         const index = state.tasks.findIndex((t) => t.taskId === task.taskId);
         if (index !== -1) {
           state.tasks[index] = task;
+        }
+      }),
+    addTask: (task: taskType) =>
+      set((state) => {
+        const index = state.tasks.findIndex((t) => t.taskId === task.taskId);
+        if (index !== -1) {
+          state.tasks[index] = { ...state.tasks[index], ...task };
+        } else {
+          state.tasks.push(task);
         }
       }),
     updateReport: (report: string) =>

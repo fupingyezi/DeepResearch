@@ -1,14 +1,20 @@
 /**
  * toClientAgentEvent
  *
- * AgentEvent → ClientAgentEvent 的边界映射纯函数
+ * AgentEvent → ClientAgentEvent 的边界映射纯函数（白名单过滤 + task_* 折叠）。
  *
- * - LIFECYCLE{stage:"start"} → START
- * - LIFECYCLE{stage:"done"}  → END
- * - 其他事件类型             → 同名客户端事件（payload 透传）
+ * 策略：
+ * - LIFECYCLE{stage:'start'} → START；LIFECYCLE{stage:'done'} → END
+ * - LLM_STREAM → STREAM_CHUNK
+ * - TOOL_CALL_START → TOOL_CALL；TOOL_CALL_RESULT → TOOL_RESULT
+ * - STATE_UPDATE / HUMAN_INTERRUPT / ERROR → 同名透传
+ * - TASK_STARTED|RUNNING|COMPLETED|FAILED|CANCELLED|TIMED_OUT
+ *     → 全部折叠为 TASK_PROGRESS（status 字段区分）
+ * - LLM_COMPLETE / HUMAN_RESUME / NODE_ENTER / NODE_EXIT /
+ *   SUB_AGENT_DISPATCH / HARNESS_LIFECYCLE
+ *     → 内部观测事件，前端不需要，返回 `null`（caller 跳过 yield）
  *
- * 若新增 AgentEventType 但未在此处加 case，TypeScript 的 exhaustive 检查
- * （`never` 兜底）会在编译期报错。
+ * 返回 `null` 表示该事件应在边界 drop，不写入 SSE channel。
  */
 
 import { AgentEventType, type AgentEvent } from '../../types/agent-event';
@@ -16,12 +22,18 @@ import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
+  type TaskProgressPayload,
 } from './client-event';
 
-export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
+const DEBUG = process.env.NODE_ENV !== 'production';
+
+export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
   const { agentId } = event;
 
   switch (event.eventType) {
+    /* -------------------------------------------------------------------- */
+    /*  生命周期                                                            */
+    /* -------------------------------------------------------------------- */
     case AgentEventType.LIFECYCLE: {
       if (event.payload.stage === 'start') {
         const sessionId = (event.metadata?.sessionId as string | undefined) ?? undefined;
@@ -31,21 +43,25 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
           sessionId ? { sessionId } : {},
         );
       }
-      return createClientAgentEvent(ClientAgentEventType.END, agentId, {} as Record<string, never>);
+      return createClientAgentEvent(
+        ClientAgentEventType.END,
+        agentId,
+        {} as Record<string, never>,
+      );
     }
 
+    /* -------------------------------------------------------------------- */
+    /*  LLM stream                                                          */
+    /* -------------------------------------------------------------------- */
     case AgentEventType.LLM_STREAM:
       return createClientAgentEvent(ClientAgentEventType.STREAM_CHUNK, agentId, {
         text: event.payload.text,
         reasoning: event.payload.reasoning,
       });
 
-    case AgentEventType.LLM_COMPLETE:
-      return createClientAgentEvent(ClientAgentEventType.LLM_COMPLETE, agentId, {
-        fullText: event.payload.fullText,
-        usage: event.payload.usage,
-      });
-
+    /* -------------------------------------------------------------------- */
+    /*  Tool call                                                           */
+    /* -------------------------------------------------------------------- */
     case AgentEventType.TOOL_CALL_START:
       return createClientAgentEvent(ClientAgentEventType.TOOL_CALL, agentId, {
         toolCallId: event.payload.toolCallId,
@@ -62,15 +78,13 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
         errorMessage: event.payload.errorMessage,
       });
 
+    /* -------------------------------------------------------------------- */
+    /*  State update / Human interrupt                                      */
+    /* -------------------------------------------------------------------- */
     case AgentEventType.STATE_UPDATE:
       return createClientAgentEvent(ClientAgentEventType.STATE_UPDATE, agentId, {
         stateType: event.payload.stateType,
         data: event.payload.data,
-      });
-
-    case AgentEventType.TASK_PROGRESS:
-      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
-        ...event.payload,
       });
 
     case AgentEventType.HUMAN_INTERRUPT:
@@ -79,83 +93,62 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
         details: event.payload.details,
       });
 
-    case AgentEventType.HUMAN_RESUME:
-      return createClientAgentEvent(ClientAgentEventType.HUMAN_RESUME, agentId, {
-        decision: event.payload.decision,
-        resumeTarget: event.payload.resumeTarget,
-      });
-
-    case AgentEventType.NODE_ENTER:
-      return createClientAgentEvent(ClientAgentEventType.NODE_ENTER, agentId, {
-        nodeName: event.payload.nodeName,
-        inputSummary: event.payload.inputSummary,
-      });
-
-    case AgentEventType.NODE_EXIT:
-      return createClientAgentEvent(ClientAgentEventType.NODE_EXIT, agentId, {
-        nodeName: event.payload.nodeName,
-        outputDelta: event.payload.outputDelta,
-      });
-
-    case AgentEventType.SUB_AGENT_DISPATCH:
-      return createClientAgentEvent(ClientAgentEventType.SUB_AGENT_DISPATCH, agentId, {
-        subAgentName: event.payload.subAgentName,
-        task: event.payload.task,
-        status: event.payload.status,
-        result: event.payload.result,
-        errorMessage: event.payload.errorMessage,
-        durationMs: event.payload.durationMs,
-      });
-
-    case AgentEventType.HARNESS_LIFECYCLE:
-      return createClientAgentEvent(ClientAgentEventType.HARNESS_LIFECYCLE, agentId, {
-        harnessId: event.payload.harnessId,
-        phase: event.payload.phase,
-        status: event.payload.status,
-        depth: event.payload.depth,
-        timestamp: event.payload.timestamp,
-        errorMessage: event.payload.errorMessage,
-      });
+    /* -------------------------------------------------------------------- */
+    /*  Task progress —— 折叠所有 task_* 事件                                */
+    /* -------------------------------------------------------------------- */
+    case AgentEventType.TASK_PROGRESS: {
+      const p = event.payload as TaskProgressPayload;
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, p);
+    }
 
     case AgentEventType.TASK_STARTED:
-      return createClientAgentEvent(ClientAgentEventType.TASK_STARTED, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'started',
         description: event.payload.description,
         subagentType: event.payload.subagentType,
       });
 
     case AgentEventType.TASK_RUNNING:
-      return createClientAgentEvent(ClientAgentEventType.TASK_RUNNING, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'running',
         message: event.payload.message,
         messageIndex: event.payload.messageIndex,
         totalMessages: event.payload.totalMessages,
       });
 
     case AgentEventType.TASK_COMPLETED:
-      return createClientAgentEvent(ClientAgentEventType.TASK_COMPLETED, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'completed',
         result: event.payload.result,
       });
 
     case AgentEventType.TASK_FAILED:
-      return createClientAgentEvent(ClientAgentEventType.TASK_FAILED, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'failed',
         error: event.payload.error,
       });
 
     case AgentEventType.TASK_CANCELLED:
-      return createClientAgentEvent(ClientAgentEventType.TASK_CANCELLED, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'cancelled',
         error: event.payload.error,
       });
 
     case AgentEventType.TASK_TIMED_OUT:
-      return createClientAgentEvent(ClientAgentEventType.TASK_TIMED_OUT, agentId, {
+      return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, {
         taskId: event.payload.taskId,
+        status: 'timed_out',
         error: event.payload.error,
       });
 
+    /* -------------------------------------------------------------------- */
+    /*  Error                                                               */
+    /* -------------------------------------------------------------------- */
     case AgentEventType.ERROR:
       return createClientAgentEvent(ClientAgentEventType.ERROR, agentId, {
         errorCode: event.payload.errorCode,
@@ -163,12 +156,29 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent {
         recoverable: event.payload.recoverable,
       });
 
+    /* -------------------------------------------------------------------- */
+    /*  Drop —— 内部观测事件，不发往前端                                      */
+    /* -------------------------------------------------------------------- */
+    case AgentEventType.LLM_COMPLETE:
+    case AgentEventType.HUMAN_RESUME:
+    case AgentEventType.NODE_ENTER:
+    case AgentEventType.NODE_EXIT:
+    case AgentEventType.SUB_AGENT_DISPATCH:
+    case AgentEventType.HARNESS_LIFECYCLE: {
+      if (DEBUG) console.debug('[event-dropped]', event.eventType);
+      return null;
+    }
+
     default: {
-      // exhaustive 检查：若 AgentEventType 新增成员但未在此 switch 处理，
+      // exhaustive 检查：若 AgentEventType 新增成员但未在此 switch 处理
       const _exhaustive: never = event;
-      throw new Error(
-        `[toClientAgentEvent] unhandled event type: ${(_exhaustive as AgentEvent).eventType}`,
-      );
+      if (DEBUG) {
+        console.warn(
+          `[toClientAgentEvent] unhandled event type, dropped:`,
+          (_exhaustive as AgentEvent).eventType,
+        );
+      }
+      return null;
     }
   }
 }

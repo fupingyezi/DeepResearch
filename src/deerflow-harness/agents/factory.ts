@@ -7,17 +7,9 @@ import { RuntimeFeatures, DEFAULT_FEATURES } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool } from '../tools';
 import {
-  threadDataMiddleware,
-  uploadsMiddleware,
-  sandboxMiddleware,
   danglingToolCallMiddleware,
-  guardrailMiddleware,
   toolErrorHandlingMiddleware,
-  summarizationMiddleware,
-  todoMiddleware,
-  titleMiddleware,
   memoryMiddleware,
-  viewImageMiddleware,
   subagentLimitMiddleware,
   loopDetectionMiddleware,
   clarificationMiddleware,
@@ -112,7 +104,7 @@ export function assembleFromFeatures(
   features: RuntimeFeatures,
   options: AssembelOptions,
 ): { chain: AgentMiddleware[]; extraTools: StructuredToolInterface[] } {
-  const { name = 'default', planMode = false, extraMiddlewares, provider } = options;
+  const { provider } = options;
 
   const chain: AgentMiddleware[] = [];
   const extraTools: StructuredToolInterface[] = [];
@@ -141,13 +133,20 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
+  // [11] SubagentLimitMiddleware (features.subagent)
+  //   plan-mode 下 lead-agent 通过 task 工具调度 research subagent，
+  //   必须用并发/总量上限兜底，防止模型 prompt 失控产生过多 task。
+  if (features.subagent === true) {
+    chain.push(subagentLimitMiddleware);
+  }
+
   // [12] LoopDetectionMiddleware (始终启用)
   chain.push(loopDetectionMiddleware);
 
   // [13] ClarificationMiddleware (始终最后)
   chain.push(clarificationMiddleware);
 
-  // subagent 工具化注入lead Agent
+  // subagent 工具化注入 lead Agent
   if (features.subagent === true) {
     extraTools.push(taskTool as StructuredToolInterface);
   }

@@ -113,6 +113,12 @@ function normalizeToolCallArgs(raw: unknown): {
   return { args: {}, fallback: stableStringify(raw) };
 }
 
+/** 简易归一：trim + lowercase + 折叠多空白，提升语义近似 query 的命中率。 */
+function normalizeQueryLike(s: unknown): string {
+  if (typeof s !== 'string') return '';
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 /** 从工具名 + 显著字段派生稳定 key（与 Python 版语义对齐）。 */
 function stableToolKey(
   name: string,
@@ -136,16 +142,26 @@ function stableToolKey(
     return `${path}:${bucketStart}-${bucketEnd}`;
   }
 
+  // search_web_tool: schema 字段名是 question；归一为 lowercase+trim 单字段，
+  // 防止"轻微措辞差异"绕过 hash 命中（这是 7 次重复 search 没断的根因）。
+  if (name === 'search_web_tool') {
+    const q = normalizeQueryLike(args.question ?? args.query ?? '');
+    return q ? `q:${q}` : (fallback ?? stableStringify(args));
+  }
+
   // write_file / str_replace 内容敏感：同一路径在迭代中应被视为不同调用
   if (name === 'write_file' || name === 'str_replace') {
     return fallback ?? stableStringify(args);
   }
 
-  // 其余按显著字段子集
-  const SALIENT = ['path', 'url', 'query', 'command', 'pattern', 'glob', 'cmd'];
+  // 其余按显著字段子集（同时把 question 也纳入，作为 search-like 工具兜底）
+  const SALIENT = ['path', 'url', 'query', 'question', 'command', 'pattern', 'glob', 'cmd'];
   const stable: Record<string, unknown> = {};
   for (const f of SALIENT) {
-    if (args[f] != null) stable[f] = args[f];
+    const v = args[f];
+    if (v == null) continue;
+    // 对 query/question 这类自然语言字段做归一，提升命中率
+    stable[f] = f === 'query' || f === 'question' ? normalizeQueryLike(v) : v;
   }
   if (Object.keys(stable).length > 0) return stableStringify(stable);
   return fallback ?? stableStringify(args);
@@ -275,6 +291,13 @@ export function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}
     }
     const count = ts.history.reduce((acc, h) => (h === callHash ? acc + 1 : acc), 0);
     const toolNames = toolCalls.map((tc) => tc.name ?? '?');
+
+    // Trace：每轮 hash + count，便于诊断"重复 N 次未触发"
+    if (process.env.MW_TRACE === '1' || process.env.MW_TRACE === 'true') {
+      console.log(
+        `[LoopDetectionMiddleware:trace] thread=${threadId} hash=${callHash} count=${count} tools=[${toolNames.join(',')}]`,
+      );
+    }
 
     // ── Layer 1: 哈希层
     if (count >= hardLimit) {

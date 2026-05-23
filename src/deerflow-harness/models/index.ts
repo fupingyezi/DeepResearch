@@ -38,7 +38,7 @@ export function createChatModel(config: ModelConfig) {
 
   const baseUrl = config?.baseUrl ?? process.env.OPENAI_QWEN_BASE_URL;
   const apiKey = config?.apiKey ?? process.env.OPENAI_QWEN_API_KEY;
-  const modelName = config?.modelName ?? 'qwen3.6-plus';
+  const modelName = config?.modelName ?? 'qwen3.7-max';
   const temperature = config?.temperature ?? 0.7;
 
   // === 采样默认参数 ===

@@ -9,7 +9,9 @@ export const HumanDecision = () => {
   const handleInterrupt = async (decision: boolean) => {
     setStatus("processing");
     await chatWithDeepResearch({
-      inputValue: "",
+      // v3 route 校验 input 非空；用决策文本作为 user 下一轮消息，
+      // 后端 checkpointer 自动续接上一轮 messages，模型能读到 plan/clarification 上下文。
+      inputValue: decision ? "确认" : "拒绝",
       callingMode: "resume",
       ...conversationStore,
       ...deepResearchStore,

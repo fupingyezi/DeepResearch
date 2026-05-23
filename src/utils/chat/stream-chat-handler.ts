@@ -40,6 +40,13 @@ export interface StreamChatConfig {
   onStreamComplete?: (data: Record<string, any>) => void;
   onStreamError?: (error: any) => void;
 
+  /**
+   * 额外注入到后端的 metadata（与默认 metadata 合并，调用方覆盖优先）。
+   * deep-research 入口通过该字段写入 `is_plan_mode / subagent_enabled / agent_name`
+   * 三个 plan-mode 开关。
+   */
+  extraMetadata?: Record<string, unknown>;
+
   // 获取深度研究结果
   getDeepResearchResult?: (
     sessionId: UUIDTypes,
@@ -210,6 +217,9 @@ export class StreamChatHandler {
         deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
         isResume: this.config.isResume,
         agentType: this.config.agentType,
+        // 调用方注入的 plan-mode 三开关 / 其它扩展字段；
+        // 放在末尾以便覆盖默认值（如某些场景显式禁用 subagent）。
+        ...(this.config.extraMetadata ?? {}),
       };
 
       await this.processSseStream(`/api/v3/chat/${this.sessionId}`, {
