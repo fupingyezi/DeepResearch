@@ -115,9 +115,25 @@ function tryParseObject(text: string): Record<string, unknown> | null {
  * - arguments 是合法 JSON 字符串 → 1 个
  * - arguments 是被错误拼接的多对象字符串 → 拆成 N 个（共享 name，id 加 -i 后缀）
  * - 其他场景 → 1 个 args 为 `{}` 的兜底（保持原有语义，避免吞掉调用）
+ *
+ * 注意：当 raw payload 没有 `function.name`（或为空字符串）时返回 `[]`。
+ * 之前这里兜底成 `'unknown'`，会让 LangGraph ToolNode 抛
+ * `Tool "unknown" not found.` 直接中断整个 stream（前端表现为
+ * `AGENT_STREAM_ERROR: Tool "unknown" not found.`）。
+ * 模型偶发流式 chunk 把 name 与 args 拆到不同帧、或 raw payload 损坏时，
+ * 名字为空的 entry 不应升级成"真实工具调用"，丢弃即可——下一轮模型会
+ * 重发或改用文本作答，比把整次 run 直接打死更可恢复。
  */
 function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
-  const name = r.function?.name ?? 'unknown';
+  const rawName = typeof r.function?.name === 'string' ? r.function.name.trim() : '';
+  if (!rawName) {
+    console.warn('[QwenRecovery] dropping raw tool_call without name', {
+      hasArgs: typeof r.function?.arguments !== 'undefined',
+      idPreview: typeof r.id === 'string' ? r.id.slice(0, 24) : null,
+    });
+    return [];
+  }
+  const name = rawName;
   // Qwen/DashScope 偶发 id 为空字符串：必须合成一个稳定 id，
   // 否则后续 ToolNode 生成的 ToolMessage.tool_call_id 也会是空，
   // 与 AIMessage.tool_calls[].id 无法配对 → graph 死循环重发 tool_calls。
@@ -243,10 +259,47 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
         }
       }
 
-      // 最终一致性兜底：保证 tool_calls[].id 与 additional_kwargs.tool_calls[].id
-      // 都为非空稳定字符串。Qwen 兼容 OpenAI 协议时常给 id=""，
-      // 会导致 ToolNode 产生的 ToolMessage.tool_call_id 为空、与 AIMessage 不可配对，
-      // 进而触发 graph 死循环（连续 N 次重发同一 tool_call）。
+      // 最终一致性兜底（顺序很重要：先清洗坏掉的 tool_calls，再补 id）：
+      //
+      // 1) 丢弃 name 缺失/空字符串/'unknown' 的 tool_calls。
+      //    这些通常是 Qwen 流式分片错位或 raw payload 损坏的产物，
+      //    保留下去会让 LangGraph ToolNode 抛
+      //    `Tool "unknown" not found.`，整个 stream 直接 ERROR。
+      //    宁可少调一次工具（模型下一轮会自然回退到文本回答），
+      //    也不要把整次 run 打死。
+      // 2) 保证 tool_calls[].id 与 additional_kwargs.tool_calls[].id 都为非空稳定字符串。
+      //    Qwen 兼容 OpenAI 协议时常给 id=""，会导致 ToolNode 产生的
+      //    ToolMessage.tool_call_id 为空、与 AIMessage 不可配对，
+      //    进而触发 graph 死循环（连续 N 次重发同一 tool_call）。
+      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        const before = msg.tool_calls.length;
+        const cleaned = msg.tool_calls.filter((tc: any) => {
+          if (!tc) return false;
+          const n = typeof tc.name === 'string' ? tc.name.trim() : '';
+          if (!n || n === 'unknown') return false;
+          return true;
+        });
+        if (cleaned.length !== before) {
+          console.warn(
+            '[QwenRecovery] dropped tool_calls without a valid name',
+            { before, after: cleaned.length },
+          );
+        }
+        msg.tool_calls = cleaned;
+
+        // raw 侧同步剔除：按 function.name 匹配（同名同位置认为是配对项）。
+        // 这里做最小同步——把 raw 里没有名字的 entry 也清掉，避免 DanglingToolCallMiddleware
+        // 后续再从 raw 兜底拿到一个无名字的占位项。
+        const rawArr = msg.additional_kwargs?.tool_calls;
+        if (Array.isArray(rawArr) && rawArr.length > 0) {
+          msg.additional_kwargs.tool_calls = rawArr.filter((r: any) => {
+            const fn = r?.function;
+            const n = typeof fn?.name === 'string' ? fn.name.trim() : '';
+            return n && n !== 'unknown';
+          });
+        }
+      }
+
       const finalCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       if (finalCalls.length > 0) {
         let mutated = false;

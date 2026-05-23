@@ -19,7 +19,15 @@ export const chatWithSearhAssistant = async (
     setCurrentMessages: params.setCurrentMessages,
     setAbortController: params.setAbortController,
     setCurrentDeepResearchId: () => {},
+
+    // search 链路同样不需要 task 工具：显式关闭 subagent，
+    // 避免命中 DeerFlowClient.baseOptions.subagentEnabled=true 的默认开关。
+    extraMetadata: {
+      is_plan_mode: false,
+      subagent_enabled: false,
+    },
   });
 
   await handler.execute();
 };
+
