@@ -1,6 +1,6 @@
 import "./globals.css";
-import Sider from "@/components/Sider/Sider";
-import DeepResearchProcess from "@/components/Process/DeepResearchProcess";
+import Sider from "@/components/sider/sider";
+import DeepResearchProcess from "@/components/process/deep-research-process";
 import { initialDB } from "@/lib/db";
 
 // 初始化数据库

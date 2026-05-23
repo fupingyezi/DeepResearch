@@ -1,0 +1,217 @@
+/**
+ * ClientAgentEvent —— 前后端共享的对外事件协议（白名单 10 项）
+ *
+ * 设计原则：
+ * - 这是后端发往前端的事件「白名单」，前端 `src/runtime/protocol/client-event.ts`
+ *   通过 re-export 直接复用本文件的枚举与类型，避免双向手动维护。
+ * - 内部观测事件（NODE_ENTER / NODE_EXIT / LLM_COMPLETE / SUB_AGENT_DISPATCH /
+ *   HARNESS_LIFECYCLE / HUMAN_RESUME / TASK_STARTED|RUNNING|COMPLETED|FAILED|
+ *   CANCELLED|TIMED_OUT 等）一律不出现在该协议中；如需观测，请订阅内部
+ *   `AgentEvent` 而非 `ClientAgentEvent`，或在 `to-client-event.ts` 边界 drop。
+ *
+ * 该文件 **必须保持纯类型与枚举**（零 node-only 依赖），以便前端 bundle 直接
+ * 复用。
+ */
+
+/** 客户端事件类型枚举（白名单 10 项，与前端严格一致） */
+export enum ClientAgentEventType {
+  /** 流式会话开始 */
+  START = 'start',
+  /** LLM 增量文本块 */
+  STREAM_CHUNK = 'stream_chunk',
+  /** 工具调用开始 */
+  TOOL_CALL = 'tool_call',
+  /** 工具调用结果 */
+  TOOL_RESULT = 'tool_result',
+  /** 状态变更（DeepResearch 等场景） */
+  STATE_UPDATE = 'state_update',
+  /** 任务进度更新（折叠所有 task_* 内部事件） */
+  TASK_PROGRESS = 'task_progress',
+  /** 人工中断（等待决策） */
+  HUMAN_INTERRUPT = 'human_interrupt',
+  /** 错误 */
+  ERROR = 'error',
+  /** 流式会话结束 */
+  END = 'end',
+  /** 心跳（其余内部事件降级保活） */
+  HEARTBEAT = 'heartbeat',
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Payload 接口                                                               */
+/* -------------------------------------------------------------------------- */
+
+export interface StartPayload {
+  sessionId?: string;
+}
+
+export interface StreamChunkPayload {
+  /** 增量文本 */
+  text: string;
+  /** 可选推理/思考文本 */
+  reasoning?: string;
+}
+
+export interface ToolCallPayload {
+  toolCallId: string;
+  toolName: string;
+  /** 工具入参（已序列化为 JSON 字符串） */
+  arguments?: string;
+}
+
+export interface ToolResultPayload {
+  toolCallId: string;
+  toolName: string;
+  /** 工具返回结果 */
+  result: unknown;
+  success: boolean;
+  errorMessage?: string;
+}
+
+export interface StateUpdatePayload {
+  /** 状态子类型，供前端按需分发 */
+  stateType:
+    | 'simple_analysis'
+    | 'tasks_initial'
+    | 'task_update'
+    | 'report'
+    | 'research_target'
+    | 'custom';
+  data: unknown;
+}
+
+/**
+ * TaskProgressPayload —— 折叠 task_started / task_running / task_completed /
+ * task_failed / task_cancelled / task_timed_out 六类 internal 事件。
+ *
+ * - status: 'started' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+ *   其余字段按 status 语义可选填。
+ */
+export interface TaskProgressPayload {
+  taskId: string;
+  status: string;
+  description?: string;
+  /** subagent 类型名（仅 started 时有值） */
+  subagentType?: string;
+  /** 增量 message（仅 running 时有值） */
+  message?: unknown;
+  messageIndex?: number;
+  totalMessages?: number;
+  /** 终态结果（completed 时） */
+  result?: string | null;
+  /** 终态错误（failed / cancelled / timed_out 时） */
+  error?: string | null;
+  /** 兼容扩展字段 */
+  [k: string]: unknown;
+}
+
+export interface HumanInterruptPayload {
+  question: string;
+  details: unknown;
+}
+
+export interface ErrorPayload {
+  errorCode: string;
+  errorMessage: string;
+  recoverable: boolean;
+}
+
+/** END / HEARTBEAT 不携带业务字段 */
+export type EndPayload = Record<string, never>;
+export type HeartbeatPayload = Record<string, never>;
+
+/* -------------------------------------------------------------------------- */
+/*  事件接口（discriminated union）                                            */
+/* -------------------------------------------------------------------------- */
+
+interface BaseClientAgentEvent {
+  /** 事件时间戳（毫秒） */
+  timestamp: number;
+  /** Agent 标识（lead / sub-agent name 等） */
+  agentId: string;
+}
+
+export interface StartEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.START;
+  payload: StartPayload;
+}
+
+export interface StreamChunkEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.STREAM_CHUNK;
+  payload: StreamChunkPayload;
+}
+
+export interface ToolCallEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TOOL_CALL;
+  payload: ToolCallPayload;
+}
+
+export interface ToolResultEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TOOL_RESULT;
+  payload: ToolResultPayload;
+}
+
+export interface StateUpdateEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.STATE_UPDATE;
+  payload: StateUpdatePayload;
+}
+
+export interface TaskProgressEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TASK_PROGRESS;
+  payload: TaskProgressPayload;
+}
+
+export interface HumanInterruptEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.HUMAN_INTERRUPT;
+  payload: HumanInterruptPayload;
+}
+
+export interface ErrorEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.ERROR;
+  payload: ErrorPayload;
+}
+
+export interface EndEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.END;
+  payload: EndPayload;
+}
+
+export interface HeartbeatEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.HEARTBEAT;
+  payload: HeartbeatPayload;
+}
+
+/** 客户端事件联合类型（discriminated union） */
+export type ClientAgentEvent =
+  | StartEvent
+  | StreamChunkEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | StateUpdateEvent
+  | TaskProgressEvent
+  | HumanInterruptEvent
+  | ErrorEvent
+  | EndEvent
+  | HeartbeatEvent;
+
+/** 客户端事件流（async generator） */
+export type ClientAgentEventStream = AsyncGenerator<ClientAgentEvent>;
+
+/**
+ * 创建 ClientAgentEvent 的工厂函数。
+ *
+ * - 自动填充 `timestamp`，调用方只需关心 eventType / agentId / payload。
+ * - 通过泛型 + `Extract` 实现 payload 类型收窄。
+ */
+export function createClientAgentEvent<T extends ClientAgentEventType>(
+  eventType: T,
+  agentId: string,
+  payload: Extract<ClientAgentEvent, { eventType: T }>['payload'],
+): Extract<ClientAgentEvent, { eventType: T }> {
+  return {
+    eventType,
+    timestamp: Date.now(),
+    agentId,
+    payload,
+  } as Extract<ClientAgentEvent, { eventType: T }>;
+}

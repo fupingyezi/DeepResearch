@@ -40,25 +40,41 @@
 
 ```
 ├── src/
-│   ├── app/                # Next.js App Router 页面
+│   ├── agents/             # Agent 智能体业务逻辑
+│   │   ├── eventStream/    # 事件流适配器（LangChain → AgentEvent）
+│   │   ├── harness/        # Harness 子代理系统
+│   │   │   ├── hooks/      # Harness 钩子实现
+│   │   │   └── subagents/  # 子代理配置
+│   │   ├── modules/        # Agent 组合模块（事件发射器、流处理器）
+│   │   └── tools/          # Agent 工具定义
+│   ├── app/                # Next.js App Router
 │   │   ├── api/            # API 路由
-│   │   ├── agents/         # 智能体定义和逻辑
+│   │   │   ├── chat/
+│   │   │   │   └── v2/     # 统一路由（支持 basic/search/deep_research）
+│   │   │   ├── conversations/  # 会话管理 API
+│   │   │   └── files/      # 文件上传/删除 API
 │   │   ├── layout.tsx      # 根布局
 │   │   └── page.tsx        # 主页
 │   ├── components/         # UI 组件
 │   │   ├── ChatWindow/     # 聊天窗口组件
 │   │   ├── Files/          # 文件处理组件
 │   │   ├── Markdown/       # Markdown 渲染组件
+│   │   ├── MessageToolBar/ # 消息工具栏组件
 │   │   ├── Process/        # 深度研究流程组件
 │   │   └── Sider/          # 侧边栏组件
-│   ├── lib/                # 工具函数和配置
-│   │   ├── cache/          # 缓存配置(暂未使用)
+│   ├── lib/                # 基础设施层
+│   │   ├── cache/          # 缓存配置
 │   │   ├── db/             # 数据库配置
-│   │   └── storage/        # 存储配置
-│   ├── pages/              # Next.js Pages Router 页面
+│   │   ├── llm/            # LLM API 构建
+│   │   ├── storage/        # 文件存储（MinIO）
+│   │   └── stream/         # 流处理（AgentEvent SSE 构建）
 │   ├── store/              # Zustand 状态管理
 │   ├── types/              # TypeScript 类型定义
-│   └── utils/              # 通用工具函数
+│   └── utils/              # 前端工具函数
+│       ├── chat/           # 聊天相关工具
+│       ├── files/          # 文件处理工具
+│       ├── hooks/          # 自定义 React Hooks
+│       └── request/        # API 请求封装
 ├── public/                 # 静态资源
 ├── docker-compose.yaml     # Docker 配置
 ├── next.config.js          # Next.js 配置

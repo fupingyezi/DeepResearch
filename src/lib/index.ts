@@ -1,5 +1,7 @@
 export * from "./db";
-export * from "./cache";
+// export * from "./cache"; // Redis 暂未使用，关闭连接避免报错
 export * from "./storage";
-export * from "./llm";
-export * from "./stream";
+export { extractTextFromFile } from "./file-parser";
+
+export { createChatModel } from "@deerflow-harness/models";
+export type { ModelConfig } from "@deerflow-harness/types";
