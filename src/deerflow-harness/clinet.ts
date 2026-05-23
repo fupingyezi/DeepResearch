@@ -5,7 +5,7 @@ import { BaseCheckpointSaver } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
-import { SYSTEM_PROMPT } from './agents/lead-agent';
+import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
@@ -17,6 +17,7 @@ function buildConfigKey(modelConfig: ModelConfig, opts: ClientOptions): AgentCon
     modelConfig.modelName,
     opts.planMode ?? false,
     opts.subagentEnabled ?? false,
+    opts.memoryEnabled ?? false,
     opts.agentName ?? 'default',
     opts.availableSkills?.sort() ?? [],
   ]);
@@ -28,7 +29,8 @@ export class DeerFlowClient {
 
   private modelConfig: ModelConfig;
   private tools: StructuredToolInterface[];
-  private systemPrompt: string;
+  /** caller 显式传入的 systemPrompt；若给定则关闭 lead-agent 的动态 memory 注入。 */
+  private explicitSystemPrompt?: string;
   private checkpointer?: BaseCheckpointSaver;
   private options: ClientOptions;
 
@@ -42,12 +44,14 @@ export class DeerFlowClient {
   ) {
     this.modelConfig = modelConfig;
     this.tools = options?.tools ?? [searchWebTool];
-    this.systemPrompt = options?.systemPrompt ?? SYSTEM_PROMPT;
+    this.explicitSystemPrompt = options?.systemPrompt;
     this.checkpointer = options?.checkpointer;
     this.options = {
       agentName: options?.agentName ?? 'lead',
       planMode: options?.planMode ?? false,
       subagentEnabled: options?.subagentEnabled ?? false,
+      memoryEnabled: options?.memoryEnabled ?? false,
+      userId: options?.userId,
       availableSkills: options?.availableSkills,
     };
   }
@@ -57,33 +61,57 @@ export class DeerFlowClient {
     this.agentConfigKey = null;
   }
 
-  private ensureAgent(): void {
+  /**
+   * 构建本轮要交给 createAgent 的 systemPrompt：
+   * - 如果 caller 显式传了 systemPrompt，则原样使用（不再注入 memory）；
+   * - 否则当 memoryEnabled 时，调用 lead-agent prompt builder，把最新 `<memory>` 块拼到 prompt 末尾；
+   * - memory 关闭则退化为静态 SYSTEM_PROMPT。
+   */
+  private async resolveSystemPrompt(userId: string | null): Promise<string> {
+    if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
+    if (this.options.memoryEnabled) {
+      try {
+        return await buildLeadAgentSystemPrompt({
+          agentName: this.options.agentName ?? null,
+          userId,
+        });
+      } catch (e) {
+        console.warn('[DeerFlowClient] buildLeadAgentSystemPrompt failed, fallback to SYSTEM_PROMPT:', e);
+      }
+    }
+    return SYSTEM_PROMPT;
+  }
+
+  private async ensureAgent(systemPrompt: string): Promise<void> {
     const key = buildConfigKey(this.modelConfig, this.options);
 
-    if (this.agent !== null && this.agentConfigKey === key) {
+    // memory 注入随每轮变化，因此 memory 启用时不走 cache，每轮重建以获得最新 prompt。
+    const cacheable = !this.options.memoryEnabled;
+    if (cacheable && this.agent !== null && this.agentConfigKey === key) {
       return;
     }
 
-    // cache miss → 重建
     const model = createChatModel(this.modelConfig);
     const provider = inferProvider(this.modelConfig);
 
     this.agent = createBaseAgent({
       model,
       tools: this.tools,
-      systemPrompt: this.systemPrompt,
+      systemPrompt,
       checkpointer: this.checkpointer,
       provider,
       features: {
         subagent: this.options.subagentEnabled === true,
+        memory: this.options.memoryEnabled === true,
       },
     });
 
-    this.agentConfigKey = key;
+    this.agentConfigKey = cacheable ? key : null;
     const builtinNames = this.tools.map((t) => (t as { name?: string }).name ?? '?').join(', ');
     console.log(
       `[DeerFlowClient] Agent created/rebuilt (name=${this.options.agentName}, ` +
         `subagentEnabled=${this.options.subagentEnabled === true}, ` +
+        `memoryEnabled=${this.options.memoryEnabled === true}, ` +
         `caller-tools=[${builtinNames}])`,
     );
   }
@@ -99,12 +127,16 @@ export class DeerFlowClient {
     // 显式参数优先；其次从 ALS 兜底；最后 fallback 到新 uuid
     const effectiveThreadId = threadId ?? getContext()?.thread_id ?? uuidv4();
     const agentId = this.options.agentName ?? 'lead';
+    const effectiveUserId =
+      this.options.userId ?? getContext()?.user_id ?? null;
 
     /** 内部辅助：构造 internal AgentEvent 并即时映射输出 */
     const emit = (event: AgentEvent) => toClientAgentEvent(event);
 
-    // 1. 确保 agent 就绪
-    this.ensureAgent();
+    // 1. 构建本轮 systemPrompt（memoryEnabled 时会拉最新 <memory> 注入到 prompt 末尾），
+    //    然后基于该 prompt 构建/复用 agent。
+    const systemPrompt = await this.resolveSystemPrompt(effectiveUserId);
+    await this.ensureAgent(systemPrompt);
 
     // 2. lifecycle start
     yield emit(
@@ -118,13 +150,19 @@ export class DeerFlowClient {
 
     try {
       // 3. 构造输入 — LangGraph ReActAgent 接受 { messages }
-      const input = {
-        messages: [new HumanMessage(message)],
-      };
+      // memory 已经通过 systemPrompt 注入，不再额外塞 SystemMessage 到 messages 头部，
+      // 避免重复 / 顺序与 summarizationMiddleware 冲突。
+      const input = { messages: [new HumanMessage(message)] };
 
       const config = {
         configurable: {
           thread_id: effectiveThreadId,
+        },
+        // 把 agentName / userId 透传给 LangGraph runtime.context，
+        // 供 memoryMiddleware.afterAgent 在入队时读取。
+        context: {
+          agentName: agentId,
+          userId: effectiveUserId,
         },
       };
 

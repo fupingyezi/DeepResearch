@@ -41,9 +41,21 @@ export function createChatModel(config: ModelConfig) {
   const modelName = config?.modelName ?? 'qwen3.6-plus';
   const temperature = config?.temperature ?? 0.7;
 
+  // === 防 repetition collapse 默认参数 ===
+  // 背景：Qwen/DashScope 在 OpenAI 兼容协议下，若不显式给 max_tokens / 重复惩罚，
+  // 长 thinking 上下文极易陷入 token 级 loop，吐出 "I will X. I will Y. ..." 这种
+  // 模板化退化输出，直到撞 max_tokens 才停。下面是"低风险但显著降级 loop 概率"的默认值。
+  // 业务侧若需更大上限/不同采样策略，可以通过 ModelConfig 显式覆盖。
+  const topP = config?.topP ?? (provider === 'qwen' ? 0.8 : 0.9);
+  const maxTokens = config?.maxTokens ?? 4096;
+  const frequencyPenalty = config?.frequencyPenalty ?? 0.3;
+  const presencePenalty = config?.presencePenalty ?? 0.1;
+
   if (process.env.NODE_ENV !== 'production') {
     console.log(
-      `[createChatModel] model=${modelName} provider=${provider} streaming=${streaming}`,
+      `[createChatModel] model=${modelName} provider=${provider} streaming=${streaming} ` +
+        `temp=${temperature} topP=${topP} maxTokens=${maxTokens} ` +
+        `freqPenalty=${frequencyPenalty} presPenalty=${presencePenalty}`,
     );
   }
 
@@ -55,5 +67,9 @@ export function createChatModel(config: ModelConfig) {
     configuration: { baseURL: baseUrl },
     streaming,
     temperature,
+    topP,
+    maxTokens,
+    frequencyPenalty,
+    presencePenalty,
   });
 }

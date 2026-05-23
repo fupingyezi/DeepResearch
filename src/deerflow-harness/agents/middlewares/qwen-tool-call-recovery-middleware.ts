@@ -1,4 +1,5 @@
 import { createMiddleware } from 'langchain';
+import { randomUUID } from 'node:crypto';
 import { AIMessage } from '@langchain/core/messages';
 
 /**
@@ -7,7 +8,17 @@ import { AIMessage } from '@langchain/core/messages';
  * 在 model 调用出口观察并修复 Qwen/DashScope 返回的 AIMessage：
  * 当 `tool_calls` 为空但 `additional_kwargs.tool_calls` 有内容时，
  *     解析 raw payload 并回填到规范化字段。
+ *
+ * 关键：Qwen/DashScope 兼容 OpenAI 协议时常常给出空字符串的 `id`，
+ * 这会导致 ToolNode 生成的 ToolMessage 也带空 tool_call_id，
+ * 下一轮无法与产生它的 AIMessage 配对，形成"模型反复重发同一 tool_call"
+ * 的死循环。这里若发现 id 缺失则合成一个稳定 id（`qwen-tc-<uuid>`），
+ * 保证 LangGraph 内部可正确串联 tool_call ↔ tool_result。
  */
+
+function synthesizeToolCallId(): string {
+  return `qwen-tc-${randomUUID()}`;
+}
 
 interface RawToolCall {
   id?: string;
@@ -107,7 +118,11 @@ function tryParseObject(text: string): Record<string, unknown> | null {
  */
 function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
   const name = r.function?.name ?? 'unknown';
-  const baseId = r.id ?? '';
+  // Qwen/DashScope 偶发 id 为空字符串：必须合成一个稳定 id，
+  // 否则后续 ToolNode 生成的 ToolMessage.tool_call_id 也会是空，
+  // 与 AIMessage.tool_calls[].id 无法配对 → graph 死循环重发 tool_calls。
+  const rawId = typeof r.id === 'string' ? r.id.trim() : '';
+  const baseId = rawId || synthesizeToolCallId();
   const raw = r.function?.arguments;
 
   // 已经是 object
@@ -174,7 +189,8 @@ function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
   });
 
   return unique.map((args, i) => ({
-    id: baseId ? `${baseId}-${i}` : '',
+    // baseId 已确保非空（缺失时已合成）；多调用展开时附加索引保证唯一。
+    id: `${baseId}-${i}`,
     name,
     args,
     type: 'tool_call' as const,
@@ -224,6 +240,40 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
             );
             msg.tool_calls = recovered;
           }
+        }
+      }
+
+      // 最终一致性兜底：保证 tool_calls[].id 与 additional_kwargs.tool_calls[].id
+      // 都为非空稳定字符串。Qwen 兼容 OpenAI 协议时常给 id=""，
+      // 会导致 ToolNode 产生的 ToolMessage.tool_call_id 为空、与 AIMessage 不可配对，
+      // 进而触发 graph 死循环（连续 N 次重发同一 tool_call）。
+      const finalCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+      if (finalCalls.length > 0) {
+        let mutated = false;
+        for (const tc of finalCalls) {
+          if (!tc) continue;
+          if (typeof tc.id !== 'string' || tc.id.trim() === '') {
+            tc.id = synthesizeToolCallId();
+            mutated = true;
+          }
+        }
+        // 与 raw 侧对齐：按 index 把规范化 id 同步回 additional_kwargs.tool_calls[i].id，
+        // 避免 DanglingToolCallMiddleware 走 fallback 路径时再次因空 id 跳过。
+        const rawArr = msg.additional_kwargs?.tool_calls;
+        if (Array.isArray(rawArr)) {
+          for (let i = 0; i < rawArr.length && i < finalCalls.length; i++) {
+            const raw = rawArr[i];
+            const sid = finalCalls[i]?.id;
+            if (raw && typeof raw === 'object' && sid && (!raw.id || raw.id === '')) {
+              raw.id = sid;
+              mutated = true;
+            }
+          }
+        }
+        if (mutated) {
+          console.warn('[QwenRecovery] synthesized missing tool_call ids', {
+            count: finalCalls.length,
+          });
         }
       }
     }

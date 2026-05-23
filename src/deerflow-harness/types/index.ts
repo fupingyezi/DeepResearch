@@ -16,6 +16,14 @@ export interface ModelConfig {
   provider?: ModelProvider;
   streaming?: boolean;
   temperature?: number;
+  /** nucleus sampling，建议 0.8~0.95；缺省由 provider 决定。 */
+  topP?: number;
+  /** 单次响应最大 token 数；强烈建议显式设置以防 repetition collapse 长尾。 */
+  maxTokens?: number;
+  /** 频次惩罚：>0 抑制重复 token；Qwen/OpenAI 推荐 0.3~0.6。 */
+  frequencyPenalty?: number;
+  /** 出现惩罚：>0 抑制重复主题；推荐 0.0~0.3。 */
+  presencePenalty?: number;
 }
 
 /** 统一工具类型 — LangChain StructuredTool 即可 */
@@ -28,6 +36,10 @@ export interface ClientOptions {
   planMode?: boolean;
   /** 是否启用子 agent */
   subagentEnabled?: boolean;
+  /** 是否启用长期记忆（features.memory）。默认 false。 */
+  memoryEnabled?: boolean;
+  /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
+  userId?: string;
   /** 可用的 skill 列表 */
   availableSkills?: string[];
 }

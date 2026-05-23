@@ -12,6 +12,79 @@ export {
 } from './subagents';
 export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent } from './types';
 
+export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
+export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';
+
+/* -------------------------------------------------------------------------- */
+/*  Memory subsystem                                                           */
+/* -------------------------------------------------------------------------- */
+
+export {
+  // types
+  type Fact,
+  type FactCategory,
+  type HistorySection,
+  type MemoryData,
+  type SectionData,
+  type UserSection,
+  createEmptyMemory,
+  utcNowIsoZ,
+  validateAgentName,
+  AGENT_NAME_PATTERN,
+  // config
+  type MemoryConfig,
+  DEFAULT_MEMORY_CONFIG,
+  getMemoryConfig,
+  loadMemoryConfigFromDict,
+  setMemoryConfig,
+  // paths
+  agentMemoryFile,
+  getBaseDir,
+  memoryFile,
+  userAgentMemoryFile,
+  userMemoryFile,
+  // storage
+  type MemoryStorage,
+  FileMemoryStorage,
+  getMemoryStorage,
+  resetMemoryStorage,
+  // prompt utilities
+  countTokens,
+  formatConversationForUpdate,
+  formatMemoryForInjection,
+  MEMORY_UPDATE_PROMPT,
+  setTokenCounter,
+  type TokenCounter,
+  // message processing
+  detectCorrection,
+  detectReinforcement,
+  filterMessagesForMemory,
+  hasUserAndAi,
+  // updater & manual fact CRUD
+  clearMemoryData,
+  createMemoryFact,
+  deleteMemoryFact,
+  getMemoryData,
+  getMemoryModelFactory,
+  importMemoryData,
+  MemoryUpdater,
+  reloadMemoryData,
+  setMemoryModelFactory,
+  updateMemoryFact,
+  updateMemoryFromConversation,
+  type MemoryModelFactory,
+  type UpdateMemoryOptions,
+  // queue
+  getMemoryQueue,
+  MemoryUpdateQueue,
+  resetMemoryQueue,
+  type AddArgs as MemoryQueueAddArgs,
+  type ConversationContext as MemoryConversationContext,
+  // facade
+  buildMemoryContext,
+  type BuildMemoryContextOptions,
+} from './memory';
+
 export {
   createSseStream,
   toClientAgentEvent,

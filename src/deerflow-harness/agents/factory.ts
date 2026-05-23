@@ -133,6 +133,14 @@ export function assembleFromFeatures(
   // [5] ToolErrorHandlingMiddleware (始终启用)
   chain.push(toolErrorHandlingMiddleware);
 
+  // [9] MemoryMiddleware (features.memory)
+  const memoryFeat = features.memory;
+  if (memoryFeat === true) {
+    chain.push(memoryMiddleware);
+  } else if (typeof memoryFeat === 'object' && memoryFeat !== null) {
+    chain.push(memoryFeat as AgentMiddleware);
+  }
+
   // [12] LoopDetectionMiddleware (始终启用)
   chain.push(loopDetectionMiddleware);
 
