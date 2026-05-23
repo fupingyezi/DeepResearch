@@ -62,6 +62,20 @@ export class StreamChatHandler {
   private initialUpdateMessages: ChatMessageType[] = [];
   private deepResearchResult: deepResearchResultType | undefined = undefined;
   private lastPushedContent: string | null = null;
+  /**
+   * deepResearch 模式下，标记 lead-agent 是否已经发布过最终 report。
+   *
+   * 用于把父图 messages channel 里的 STREAM_CHUNK 切成两段：
+   *   - emit_report 之前：lead 在 emit_plan / 各 task 委派之间夹的"过程态过渡语"，
+   *     与右栏 ProcessHeader / 任务进度大量重复，**屏蔽**，避免左气泡出现"过程倾倒"。
+   *   - emit_report 之后：prompt 强约束 lead "可以再说一两句简短结束语"，
+   *     这段就是用户视角的最终收尾，**放行**到左气泡。
+   *
+   * 注意：simpleAnalysis（plan 阶段开场）走的是 STATE_UPDATE 而不是 STREAM_CHUNK，
+   * 由 chat-with-deep-research.ts 在 start_analyse 分支显式 append，
+   * 不受此标志位影响——所以开场分析始终可见。
+   */
+  private deepResearchReportEmitted = false;
 
   constructor(config: StreamChatConfig) {
     this.config = config;
@@ -253,14 +267,35 @@ export class StreamChatHandler {
     for await (const event of stream) {
       switch (event.eventType) {
         case ClientAgentEventType.STREAM_CHUNK: {
+          // STREAM_CHUNK 来源（父图 messages channel）：
+          //   仅承载 **lead-agent 自身** token；subagent 走 task 工具内部子图，
+          //   不会冒泡到这里——subagent 进度通过 TASK_PROGRESS 走右栏。
+          //
+          // deepResearch 模式下分两段处理：
+          //   - emit_report 之前：lead 在 emit_plan / 各 task 委派之间的过渡语，
+          //     与右栏过程视图高度重复，全部屏蔽（避免左气泡"过程倾倒"）。
+          //   - emit_report 之后：prompt 要求 lead "可以再说一两句简短结束语"，
+          //     这段是面向用户的收尾，放行进左气泡。
+          //
+          // chat / search 模式下 STREAM_CHUNK 是左气泡正文唯一来源，必须保留。
+          if (this.config.mode === 'deepResearch' && !this.deepResearchReportEmitted) {
+            break;
+          }
           this.accumulatedContent += event.payload.text;
           this.updateMessages();
           break;
         }
 
         case ClientAgentEventType.STATE_UPDATE: {
-          if (!this.config.onStreamData) break;
           const { stateType, data } = event.payload;
+          // emit_report 帧充当 deepResearch 模式下 STREAM_CHUNK 的"分水岭"：
+          // 收到这一帧之后，lead 的收尾 token 才允许进入左气泡。
+          // 注意要在 dispatch 之前置位，确保即使 onStreamData 里同步又触发了
+          // STREAM_CHUNK 处理，也能命中放行分支。
+          if (this.config.mode === 'deepResearch' && stateType === 'report') {
+            this.deepResearchReportEmitted = true;
+          }
+          if (!this.config.onStreamData) break;
           // simple_analysis → start_analyse；其余按 stateType 直接转发
           const dispatchType = stateType === 'simple_analysis' ? 'start_analyse' : stateType;
           dispatchStreamData(dispatchType, data);

@@ -70,6 +70,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
                   {supportDownloadFiles.map((fileType) => {
                     return (
                       <div
+                        key={fileType}
                         className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
                         onClick={() => handleDownloadFilesOperator(fileType)}
                       >

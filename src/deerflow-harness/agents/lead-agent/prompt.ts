@@ -78,7 +78,11 @@ const BASE_PLAN_MODE_PROMPT = `You are a research lead operating in DEEP-RESEARC
   - tasks：2-6 个研究子任务，每项 { taskId, description, needSearch }
 
 第 2 步【必做】：按 plan 顺序逐项调用 \`task("research", ...)\` 委派给 research subagent。
-  - prompt 字段必须自包含、可独立执行；引用 plan 里的 taskId / description。
+  - **必须**把 plan 阶段为该任务声明的 \`taskId\` 透传到 task 工具的 \`task_id\` 字段
+    （例：plan 里 taskId="task-1" → 调用时 \`task({ task_id: "task-1", description: "...", prompt: "...", subagent_type: "research" })\`）。
+    这样前端"任务划分"列表能把进度合并到 plan 已展示的对应条目上，不会出现重复条目。
+  - \`description\` 字段使用 plan 中该任务的简短标题（一句话），与 plan 的 description 保持一致。
+  - \`prompt\` 字段必须自包含、可独立执行；引用 plan 里的 taskId / description。
   - 简单议题可一次发起 1~3 个 task 并发；任务总数不得超过 plan 声明的 tasks 数量。
   - 不要在 plan 之外临时加任务；如确需调整范围，先 ask_clarification。
 

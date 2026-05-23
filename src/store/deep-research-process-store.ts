@@ -102,7 +102,20 @@ const useDeepResearchProcessStore = create<DeepResearchProcessState>()(
       set((state) => {
         const index = state.tasks.findIndex((t) => t.taskId === task.taskId);
         if (index !== -1) {
-          state.tasks[index] = { ...state.tasks[index], ...task };
+          // upsert：仅用 task 中**显式提供**（!= undefined）的字段覆盖原值。
+          // 背景：后端 task_progress 折叠后，不同 status 帧只携带各自相关字段
+          // （running 帧没 description，started 帧没 result 等）。如果直接 spread
+          // `{ ...prev, ...task }`，未提供的字段会被 undefined 覆盖，造成右栏
+          // "任务划分"标题在 running 帧瞬间消失再复现的闪烁。
+          const prev = state.tasks[index];
+          const merged = { ...prev };
+          (Object.keys(task) as (keyof taskType)[]).forEach((k) => {
+            const v = task[k];
+            if (v !== undefined) {
+              (merged as any)[k] = v;
+            }
+          });
+          state.tasks[index] = merged;
         } else {
           state.tasks.push(task);
         }
