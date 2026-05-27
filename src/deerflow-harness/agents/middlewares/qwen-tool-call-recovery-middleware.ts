@@ -26,14 +26,14 @@ interface RawToolCall {
   index?: number;
   function?: {
     name?: string;
-    arguments?: unknown;
+    arguments?: any;
   };
 }
 
 interface NormalizedToolCall {
   id: string;
   name: string;
-  args: Record<string, unknown>;
+  args: Record<string, any>;
   type: 'tool_call';
 }
 
@@ -97,11 +97,11 @@ function splitConcatenatedJsonObjects(raw: string): string[] {
   return out;
 }
 
-function tryParseObject(text: string): Record<string, unknown> | null {
+function tryParseObject(text: string): Record<string, any> | null {
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
+      return parsed as Record<string, any>;
     }
   } catch {
     /* fallthrough */
@@ -116,13 +116,6 @@ function tryParseObject(text: string): Record<string, unknown> | null {
  * - arguments 是被错误拼接的多对象字符串 → 拆成 N 个（共享 name，id 加 -i 后缀）
  * - 其他场景 → 1 个 args 为 `{}` 的兜底（保持原有语义，避免吞掉调用）
  *
- * 注意：当 raw payload 没有 `function.name`（或为空字符串）时返回 `[]`。
- * 之前这里兜底成 `'unknown'`，会让 LangGraph ToolNode 抛
- * `Tool "unknown" not found.` 直接中断整个 stream（前端表现为
- * `AGENT_STREAM_ERROR: Tool "unknown" not found.`）。
- * 模型偶发流式 chunk 把 name 与 args 拆到不同帧、或 raw payload 损坏时，
- * 名字为空的 entry 不应升级成"真实工具调用"，丢弃即可——下一轮模型会
- * 重发或改用文本作答，比把整次 run 直接打死更可恢复。
  */
 function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
   const rawName = typeof r.function?.name === 'string' ? r.function.name.trim() : '';
@@ -147,7 +140,7 @@ function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
       {
         id: baseId,
         name,
-        args: raw as Record<string, unknown>,
+        args: raw as Record<string, any>,
         type: 'tool_call',
       },
     ];
@@ -167,7 +160,7 @@ function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
 
   // 多对象拼接：尝试切分
   const chunks = splitConcatenatedJsonObjects(trimmed);
-  const parsed: Record<string, unknown>[] = [];
+  const parsed: Record<string, any>[] = [];
   for (const c of chunks) {
     const obj = tryParseObject(c);
     if (obj) parsed.push(obj);
@@ -189,7 +182,7 @@ function expandRawToolCall(r: RawToolCall): NormalizedToolCall[] {
 
   // 多个有效对象：去重后展开为多调用
   const seen = new Set<string>();
-  const unique: Record<string, unknown>[] = [];
+  const unique: Record<string, any>[] = [];
   for (const p of parsed) {
     const key = JSON.stringify(p);
     if (!seen.has(key)) {

@@ -140,7 +140,7 @@ export function countTokens(text: string): number {
 }
 
 // 强制 confidence 在 0-1 之间
-function coerceConfidence(value: unknown, dft = 0.0): number {
+function coerceConfidence(value: any, dft = 0.0): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return Math.max(0, Math.min(1, dft));
   return Math.max(0, Math.min(1, n));

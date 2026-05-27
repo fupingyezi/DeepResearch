@@ -17,7 +17,7 @@ export interface ViewedImageData {
 
 export interface UploadedFile {
   // 与 Python 的 list[dict] 对齐，按需补字段
-  [key: string]: unknown;
+  [key: string]: any;
 }
 
 /** Reducer for artifacts list - 合并并去重 */
@@ -61,7 +61,7 @@ export const ThreadStateAnnotation = Annotation.Root({
     default: () => [],
   }),
 
-  todos: Annotation<unknown[] | null | undefined>(),
+  todos: Annotation<any[] | null | undefined>(),
   uploadedFiles: Annotation<UploadedFile[] | null | undefined>(),
 
   viewedImages: Annotation<Record<string, ViewedImageData>>({

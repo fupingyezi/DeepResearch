@@ -25,7 +25,7 @@ export const AskClarificationInputSchema = z.object({
     .min(1)
     .describe('要向用户询问的问题，单句、可直接展示给用户。'),
   details: z
-    .unknown()
+    .any()
     .optional()
     .describe(
       '可选的上下文，便于前端在决策面板中给出更多说明（自由结构）。',
@@ -34,11 +34,11 @@ export const AskClarificationInputSchema = z.object({
 
 type AskClarificationInput = z.infer<typeof AskClarificationInputSchema>;
 
-function pickWriter(runtime: any): ((p: unknown) => void) | undefined {
-  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, unknown>;
+function pickWriter(runtime: any): ((p: any) => void) | undefined {
+  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
   return (
-    (runtime?.writer as ((p: unknown) => void) | undefined) ??
-    (cfgObj.writer as ((p: unknown) => void) | undefined)
+    (runtime?.writer as ((p: any) => void) | undefined) ??
+    (cfgObj.writer as ((p: any) => void) | undefined)
   );
 }
 

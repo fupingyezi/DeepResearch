@@ -26,11 +26,11 @@ export const EmitReportInputSchema = z.object({
 
 type EmitReportInput = z.infer<typeof EmitReportInputSchema>;
 
-function pickWriter(runtime: any): ((p: unknown) => void) | undefined {
-  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, unknown>;
+function pickWriter(runtime: any): ((p: any) => void) | undefined {
+  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
   return (
-    (runtime?.writer as ((p: unknown) => void) | undefined) ??
-    (cfgObj.writer as ((p: unknown) => void) | undefined)
+    (runtime?.writer as ((p: any) => void) | undefined) ??
+    (cfgObj.writer as ((p: any) => void) | undefined)
   );
 }
 

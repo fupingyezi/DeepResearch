@@ -42,7 +42,7 @@ export interface CreateThreadInput {
   user_id?: string;
   assistant_id?: string;
   display_name?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface ListThreadsOptions {
@@ -50,7 +50,7 @@ export interface ListThreadsOptions {
   status?: ThreadStatus;
   limit?: number;
   offset?: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface GetThreadInput {
@@ -68,7 +68,7 @@ export interface SubmitRunInput {
   thread_id: string;
   user_id?: string;
   input: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface SubscribeInput {
@@ -86,13 +86,13 @@ export interface ThreadService {
   listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]>;
   getThread(
     input: GetThreadInput,
-  ): Promise<{ meta: ThreadMeta; checkpoint?: unknown } | null>;
+  ): Promise<{ meta: ThreadMeta; checkpoint?: any } | null>;
   deleteThread(input: DeleteThreadInput): Promise<void>;
   submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
   subscribe(input: SubscribeInput): AsyncIterable<ClientAgentEvent>;
-  getCheckpoint(input: GetCheckpointInput): Promise<unknown>;
+  getCheckpoint(input: GetCheckpointInput): Promise<any>;
   /** 占位：interrupt/resume 后续版本提供 */
-  resume(input: { thread_id: string; run_id: string; decision: unknown }): Promise<never>;
+  resume(input: { thread_id: string; run_id: string; decision: any }): Promise<never>;
 }
 
 export interface ThreadServiceDeps {
@@ -153,7 +153,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     async deleteThread({ thread_id, user_id }) {
       await threads.delete(thread_id, { user_id: user_id ?? null });
       // 尝试清理 checkpoint（PostgresSaver 1.x 提供 deleteThread）
-      const fn = (checkpointer as unknown as { deleteThread?: (tid: string) => Promise<void> })
+      const fn = (checkpointer as any as { deleteThread?: (tid: string) => Promise<void> })
         .deleteThread;
       if (typeof fn === 'function') {
         try {
@@ -254,7 +254,7 @@ async function getTupleSafe(
   checkpointer: BaseCheckpointSaver,
   thread_id: string,
   checkpoint_id?: string,
-): Promise<unknown> {
+): Promise<any> {
   const cfg = buildThreadConfig(thread_id, checkpoint_id);
   // BaseCheckpointSaver 接口暴露 getTuple；此处 as any 仅用于兼容部分实现签名
   const fn = checkpointer.getTuple;

@@ -22,7 +22,7 @@ function truncateDetail(detail: string): string {
 }
 
 /** 从未知错误中提取人类可读的描述与构造器名（用于日志/反馈给模型）。 */
-function describeError(err: unknown): { className: string; detail: string } {
+function describeError(err: any): { className: string; detail: string } {
   if (err instanceof Error) {
     const className = err.constructor?.name || 'Error';
     const detail = truncateDetail((err.message || '').trim() || className);

@@ -63,7 +63,7 @@ export interface ToolResultPayload {
   toolCallId: string;
   toolName: string;
   /** 工具返回结果 */
-  result: unknown;
+  result: any;
   success: boolean;
   errorMessage?: string;
 }
@@ -77,7 +77,7 @@ export interface StateUpdatePayload {
     | 'report'
     | 'research_target'
     | 'custom';
-  data: unknown;
+  data: any;
 }
 
 /**
@@ -94,7 +94,7 @@ export interface TaskProgressPayload {
   /** subagent 类型名（仅 started 时有值） */
   subagentType?: string;
   /** 增量 message（仅 running 时有值） */
-  message?: unknown;
+  message?: any;
   messageIndex?: number;
   totalMessages?: number;
   /** 终态结果（completed 时） */
@@ -102,12 +102,12 @@ export interface TaskProgressPayload {
   /** 终态错误（failed / cancelled / timed_out 时） */
   error?: string | null;
   /** 兼容扩展字段 */
-  [k: string]: unknown;
+  [k: string]: any;
 }
 
 export interface HumanInterruptPayload {
   question: string;
-  details: unknown;
+  details: any;
 }
 
 export interface ErrorPayload {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { v4 as uuidv4 } from 'uuid';
 import { HumanMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
 
@@ -37,7 +37,7 @@ export class SubagentExecutor {
   constructor(opts: SubagentExecutorOptions) {
     this.config = opts.config;
     this.tools = opts.tools;
-    this.traceId = opts.traceId ?? randomUUID().slice(0, 8);
+    this.traceId = opts.traceId ?? uuidv4().slice(0, 8);
     this.taskId = opts.taskId ?? this.traceId;
   }
 
@@ -85,7 +85,7 @@ export class SubagentExecutor {
       const input = { messages: [new HumanMessage(prompt)] };
       // 若处于 thread 上下文中，把 thread_id 透传给子图，让父子共用同一 checkpoint thread
       const ctxThreadId = getContext()?.thread_id;
-      const streamOpts: Record<string, unknown> = {
+      const streamOpts: Record<string, any> = {
         signal: internalCtl.signal,
         streamMode: ['messages', 'updates'],
         recursionLimit: Math.max(2, config.maxTurns) * 2,
@@ -99,7 +99,7 @@ export class SubagentExecutor {
       let finalText: string | null = null;
 
       for await (const chunk of stream) {
-        const [mode, payload] = chunk as [string, unknown];
+        const [mode, payload] = chunk as [string, any];
 
         if (mode === 'messages') {
           // payload 形如 [msgChunk, metadata]
@@ -148,7 +148,7 @@ export class SubagentExecutor {
       // 6) 终态：completed -------------------------------------------------
       yield { kind: 'completed', taskId, result: finalText };
       console.info(`${logPrefix} completed (messages=${aiMessageCount})`);
-    } catch (err: unknown) {
+    } catch (err: any) {
       const aborted = internalCtl.signal.aborted || parentSignal?.aborted;
 
       if (timedOut) {
@@ -180,9 +180,9 @@ export class SubagentExecutor {
  * 把 LangChain message chunk 转成可安全序列化的对象，避免 writer/SSE 链路
  * 持有完整类实例（含循环引用风险）。
  */
-function safeSerializeMessage(msg: unknown): Record<string, unknown> {
+function safeSerializeMessage(msg: any): Record<string, any> {
   if (!msg || typeof msg !== 'object') return { content: String(msg ?? '') };
-  const m = msg as Record<string, unknown>;
+  const m = msg as Record<string, any>;
   return {
     type: (m as any)?._getType?.() ?? m.type ?? 'unknown',
     content: m.content ?? '',

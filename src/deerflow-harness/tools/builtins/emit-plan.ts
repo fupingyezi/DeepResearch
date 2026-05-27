@@ -50,11 +50,11 @@ type EmitPlanInput = z.infer<typeof EmitPlanInputSchema>;
  * 安全地从 runtime 中拿到 LangGraph custom writer。
  * runtime 形态因 LangChain JS 版本而异，按兼容顺序探测。
  */
-function pickWriter(runtime: any): ((p: unknown) => void) | undefined {
-  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, unknown>;
+function pickWriter(runtime: any): ((p: any) => void) | undefined {
+  const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
   return (
-    (runtime?.writer as ((p: unknown) => void) | undefined) ??
-    (cfgObj.writer as ((p: unknown) => void) | undefined)
+    (runtime?.writer as ((p: any) => void) | undefined) ??
+    (cfgObj.writer as ((p: any) => void) | undefined)
   );
 }
 

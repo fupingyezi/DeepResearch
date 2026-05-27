@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       thread_id?: string;
       assistant_id?: string;
       display_name?: string;
-      metadata?: Record<string, unknown>;
+      metadata?: Record<string, any>;
     };
 
     const service = await getThreadService();

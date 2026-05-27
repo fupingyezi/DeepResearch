@@ -57,7 +57,7 @@ function startTimer(): () => string {
 }
 
 /** 把任意错误描述压缩成一行，避免巨型堆栈污染日志。 */
-function describeErr(err: unknown): string {
+function describeErr(err: any): string {
   if (err instanceof Error) return `${err.constructor?.name || 'Error'}: ${err.message}`;
   try {
     return typeof err === 'string' ? err : JSON.stringify(err);
@@ -75,14 +75,14 @@ export function withCallLog<M extends AgentMiddleware>(
 
   // AgentMiddleware 是一个对象（含 name + 各 hook 字段）。
   // 我们浅拷贝并覆盖其上存在的 hook。
-  const mw = middleware as unknown as Record<string, unknown> & { name?: string };
+  const mw = middleware as any as Record<string, any> & { name?: string };
   const mwName = mw.name || 'UnknownMiddleware';
   const logger = options.logger ?? console;
   const prefix = options.prefix ?? ((n: string) => `[mw:${n}]`);
   const tag = prefix(mwName);
 
   // 用浅拷贝产出一个新对象，避免污染原中间件实例（可能被多处共享）。
-  const decorated: Record<string, unknown> = { ...mw };
+  const decorated: Record<string, any> = { ...mw };
 
   for (const hook of HOOKS) {
     const original = mw[hook];
@@ -91,13 +91,13 @@ export function withCallLog<M extends AgentMiddleware>(
     if (hook === 'wrapModelCall' || hook === 'wrapToolCall') {
       // wrap-style: (request, handler) => Promise<result>
       decorated[hook] = async function wrappedWrapHook(
-        request: unknown,
-        handler: (req: unknown) => Promise<unknown>,
+        request: any,
+        handler: (req: any) => Promise<any>,
       ) {
         const elapsed = startTimer();
         logger.info(`${tag} ${hook} ▶ enter`);
         // 给 handler 也打日志，便于看出"模型/工具实际耗时" vs "本中间件包装耗时"
-        const tracedHandler = async (req: unknown) => {
+        const tracedHandler = async (req: any) => {
           const handlerElapsed = startTimer();
           logger.info(`${tag} ${hook} → handler ▶`);
           try {
@@ -111,7 +111,7 @@ export function withCallLog<M extends AgentMiddleware>(
         };
 
         try {
-          const result = await (original as (req: unknown, h: typeof tracedHandler) => unknown)(
+          const result = await (original as (req: any, h: typeof tracedHandler) => any)(
             request,
             tracedHandler,
           );
@@ -126,11 +126,11 @@ export function withCallLog<M extends AgentMiddleware>(
     }
 
     // 普通生命周期 hook: (state, runtime) => result | Promise<result>
-    decorated[hook] = async function wrappedLifecycleHook(state: unknown, runtime: unknown) {
+    decorated[hook] = async function wrappedLifecycleHook(state: any, runtime: any) {
       const elapsed = startTimer();
       logger.info(`${tag} ${hook} ▶ enter`);
       try {
-        const result = await (original as (s: unknown, r: unknown) => unknown | Promise<unknown>)(
+        const result = await (original as (s: any, r: any) => any | Promise<any>)(
           state,
           runtime,
         );
@@ -143,7 +143,7 @@ export function withCallLog<M extends AgentMiddleware>(
     };
   }
 
-  return decorated as unknown as M;
+  return decorated as any as M;
 }
 
 /** 批量装饰，保持顺序与引用稳定（每个 mw 都被替换为新对象）。 */

@@ -92,7 +92,7 @@ export class ThreadChannel {
             // 3) 已 close 且无残留 → 终止
             if (isClosed()) {
               cleanup();
-              return { value: undefined as unknown as ClientAgentEvent, done: true };
+              return { value: undefined as any as ClientAgentEvent, done: true };
             }
             // 4) 等待下一个事件
             return new Promise<IteratorResult<ClientAgentEvent>>((resolve) => {
@@ -101,7 +101,7 @@ export class ThreadChannel {
           },
           async return(): Promise<IteratorResult<ClientAgentEvent>> {
             cleanup();
-            return { value: undefined as unknown as ClientAgentEvent, done: true };
+            return { value: undefined as any as ClientAgentEvent, done: true };
           },
         };
       },

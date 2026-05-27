@@ -11,7 +11,7 @@ export interface ThreadMeta {
   user_id?: string | null;
   display_name: string;
   status: ThreadStatus;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, any>;
   /** ISO 8601 字符串 */
   created_at: string;
   updated_at: string;
@@ -22,14 +22,14 @@ export interface ThreadMetaCreateInput {
   assistant_id?: string;
   user_id?: string | null;
   display_name?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface ThreadMetaSearchOptions {
   user_id?: string | null;
   status?: ThreadStatus;
   /** jsonb 包含匹配（PG @> ）的子结构 */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
   limit?: number;
   offset?: number;
 }
@@ -47,7 +47,7 @@ export interface ThreadMetaStore {
   updateStatus(thread_id: string, status: ThreadStatus, opts?: { user_id?: string | null }): Promise<void>;
   updateMetadata(
     thread_id: string,
-    patch: Record<string, unknown>,
+    patch: Record<string, any>,
     opts?: { user_id?: string | null },
   ): Promise<void>;
   /** user_id 为空时直接放行；存在则做 owner 校验。 */

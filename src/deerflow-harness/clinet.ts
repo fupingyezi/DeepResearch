@@ -90,7 +90,7 @@ export class DeerFlowClient {
   /**
    * 计算本轮 stream 的运行期开关：以 baseOptions 为底，metadata 覆盖。
    */
-  private resolveRuntimeOptions(metadata?: Record<string, unknown>): RuntimeRunOptions {
+  private resolveRuntimeOptions(metadata?: Record<string, any>): RuntimeRunOptions {
     const m = metadata ?? {};
     const planMode =
       typeof m.is_plan_mode === 'boolean' ? (m.is_plan_mode as boolean) : !!this.baseOptions.planMode;
@@ -222,7 +222,7 @@ export class DeerFlowClient {
   async *stream(
     message: string,
     threadId?: string,
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, any>,
   ): ClientAgentEventStream {
     // 1. 解析本次调用的运行期开关（不修改 this.baseOptions）
     const runOpts = this.resolveRuntimeOptions(metadata);
@@ -394,7 +394,7 @@ export class DeerFlowClient {
 
         // —— human_interrupt（ask_clarification） ——
         if (t === 'human_interrupt') {
-          const payload = (raw.payload ?? {}) as { question?: string; details?: unknown };
+          const payload = (raw.payload ?? {}) as { question?: string; details?: any };
           const ev = emit(
             createAgentEvent<AgentEvent>(
               AgentEventType.HUMAN_INTERRUPT,

@@ -26,7 +26,7 @@ interface ChatBody {
   input?: string;
   agentType?: string;
   displayName?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export async function POST(

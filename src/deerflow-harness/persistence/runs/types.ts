@@ -10,7 +10,7 @@ export interface Run {
   assistant_id: string;
   user_id?: string | null;
   status: RunStatus;
-  input: unknown;
+  input: any;
   error?: string | null;
   created_at: string;
   updated_at: string;
@@ -21,7 +21,7 @@ export interface RunCreateInput {
   thread_id: string;
   assistant_id?: string;
   user_id?: string | null;
-  input: unknown;
+  input: any;
 }
 
 export interface RunListOptions {

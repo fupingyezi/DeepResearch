@@ -204,7 +204,7 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
 /* Apply updates                                                               */
 /* -------------------------------------------------------------------------- */
 
-function factContentKey(content: unknown): string | null {
+function factContentKey(content: any): string | null {
   if (typeof content !== 'string') return null;
   const s = content.trim();
   if (!s) return null;

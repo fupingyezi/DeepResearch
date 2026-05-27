@@ -28,7 +28,7 @@ export const clineMessageSchema = z.object({
   partial: z.boolean().optional(),
   reasoning: z.string().optional(),
   conversationHistoryIndex: z.number().optional(),
-  checkpoint: z.record(z.string(), z.unknown()).optional(),
+  checkpoint: z.record(z.string(), z.any()).optional(),
   progressStatus: toolProgressStatusSchema.optional(),
   isProtected: z.boolean().optional(),
   isAnswered: z.boolean().optional(),

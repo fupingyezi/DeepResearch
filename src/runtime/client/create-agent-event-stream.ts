@@ -23,7 +23,7 @@ export interface AgentEventStreamOptions {
   /** HTTP 方法，默认 POST。GET 时 body 会被忽略。 */
   method?: 'GET' | 'POST';
   /** POST body（会被 JSON.stringify 后发送） */
-  body?: unknown;
+  body?: any;
   /** 中断信号 */
   signal?: AbortSignal;
   /** 自定义 headers，会与默认的 Content-Type 合并 */

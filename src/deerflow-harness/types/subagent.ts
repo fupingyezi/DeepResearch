@@ -45,7 +45,7 @@ export type SubagentEvent =
   | {
       kind: 'ai_message';
       taskId: string;
-      message: unknown;
+      message: any;
       index: number;
       total: number;
     }

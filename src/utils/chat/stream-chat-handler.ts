@@ -42,7 +42,7 @@ export interface StreamChatConfig {
    * deep-research 入口通过该字段写入 `is_plan_mode / subagent_enabled / agent_name`
    * 三个 plan-mode 开关。
    */
-  extraMetadata?: Record<string, unknown>;
+  extraMetadata?: Record<string, any>;
 
   // 获取深度研究结果
   getDeepResearchResult?: (
@@ -243,7 +243,7 @@ export class StreamChatHandler {
   /**
    * 消费后端 ClientAgentEvent 流（POST SSE 订阅 v3 chat 合并端点）
    */
-  private async processSseStream(streamUrl: string, body: Record<string, unknown>): Promise<void> {
+  private async processSseStream(streamUrl: string, body: Record<string, any>): Promise<void> {
     const stream = createAgentEventStream({
       endpoint: streamUrl,
       method: 'POST',
@@ -251,7 +251,7 @@ export class StreamChatHandler {
       signal: this.abortController!.signal,
     });
 
-    const dispatchStreamData = (type: string, payload: unknown) => {
+    const dispatchStreamData = (type: string, payload: any) => {
       const newContent = this.config.onStreamData?.({ type, payload }, this.accumulatedContent);
       if (typeof newContent === 'string' && newContent !== this.accumulatedContent) {
         this.accumulatedContent = newContent;

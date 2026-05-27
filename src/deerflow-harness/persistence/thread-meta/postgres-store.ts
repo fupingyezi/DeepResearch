@@ -22,7 +22,7 @@ interface ThreadMetaRow {
   user_id: string | null;
   display_name: string;
   status: ThreadStatus;
-  metadata: unknown;
+  metadata: any;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -35,7 +35,7 @@ const rowToMeta = (r: ThreadMetaRow): ThreadMeta => ({
   user_id: r.user_id,
   display_name: r.display_name,
   status: r.status,
-  metadata: (r.metadata && typeof r.metadata === 'object' ? (r.metadata as Record<string, unknown>) : {}),
+  metadata: (r.metadata && typeof r.metadata === 'object' ? (r.metadata as Record<string, any>) : {}),
   created_at: toIso(r.created_at),
   updated_at: toIso(r.updated_at),
 });
@@ -71,7 +71,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
 
   async search(opts: ThreadMetaSearchOptions): Promise<ThreadMeta[]> {
     const where: string[] = [];
-    const params: unknown[] = [];
+    const params: any[] = [];
     let i = 1;
 
     if (opts.user_id != null) {
@@ -103,7 +103,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       limit $${limitIdx} offset $${offsetIdx}
     `;
 
-    const res = await query(sql, params as unknown[]);
+    const res = await query(sql, params as any[]);
     return (res.rows as ThreadMetaRow[]).map(rowToMeta);
   }
 
@@ -136,7 +136,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
 
   async updateMetadata(
     thread_id: string,
-    patch: Record<string, unknown>,
+    patch: Record<string, any>,
     opts?: { user_id?: string | null },
   ): Promise<void> {
     await this.assertOwner(thread_id, opts?.user_id);

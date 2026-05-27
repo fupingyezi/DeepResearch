@@ -1,6 +1,6 @@
 import { tool } from 'langchain';
 import z from 'zod';
-import { randomUUID } from 'node:crypto';
+import { v4 as uuidv4 } from 'uuid';
 
 import { SubagentExecutor, getSubagentConfig, getAvailableSubagentNames } from '../../subagents';
 import type { SubagentConfig } from '../../subagents';
@@ -47,18 +47,12 @@ function toWriterPayload(
   ev: SubagentEvent,
   description: string,
   publicTaskId: string,
-): Record<string, unknown> {
+): Record<string, any> {
   switch (ev.kind) {
     case 'started':
       return {
         type: 'task_started',
         task_id: publicTaskId,
-        // 优先采用 task tool 调用方（lead-agent）传入的 `description`——它是
-        // plan 里那条具体任务的简短标题（如"研究蜂鸟最高飞行时速"）。
-        // 而 `ev.description` 来自 SubagentExecutor 的 `started` 帧，里面塞的是
-        // subagent 的 `config.description`（subagent 的自我介绍，对所有任务都一样），
-        // 把它当 description 推到前端会把"任务划分"里每条任务的标题都洗成同一段
-        // "深度研究子 agent。当用户问题需要联网搜索..."的模板字符串。
         description: description || ev.description,
         subagent_type: ev.subagentType,
       };
@@ -101,21 +95,17 @@ export const taskTool = tool(
     //   - runtime.signal | runtime.config?.signal
     //   - runtime.writer | runtime.config?.writer
     //   - runtime.toolCall?.id | runtime.toolCallId
-    const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, unknown>;
+    const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
     const parentSignal: AbortSignal | undefined =
       (runtime?.signal as AbortSignal | undefined) ?? (cfgObj.signal as AbortSignal | undefined);
-    const writer: ((p: unknown) => void) | undefined =
-      (runtime?.writer as ((p: unknown) => void) | undefined) ??
-      (cfgObj.writer as ((p: unknown) => void) | undefined);
+    const writer: ((p: any) => void) | undefined =
+      (runtime?.writer as ((p: any) => void) | undefined) ??
+      (cfgObj.writer as ((p: any) => void) | undefined);
     const toolCallId: string =
       (runtime?.toolCall?.id as string | undefined) ??
       (runtime?.toolCallId as string | undefined) ??
-      randomUUID().slice(0, 8);
+      uuidv4().slice(0, 8);
 
-    // 推给前端的 publicTaskId：优先采用 lead-agent 传入的 plan taskId（保证与
-    // emit_plan tasks_initial 阶段同一条任务在前端 store 里 upsert 成功），缺省退回
-    // 内部 toolCallId。executor 仍用 toolCallId 作为它的内部 taskId（避免影响 LangGraph
-    // 内部链路），二者解耦。
     const publicTaskId = task_id ?? toolCallId;
 
     // ---- 3) 装载 subagent 内部工具集（subagentEnabled=false 防递归） ------
@@ -132,7 +122,7 @@ export const taskTool = tool(
       taskId: toolCallId,
     });
 
-    const safeWriter = (payload: unknown) => {
+    const safeWriter = (payload: any) => {
       try {
         writer?.(payload);
       } catch (err) {
@@ -169,7 +159,7 @@ export const taskTool = tool(
           // started / ai_message：不影响终态
         }
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       // executor 一般会先 yield 终态再 return，不应抛到这里。
       // 兜底：catch AbortError 等异常时再补一条 cancelled 事件，并以失败形式返回。
       const aborted = parentSignal?.aborted || (err as Error)?.name === 'AbortError';

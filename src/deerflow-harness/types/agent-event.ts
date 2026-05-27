@@ -213,7 +213,7 @@ export interface TaskStartedPayload {
 export interface TaskRunningPayload {
   taskId: string;
   /** 当前增量 AI 消息（结构化 JSON，前端可按需展示） */
-  message: unknown;
+  message: any;
   /** 当前是第几条（从 1 开始） */
   messageIndex: number;
   /** 截至目前累计的消息数 */

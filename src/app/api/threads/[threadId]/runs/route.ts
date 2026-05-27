@@ -20,7 +20,7 @@ export async function POST(
   try {
     const body = (await request.json().catch(() => ({}))) as {
       input?: string;
-      metadata?: Record<string, unknown>;
+      metadata?: Record<string, any>;
     };
     if (!body.input || typeof body.input !== 'string') {
       return NextResponse.json({ error: 'missing input' }, { status: 400 });

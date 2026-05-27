@@ -33,16 +33,16 @@ import type { ToolCall } from '@langchain/core/messages/tool';
 interface NormalizedToolCall {
   id?: string;
   name: string;
-  args: Record<string, unknown>;
+  args: Record<string, any>;
 }
 
 interface RawToolCallPayload {
   id?: string;
   name?: string;
-  args?: unknown;
+  args?: any;
   function?: {
     name?: string;
-    arguments?: unknown;
+    arguments?: any;
   };
 }
 
@@ -55,7 +55,7 @@ function extractToolCalls(msg: BaseMessage): NormalizedToolCall[] {
       return structured.map((tc: ToolCall) => ({
         id: tc.id,
         name: tc.name ?? 'unknown',
-        args: (tc.args ?? {}) as Record<string, unknown>,
+        args: (tc.args ?? {}) as Record<string, any>,
       }));
     }
   }
@@ -73,14 +73,14 @@ function extractToolCalls(msg: BaseMessage): NormalizedToolCall[] {
     const fn = raw.function;
     const name = raw.name ?? fn?.name ?? 'unknown';
 
-    let args: Record<string, unknown> = {};
+    let args: Record<string, any> = {};
     if (raw.args && typeof raw.args === 'object') {
-      args = raw.args as Record<string, unknown>;
+      args = raw.args as Record<string, any>;
     } else if (typeof fn?.arguments === 'string') {
       try {
         const parsed = JSON.parse(fn.arguments);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          args = parsed as Record<string, unknown>;
+          args = parsed as Record<string, any>;
         }
       } catch {
         // 解析失败保持空对象；上游模型一般容忍空 args 的占位回包

@@ -19,7 +19,7 @@ interface RunRow {
   assistant_id: string;
   user_id: string | null;
   status: RunStatus;
-  input: unknown;
+  input: any;
   error: string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -75,7 +75,7 @@ export class PgRunStore implements RunStore {
 
   async listByThread(thread_id: string, opts?: RunListOptions): Promise<Run[]> {
     const where: string[] = ['thread_id = $1'];
-    const params: unknown[] = [thread_id];
+    const params: any[] = [thread_id];
     let i = 2;
 
     if (opts?.status) {
