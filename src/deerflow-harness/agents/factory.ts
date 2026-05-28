@@ -25,7 +25,6 @@ export interface CreateAgentOptions {
   middlewares?: AgentMiddleware[];
   features?: RuntimeFeatures;
   extraMiddlewares?: AgentMiddleware[];
-  planMode?: boolean;
   checkpointer?: BaseCheckpointSaver;
   /** 当前 model 的 provider，用于按 provider 自动启用相关中间件。 */
   provider?: ModelProvider;
@@ -59,7 +58,6 @@ export function createBaseAgent(opts: CreateAgentOptions) {
   } else {
     const feat = features ? features : DEFAULT_FEATURES;
     const { chain, extraTools } = assembleFromFeatures(feat, {
-      planMode: opts.planMode,
       extraMiddlewares,
       provider,
     });
@@ -100,6 +98,22 @@ export function createBaseAgent(opts: CreateAgentOptions) {
   });
 }
 
+/**
+ * 装配中间件链与 lead-agent 内置 extra tools。
+ *
+ * 对齐 deer-flow 2.0：lead-agent 永远启用 subagent 能力，
+ * `taskTool` 与 `subagentLimitMiddleware` 始终挂载，不再受 features.subagent
+ * 控制。其它能力（memory / qwen recovery）仍按 features 开关条件挂载。
+ *
+ * SubagentExecutor 在内部调用 createBaseAgent 时不会传 features.subagent，
+ * 但 lead-agent 工具集会包含 task；为防止 subagent 内部递归调用 task，
+ * 实际工具集由 task-tool 在装载 subagent 工具时按 disabledTools 过滤掉。
+ *
+ * 注意：SubagentExecutor 调用 createBaseAgent 时同样会走这条路径，因此
+ * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
+ * 会过滤掉 task，最终绑定到 LLM 的工具列表里没有 task，模型不会调用它。
+ * subagentLimitMiddleware 在 subagent 上下文中也是无害的（不会拦到 task）。
+ */
 export function assembleFromFeatures(
   features: RuntimeFeatures,
   options: AssembelOptions,
@@ -120,14 +134,7 @@ export function assembleFromFeatures(
   }
 
   // [3] ToolCallIntegrityMiddleware (始终启用)
-  //   统一处理消息层面的工具调用完整性问题（IntegrityRule 形式可插拔）：
-  //     - DanglingToolCallRule —— AIMessage 有 tool_calls 但缺 ToolMessage
-  //       （中断/取消/断流场景）
-  //     - UnknownToolCallRule —— tool_call 引用了"当前工具集合外"的工具
-  //       （跨轮 metadata 切换 e.g. subagent_enabled true→false 时，
-  //        PostgreSQL checkpointer 残留 task tool_call 会让 LangGraph
-  //        抛 "Tool task not found"）
-  //   新增此类问题请追加 IntegrityRule，不要新加中间件。
+  //   统一处理消息层面的工具调用完整性问题（IntegrityRule 形式可插拔）。
   chain.push(toolCallIntegrityMiddleware);
 
   // [4] ToolErrorHandlingMiddleware (始终启用)
@@ -141,12 +148,10 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // [10] SubagentLimitMiddleware (features.subagent)
-  //   plan-mode 下 lead-agent 通过 task 工具调度 research subagent，
-  //   必须用并发/总量上限兜底，防止模型 prompt 失控产生过多 task。
-  if (features.subagent === true) {
-    chain.push(subagentLimitMiddleware);
-  }
+  // [10] SubagentLimitMiddleware (始终启用)
+  //   lead-agent 永远具备 task 能力，必须挂上并发/总量上限兜底，
+  //   防止模型 prompt 失控产生过多 task。
+  chain.push(subagentLimitMiddleware);
 
   // [11] LoopDetectionMiddleware (始终启用)
   chain.push(loopDetectionMiddleware);
@@ -154,10 +159,8 @@ export function assembleFromFeatures(
   // [12] ClarificationMiddleware (始终最后)
   chain.push(clarificationMiddleware);
 
-  // subagent 工具化注入 lead Agent
-  if (features.subagent === true) {
-    extraTools.push(taskTool as StructuredToolInterface);
-  }
+  // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）
+  extraTools.push(taskTool as StructuredToolInterface);
 
   return { chain, extraTools };
 }

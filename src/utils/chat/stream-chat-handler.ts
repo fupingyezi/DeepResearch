@@ -35,7 +35,7 @@ export interface StreamChatConfig {
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
 
-  /** plan-mode 三开关等扩展 metadata */
+  /** plan-mode 三开关等扩展 metadata（deerflow2 重构后已不再使用 plan-mode 字段，仅保留通用业务 metadata） */
   extraMetadata?: Record<string, any>;
 
   // 自定义 hook
@@ -355,6 +355,10 @@ export class StreamChatHandler {
           if (this.timeline.status === 'processing') {
             this.timeline.status = 'end';
           }
+          // 启发式 artifact 抽取（仅当后端没有通过 STATE_UPDATE.report
+          // 显式塞入 artifact 时才尝试）：
+          // 较长且含层级标题的 markdown 视为"研究报告"，自动塞入右侧产物面板。
+          this.maybeExtractArtifactFromContent();
           this.flushMessageSync();
           return;
         }
@@ -496,6 +500,40 @@ export class StreamChatHandler {
       status: this.timeline.status,
       interrupt: this.timeline.interrupt,
     };
+  }
+
+  // -------------------- 启发式 artifact 抽取 --------------------
+
+  /** 启发式判定：
+   *  - accumulatedContent 长度 > 800 字符
+   *  - 包含 ≥ 2 个 `## ` 二级标题
+   *  - 当前 artifact 为空（未被 STATE_UPDATE.report 显式注入）
+   *  命中时把全文塞入 artifact，标题取首个 `# ` / `## ` 行，否则 fallback 为 user 输入前 20 字。
+   */
+  private maybeExtractArtifactFromContent(): void {
+    if (this.artifact) return;
+    const text = this.accumulatedContent ?? '';
+    if (text.length <= 800) return;
+
+    const h2Matches = text.match(/^##\s+/gm);
+    if (!h2Matches || h2Matches.length < 2) return;
+
+    // 抽标题：首个 `# ` 或 `## ` 行的内容
+    let title = '';
+    const headingMatch = text.match(/^#{1,2}\s+(.+?)\s*$/m);
+    if (headingMatch && headingMatch[1]) {
+      title = headingMatch[1].trim();
+    }
+    if (!title) {
+      title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
+    }
+
+    this.artifact = { title, content: text };
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        `[StreamChatHandler] heuristic artifact extracted: title="${title}" len=${text.length} h2=${h2Matches.length}`,
+      );
+    }
   }
 
   // 把当前 accumulatedContent + timeline + artifact 推送到 store。

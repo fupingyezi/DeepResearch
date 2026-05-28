@@ -100,9 +100,11 @@ async function build(): Promise<ThreadService> {
   ensureMemoryModelFactory();
 
   const defaultModelConfig = getDefaultModelConfig();
+  // deer-flow 2.0 风格：lead-agent 永远启用 subagent 能力（subagentEnabled 字段
+  // 已 deprecated，保留传值仅为旧 ClientOptions 字段穿透不报错；实际行为由
+  // factory 始终注入 taskTool + subagentLimitMiddleware 决定）。
   const client = new DeerFlowClient(defaultModelConfig, {
     agentName: 'lead',
-    subagentEnabled: true,
     memoryEnabled: true,
     checkpointer,
   });
@@ -140,7 +142,6 @@ export async function getDeerFlowClientWithModelConfig(
 
   return new DeerFlowClient(modelConfig, {
     agentName: 'lead',
-    subagentEnabled: true,
     memoryEnabled: true,
     checkpointer,
   });

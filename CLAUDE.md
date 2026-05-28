@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Mini-DeepResearch** 是基于 **Next.js 14** 和 **LangChain/LangGraph** 构建的 AI 智能对话应用，核心能力包括：
 
 - 多模型 AI 对话（支持 OpenAI、Qwen、Spark、DeepSeek 等 OpenAI 兼容接口）
-- 深度研究模式（Lead Agent + Research Subagent 协作，调用 Tavily 搜索）
+- 单一 lead-agent 形态（对齐 deer-flow 2.0）：lead-agent 永远启用 subagent 能力（`task` 工具 + general-purpose subagent），由 agent 自主判断"简单直接答 / 复杂分解为并行 subagent"，不再有"联网搜索 / 深度研究"档位
 - 持久化对话线程（PostgreSQL 存储元数据 + LangGraph Checkpoint 保存状态）
 - 实时 SSE 事件流（fire-and-forget 执行 + StreamBridge 缓冲回放）
 - 长期记忆系统（LLM 驱动的事实提取与更新）
@@ -175,9 +175,12 @@ interface ChatBody {
 ```
 
 `metadata` 中的运行期开关（影响本次 Agent 行为，不修改 baseOptions）：
-- `is_plan_mode: boolean` → 切换 plan-mode 提示词 + 工具集
-- `subagent_enabled: boolean` → 启用 features.subagent（注入 task 工具 + SubagentLimit 中间件）
-- `agent_name: string` → 覆盖 agentName（影响日志 / memory 隔离）
+- `modelKey: string` → 选择 MODEL_PRESETS 中的预设模型（不传走默认 preset）
+- 其它业务字段（如 `sessionId`、`hasFiles`、`uploadedFiles`）按需透传
+
+> 注：自 deer-flow 2.0 重构起，旧版 `is_plan_mode` / `subagent_enabled` /
+> `agent_name` 三开关已废弃；lead-agent 永远启用 subagent 能力，由 agent 自主
+> 判断是否分解任务并调用 `task("general-purpose", ...)`。
 
 #### 其他路由
 
@@ -225,7 +228,7 @@ idle → running → idle（成功）
 
 缓存键由以下字段组合（JSON.stringify）：
 ```typescript
-[modelName, planMode, subagentEnabled, memoryEnabled, agentName, sortedSkills]
+[modelName, memoryEnabled, agentName, sortedSkills]
 ```
 
 **重要例外：** `memoryEnabled=true` 时**不缓存**（每轮 prompt 含最新 memory，必须每次重建）。
@@ -349,11 +352,11 @@ StreamBridge（单例 streamBridge）
 | 2 | `DanglingToolCallMiddleware` | 始终启用 |
 | 3 | `ToolErrorHandlingMiddleware` | 始终启用 |
 | 4 | `MemoryMiddleware` | `features.memory=true` 或自定义中间件 |
-| 5 | `SubagentLimitMiddleware` | `features.subagent=true` |
+| 5 | `SubagentLimitMiddleware` | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底） |
 | 6 | `LoopDetectionMiddleware` | 始终启用 |
 | 7 | `ClarificationMiddleware` | 始终启用，且始终最后 |
 
-同时，`features.subagent=true` 时向 `extraTools` 注入 `taskTool`。
+同时，`taskTool` 始终注入到 `extraTools`。
 
 #### RuntimeFeatures 类型
 
@@ -382,7 +385,7 @@ interface RuntimeFeatures {
 - `src/deerflow-harness/subagents/config.ts` — `SubagentConfig` 接口
 - `src/deerflow-harness/subagents/executor.ts` — `SubagentExecutor`
 - `src/deerflow-harness/subagents/registry.ts` — 运行时注册表
-- `src/deerflow-harness/subagents/builtins/research.ts` — 内置 research subagent
+- `src/deerflow-harness/subagents/builtins/general-purpose.ts` — 内置 general-purpose subagent（对齐 deer-flow 2.0 `general_purpose.py`：`tools=undefined` 继承 lead 工具集 + `disabledTools=['task']` 防递归 + `model='inherit'` 复用 lead modelConfig）
 
 #### SubagentExecutor
 
@@ -656,17 +659,17 @@ curl -X POST http://localhost:3000/api/threads \
   -H "Content-Type: application/json" \
   -d '{"display_name": "测试线程"}'
 
-# 发送消息（SSE 流）
+# 发送消息（SSE 流）— 由 lead-agent 自主判断是否进入深度研究
 curl -X POST http://localhost:3000/api/v3/chat/thread-123 \
   -H "Content-Type: application/json" \
   -d '{"input": "什么是 LangChain？"}' \
   -H 'Accept: text/event-stream' \
   --no-buffer
 
-# 带 plan mode 的深度研究
+# 切换模型（其余字段同上）
 curl -X POST http://localhost:3000/api/v3/chat/thread-456 \
   -H "Content-Type: application/json" \
-  -d '{"input": "研究量子计算趋势", "metadata": {"is_plan_mode": true, "subagent_enabled": true}}' \
+  -d '{"input": "研究量子计算趋势", "metadata": {"modelKey": "deepseek-v4-pro"}}' \
   -H 'Accept: text/event-stream' \
   --no-buffer
 ```

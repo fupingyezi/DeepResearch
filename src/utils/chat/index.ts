@@ -17,29 +17,20 @@ export async function reChatWithAgent(params: reChatWithAgentProps) {
 }
 
 // ------------------------------------------------------------------
-// 向后兼容别名：保留旧的 chatWithChatAssistant / chatWithSearhAssistant /
-// chatWithDeepResearch / reChatWithAssistant 作为薄壳，内部统一走 chatWithAgent。
-// 上层调用处可以渐进式迁移到 chatWithAgent。
+// 向后兼容别名（deer-flow 2.0 重构后）：
+// 旧调用点 chatWithChatAssistant / chatWithSearhAssistant /
+// chatWithDeepResearch / reChatWithAssistant 全部统一走 chatWithAgent。
+// 是否进入深度研究流程由后端 lead-agent 自主判断，前端不再传 enable* 标志。
+// 这些别名仅作为薄壳，便于上层渐进式迁移。
 // ------------------------------------------------------------------
 
 export const chatWithChatAssistant = (params: chatWithAgentProps) =>
-  chatWithAgent({
-    ...params,
-    enableDeepResearch: false,
-    enableSearch: false,
-  });
+  chatWithAgent(params);
 
 export const chatWithSearhAssistant = (params: chatWithAgentProps) =>
-  chatWithAgent({
-    ...params,
-    enableDeepResearch: false,
-    enableSearch: true,
-  });
+  chatWithAgent(params);
 
 export const chatWithDeepResearch = (params: chatWithAgentProps) =>
-  chatWithAgent({
-    ...params,
-    enableDeepResearch: true,
-  });
+  chatWithAgent(params);
 
 export const reChatWithAssistant = reChatWithAgent;

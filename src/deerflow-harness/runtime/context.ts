@@ -1,15 +1,24 @@
 /**
  * RuntimeContext —— 通过 AsyncLocalStorage 在 lead-agent / sub-agent 调用链上
  * 透传 thread / run / user 等运行时信息（等价 Python `contextvars.ContextVar`）。
+ *
+ * 字段说明：
+ * - `currentModelConfig`：lead-agent 当前轮次使用的 ModelConfig。
+ *   `general-purpose` subagent 的 `model: 'inherit'` 通过该字段拿到 lead 的
+ *   modelConfig，保证 lead/subagent 走同一模型与 baseUrl/apiKey。
+ *   由 `DeerFlowClient.stream()` 在 `runWithContext` 入口注入。
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ModelConfig } from '../types';
 
 export interface RuntimeContext {
   thread_id: string;
   run_id: string;
   assistant_id: string;
   user_id?: string;
+  /** lead-agent 当前轮次的 ModelConfig，供 inherit 模式下的 subagent 复用。 */
+  currentModelConfig?: ModelConfig;
 }
 
 const als = new AsyncLocalStorage<RuntimeContext>();

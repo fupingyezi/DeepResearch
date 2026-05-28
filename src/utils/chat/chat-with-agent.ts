@@ -2,19 +2,17 @@ import { StreamChatHandler } from "./stream-chat-handler";
 import { chatWithAgentProps } from "@/types";
 
 /**
- * 合并版统一 chat 入口（对齐 deer-flow 的渲染范式）：
+ * 合并版统一 chat 入口（对齐 deer-flow 2.0）：
  *
- * - 工作流（plan / tasks / interrupt / 思考过程）一律内联在当前 assistant 消息的
- *   `timeline` 字段，由 ChatMessageBubble 渲染在气泡里；
- * - 右侧 ArtifactPanel 仅用于打开/查看产物（report 等）；
- * - 是否走 plan-mode / subagent / 联网搜索，全部由 metadata 控制，前端不再分三套链路。
+ * - 不再有"联网搜索 / 深度研究"档位；
+ * - 是否进入深度研究流程由后端 lead-agent 自主判断（subagent 永远启用）；
+ * - metadata 仅携带模型选择 / 业务字段，不再透传 is_plan_mode / subagent_enabled / agent_name。
  *
- * 默认契约：
- *   enableDeepResearch=true（默认）→ is_plan_mode=true, subagent_enabled=true,
- *                                     agent_name=lead-research, agentType=deep_research
- *   enableDeepResearch=false        → is_plan_mode=false, subagent_enabled=false
- *     · enableSearch=true           → agentType=search
- *     · enableSearch=false / 缺省   → agentType=basic
+ * 兼容性：
+ * - chatWithAgentProps 仍保留 enableDeepResearch / enableSearch 字段为 deprecated，
+ *   但本函数不再消费这两个字段。
+ * - 历史消息的 mode 标签统一写为 'chat'；旧记录上的 'deepResearch' / 'search'
+ *   保持只读兼容（DB CHECK 约束未改）。
  */
 export const chatWithAgent = async (params: chatWithAgentProps) => {
   const {
@@ -23,8 +21,6 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     isResume,
     hasFiles,
     uploadedFiles,
-    enableDeepResearch = false,
-    enableSearch = false,
     modelKey,
 
     // ConversationState 注入
@@ -39,33 +35,18 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     setAbortController,
   } = params;
 
-  // 1) 计算 agentType / mode（mode 字段仅用于历史消息标签，与 UI 渲染无关）
-  const agentType: "basic" | "search" | "deep_research" = enableDeepResearch
-    ? "deep_research"
-    : enableSearch
-    ? "search"
-    : "basic";
+  // agentType 字段保留（StreamChatConfig 类型里仍存在），统一固定为 'basic'
+  // 表示"由后端 lead-agent 自主判断"。前端不再做三档分支。
+  const agentType: "basic" | "search" | "deep_research" = "basic";
 
-  const mode: "chat" | "search" | "deepResearch" = enableDeepResearch
-    ? "deepResearch"
-    : enableSearch
-    ? "search"
-    : "chat";
+  // 历史消息 mode 标签：新消息一律 'chat'，旧记录的 'deepResearch'/'search'
+  // 保留兼容（DB schema 不动）。
+  const mode: "chat" | "search" | "deepResearch" = "chat";
 
-  // 2) 计算 metadata（plan-mode 三开关）
-  const extraMetadata: Record<string, any> = enableDeepResearch
-    ? {
-        is_plan_mode: true,
-        subagent_enabled: true,
-        agent_name: "lead-research",
-      }
-    : {
-        is_plan_mode: false,
-        subagent_enabled: false,
-      };
+  // metadata 只携带模型选择 + 业务字段；不再透传 plan-mode 三开关。
+  const extraMetadata: Record<string, any> = {};
   if (modelKey) extraMetadata.modelKey = modelKey;
 
-  // 3) 唯一一条流式链路
   const handler = new StreamChatHandler({
     agentType,
     mode,

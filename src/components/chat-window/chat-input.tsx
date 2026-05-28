@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useLayoutEffect } from "react";
 import { useFileUpload } from "@/utils/hooks";
 import Image from "next/image";
 import FileItem from "../files/file-items";
@@ -6,8 +6,12 @@ import { ChatInputProps } from "@/types";
 import { useConversationStore } from "@/store";
 import ModelSelector from "../model-selector/model-selector";
 
-type ModeKey = "search" | "deepResearch";
-
+/**
+ * ChatInput —— 对齐 deer-flow 2.0
+ *
+ * 单一输入入口：用户只输入文本（含可选附件），是否走深度研究 / 是否联网搜索
+ * 完全交给后端 lead-agent 自主判断。前端不再呈现"联网搜索 / 深度研究"两档。
+ */
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
   onSend,
@@ -23,10 +27,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   );
   const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
   const [inputValue, setInputValue] = useState("");
-  /** 模式开关（互斥）：null = 普通对话 */
-  const [activeMode, setActiveMode] = useState<ModeKey | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 中文/日文等输入法 composition（候选词）状态。处于组合中时，回车用于
   // 选词/确认候选，不应触发发送。
   const isComposingRef = useRef(false);
@@ -37,11 +40,23 @@ const ChatInput: React.FC<ChatInputProps> = ({
     clearFiles,
     getFileIcon,
   } = useFileUpload();
-  /** 仅普通对话支持文件上传（与原行为保持一致） */
-  const supportUploadFiles = activeMode === null;
+
+  // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内，
+  // 避免在 onInput 里每次按键都触发同步 reflow。
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 100) + "px";
+  }, [inputValue]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // 统一前置守卫：disabled 状态下任何路径都不应产生副作用
+    if (disabled) return;
+    // IME 组合中（包括 compositionend 之后的同 tick 残余），不发送
+    if (isComposingRef.current) return;
+
     if (!localUploadedFiles.every((file) => file.parsedStatus === "success")) {
       return;
     }
@@ -53,13 +68,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
 
-    if (inputValue.trim() && onSend && !disabled) {
+    if (inputValue.trim() && onSend) {
       const hasFiles = localUploadedFiles.length > 0;
-      onSend(inputValue.trim(), {
-        hasFiles,
-        enableSearch: activeMode === "search",
-        enableDeepResearch: activeMode === "deepResearch",
-      });
+      onSend(inputValue.trim(), { hasFiles });
       setInputValue("");
       clearFiles();
     }
@@ -67,16 +78,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isChating) return;
-    // 输入法组合中按回车（选词/上屏）不应触发发送：
-    // 1. e.nativeEvent.isComposing：现代浏览器标准
-    // 2. e.keyCode === 229：老内核（Safari/部分 IME）兜底
-    // 3. isComposingRef：compositionend 之后浏览器还会派发一次 keydown(Enter)，
-    //    用 ref 在 compositionend 里短暂保留状态，避免该次回车被误判为发送。
     if (
       e.nativeEvent.isComposing ||
-      e.keyCode === 229 ||
       isComposingRef.current
     ) {
+      e.preventDefault();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -85,13 +91,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const toggleMode = (e: React.MouseEvent, mode: ModeKey) => {
-    e.stopPropagation();
-    setActiveMode((cur) => (cur === mode ? null : mode));
-  };
-
   const handleUploadClick = () => {
-    if (fileInputRef.current && supportUploadFiles) {
+    if (fileInputRef.current) {
       fileInputRef.current.click();
     }
   };
@@ -126,6 +127,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           ))}
       </div>
       <textarea
+        ref={textareaRef}
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -133,9 +135,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
           isComposingRef.current = true;
         }}
         onCompositionEnd={() => {
-          queueMicrotask(() => {
+          // compositionend 之后，部分浏览器还会再派发一次 keydown(Enter)。
+          // 用 setTimeout(0) 跨过整个事件循环当前任务，比 queueMicrotask
+          // 更稳——后者在某些 IME / React 18 同步事件批处理下仍可能早于
+          // 那次补发的 keydown 执行，从而误判为发送。
+          setTimeout(() => {
             isComposingRef.current = false;
-          });
+          }, 0);
         }}
         placeholder={placeholder}
         rows={1}
@@ -144,11 +150,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
           minHeight: "40px",
           maxHeight: "100px",
           height: "auto",
-        }}
-        onInput={(e) => {
-          const target = e.target as HTMLTextAreaElement;
-          target.style.height = "auto";
-          target.style.height = Math.min(target.scrollHeight, 100) + "px";
         }}
       />
       <div className="flex w-full justify-between px-2 gap-2 items-center flex-wrap">
@@ -166,34 +167,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
             alt="添加附件"
             width={30}
             height={30}
-            className={`p-2 w-10 h-8 rounded-3xl ${
-              supportUploadFiles
-                ? "hover:bg-[#e7e7e7] hover:cursor-pointer"
-                : "opacity-40 cursor-not-allowed"
-            }`}
+            className="p-2 w-10 h-8 rounded-3xl hover:bg-[#e7e7e7] hover:cursor-pointer"
             onClick={() => handleUploadClick()}
           />
-          <div
-            className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => toggleMode(e, "search")}
-            style={{
-              backgroundColor: activeMode === "search" ? "#eceaff" : "",
-              color: activeMode === "search" ? "#4433ff" : "",
-            }}
-          >
-            联网搜索
-          </div>
-          <div
-            className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => toggleMode(e, "deepResearch")}
-            style={{
-              backgroundColor:
-                activeMode === "deepResearch" ? "#eceaff" : "",
-              color: activeMode === "deepResearch" ? "#4433ff" : "",
-            }}
-          >
-            深度研究
-          </div>
           <ModelSelector showLabel={false} />
         </div>
 

@@ -20,7 +20,16 @@ export interface ChatMessagesProps {
 
 export interface ChatInputSendOptions {
   hasFiles?: boolean;
+  /**
+   * @deprecated 自 deer-flow 2.0 重构起，前端不再有"深度研究"档位；
+   * 是否进入深度研究流程由后端 lead-agent 自主判断。该字段保留仅为
+   * 兼容旧调用点，新代码不应使用。
+   */
   enableDeepResearch?: boolean;
+  /**
+   * @deprecated 自 deer-flow 2.0 重构起，前端不再有"联网搜索"档位；
+   * 是否调用 search_web_tool 由 lead-agent 自主决定。
+   */
   enableSearch?: boolean;
 }
 

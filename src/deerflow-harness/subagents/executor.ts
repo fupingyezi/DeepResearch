@@ -5,7 +5,7 @@ import { StructuredToolInterface } from '@langchain/core/tools';
 import { createBaseAgent } from '../agents/factory';
 import { createChatModel, inferProvider } from '../models';
 import { getContext } from '../runtime/context';
-import { SubagentEvent } from '../types';
+import { ModelConfig, SubagentEvent } from '../types';
 import { SubagentConfig } from './config';
 
 export interface SubagentExecutorOptions {
@@ -15,6 +15,13 @@ export interface SubagentExecutorOptions {
   traceId?: string;
   /** 可选 task id（通常来自 lead agent 的 tool_call_id）；未提供时使用 traceId。 */
   taskId?: string;
+  /**
+   * 当 `config.model === 'inherit'` 时使用此 ModelConfig 构建 ChatModel。
+   * 由 task-tool 从 RuntimeContext.currentModelConfig 读取后透传。
+   * 缺省时退化为 `createChatModel({ modelName: 'inherit' })` —— 该路径
+   * 通常会被 createChatModel 的 modelName 兜底解析为默认模型。
+   */
+  inheritedModelConfig?: ModelConfig;
 }
 
 /**
@@ -33,12 +40,14 @@ export class SubagentExecutor {
   private readonly tools: StructuredToolInterface[];
   private readonly traceId: string;
   private readonly taskId: string;
+  private readonly inheritedModelConfig?: ModelConfig;
 
   constructor(opts: SubagentExecutorOptions) {
     this.config = opts.config;
     this.tools = opts.tools;
     this.traceId = opts.traceId ?? uuidv4().slice(0, 8);
     this.taskId = opts.taskId ?? this.traceId;
+    this.inheritedModelConfig = opts.inheritedModelConfig;
   }
 
   async *execute(
@@ -72,8 +81,20 @@ export class SubagentExecutor {
 
     try {
       // 4) 模型 + agent 构造（每次执行独立实例）
-      const model = createChatModel({ modelName: config.model });
-      const provider = inferProvider({ modelName: config.model });
+      //   model='inherit' → 复用 lead 当前 ModelConfig（baseUrl/apiKey/temperature 等）
+      //   其它值          → 按 modelName 走默认 createChatModel（baseUrl/apiKey 取 env）
+      const isInherit = config.model === 'inherit' || !config.model;
+      const modelConfig: ModelConfig = isInherit
+        ? this.inheritedModelConfig ?? { modelName: 'inherit' }
+        : { modelName: config.model };
+      if (isInherit && !this.inheritedModelConfig && process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `${logPrefix} model='inherit' but no inheritedModelConfig provided; ` +
+            `falling back to createChatModel default (modelName="inherit").`,
+        );
+      }
+      const model = createChatModel(modelConfig);
+      const provider = inferProvider(modelConfig);
       const agent: any = createBaseAgent({
         model,
         tools: this.tools,

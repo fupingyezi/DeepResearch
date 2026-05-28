@@ -32,9 +32,14 @@ export type BaseTool = StructuredToolInterface;
 export interface ClientOptions {
   /** agent 实例名称，用于区分日志 */
   agentName?: string;
-  /** 是否开启 plan 模式 */
+  /**
+   * @deprecated lead-agent 永远启用 subagent 能力，本字段不再生效；保留仅为
+   * 兼容旧调用点的字段穿透，请勿在新代码中使用。
+   */
   planMode?: boolean;
-  /** 是否启用子 agent */
+  /**
+   * @deprecated lead-agent 永远启用 subagent 能力，本字段不再生效。
+   */
   subagentEnabled?: boolean;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
@@ -46,7 +51,6 @@ export interface ClientOptions {
 
 export interface AssembelOptions {
   name?: string;
-  planMode?: boolean;
   extraMiddlewares?: AgentMiddleware[];
   /** 当前 model 的 provider，用于 feature 自动判断（如 qwenToolCallRecovery）。 */
   provider?: ModelProvider;

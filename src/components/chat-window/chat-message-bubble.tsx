@@ -147,11 +147,11 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           return;
         }
         case "recall": {
+          // deer-flow 2.0 风格：re-call 不再读取 message.mode 决定档位，
+          // 是否进入深度研究流程由后端 lead-agent 自主判断。
           await chatWithAgent({
             callingMode: "recall",
             inputValue: message.content as string,
-            enableDeepResearch: message.mode === "deepResearch",
-            enableSearch: message.mode === "search",
             // 事件回调里取最新 store 快照，无需把整个 store 作为响应式依赖。
             ...useConversationStore.getState(),
           });
@@ -233,16 +233,11 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
-        // 通过快照读取最新 messages（无需响应式订阅）
-        const latestMessages =
-          useConversationStore.getState().currentMessages;
-        const lastMode =
-          latestMessages[latestMessages.length - 1]?.mode || "chat";
+        // deer-flow 2.0 风格：reEditCall 不再读 message.mode 决定档位，
+        // 后端 lead-agent 自主判断是否进入深度研究。
         await chatWithAgent({
           callingMode: "reEditCall",
           inputValue: reEditValue,
-          enableDeepResearch: lastMode === "deepResearch",
-          enableSearch: lastMode === "search",
           ...useConversationStore.getState(),
         });
       }

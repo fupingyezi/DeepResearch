@@ -9,6 +9,11 @@ export interface RuntimeFeatures {
   sandbox?: FeatureToggle;
   memory?: FeatureToggle;
   summarization?: FeatureToggle; // 不允许 true
+  /**
+   * @deprecated 自 deerflow2 重构起，lead-agent 永远启用 subagent 能力
+   * （taskTool + subagentLimitMiddleware 始终注入）。该字段保留仅为向后兼容
+   * 旧调用点的字段穿透，新代码请勿读写。
+   */
   subagent?: FeatureToggle;
   vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
@@ -20,7 +25,6 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
   sandbox: false,
   memory: false,
   summarization: false,
-  subagent: false,
   vision: false,
   autoTitle: false,
   guardrail: false,

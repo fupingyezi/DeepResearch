@@ -40,18 +40,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   );
 
   /**
-   * 发送消息：合并版统一入口。
-   * - 不再分三套链路（chat / search / deepResearch）；
-   * - 是否启用搜索 / 深度研究由 ChatInput 通过 opts 传上来；
-   * - 默认（两开关均关闭）= 普通对话。
+   * 发送消息：对齐 deer-flow 2.0 单一入口。
+   * - 不再有"联网搜索 / 深度研究"档位；
+   * - 是否走深度研究由后端 lead-agent 自主判断；
+   * - 前端只透传文本和附件状态。
    */
   const handleSendMessage = useCallback(
     async (
       inputValue: string,
       opts?: {
         hasFiles?: boolean;
-        enableDeepResearch?: boolean;
-        enableSearch?: boolean;
       }
     ) => {
       const conversationStore = useConversationStore.getState();
@@ -61,8 +59,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         modelKey: selectedModelKey,
         hasFiles: opts?.hasFiles,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
-        enableDeepResearch: !!opts?.enableDeepResearch,
-        enableSearch: !!opts?.enableSearch,
         ...conversationStore,
       });
       if (opts?.hasFiles) {

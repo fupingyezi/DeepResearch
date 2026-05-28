@@ -7,7 +7,7 @@ export {
   registerSubagent,
   getSubagentConfig,
   getAvailableSubagentNames,
-  researchConfig,
+  generalPurposeConfig,
   type SubagentConfig,
 } from './subagents';
 export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider } from './types';
