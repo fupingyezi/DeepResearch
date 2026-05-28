@@ -5,13 +5,11 @@ import CustomMarkdown from "../markdown/custom-markdown";
 import MessageToolBar from "../message-tool-bar/message-tool-bar";
 import MessageTimeline from "./message-timeline";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useCopy } from "@/utils/hooks";
 import { useConversationStore, useArtifactPanelStore } from "@/store";
 import {
   ChatMessageBubbleProps,
-  MessageArtifact,
-  MessageTimeline as MessageTimelineType,
   SupportDownloadFileType,
 } from "@/types";
 import { chatWithAgent } from "@/utils/chat";
@@ -44,56 +42,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     message.content as string
   );
 
-  /**
-   * 兼容旧消息：若历史消息只有 deepResearchResult 字段，把它降级为
-   * 一个最简化的 timeline + artifact，仅供历史回放。
-   */
-  const { effectiveTimeline, effectiveArtifact } = useMemo<{
-    effectiveTimeline?: MessageTimelineType;
-    effectiveArtifact?: MessageArtifact;
-  }>(() => {
-    if (message.timeline || message.artifact) {
-      return {
-        effectiveTimeline: message.timeline,
-        effectiveArtifact: message.artifact,
-      };
-    }
-    if (message.mode === "deepResearch" && message.deepResearchResult) {
-      const dr = message.deepResearchResult;
-      const timeline: MessageTimelineType = {
-        steps: (dr.tasks || []).map((t, idx) => ({
-          kind: "subagent_task" as const,
-          id: t.id || t.taskId || String(idx),
-          taskId: t.taskId || String(idx),
-          description: t.description,
-          status: t.result ? "completed" : "running",
-          result: t.result,
-        })),
-        status:
-          message.researchStatus === "finished"
-            ? "end"
-            : message.researchStatus === "failed"
-            ? "failed"
-            : message.researchStatus === "suspended"
-            ? "interrupt"
-            : "processing",
-      };
-      return {
-        effectiveTimeline: timeline,
-        effectiveArtifact: dr.report
-          ? { title: dr.researchTarget || "研究报告", content: dr.report }
-          : undefined,
-      };
-    }
-    return {};
-  }, [
-    message.timeline,
-    message.artifact,
-    message.mode,
-    message.deepResearchResult,
-    message.researchStatus,
-  ]);
-
   const renderContent = () => {
     if (typeof message.content === "string") {
       return message.content;
@@ -102,15 +50,15 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   };
 
   const handleOpenArtifact = () => {
-    if (!effectiveArtifact) return;
+    if (!message.artifact) return;
     openArtifact({
       sessionId:
         typeof message.sessionId === "string"
           ? message.sessionId
           : String(message.sessionId ?? ""),
       messageId: message.id,
-      title: effectiveArtifact.title,
-      report: effectiveArtifact.content,
+      title: message.artifact.title,
+      report: message.artifact.content,
     });
   };
 
@@ -147,7 +95,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           return;
         }
         case "recall": {
-          // deer-flow 2.0 风格：re-call 不再读取 message.mode 决定档位，
           // 是否进入深度研究流程由后端 lead-agent 自主判断。
           await chatWithAgent({
             callingMode: "recall",
@@ -169,7 +116,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
     /** 下载内容来源：优先 artifact.content，其次正文 */
     const getDownloadSource = () => {
-      if (effectiveArtifact?.content) return effectiveArtifact.content;
+      if (message.artifact?.content) return message.artifact.content;
       return (message.content as string) || "";
     };
 
@@ -233,8 +180,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
-        // deer-flow 2.0 风格：reEditCall 不再读 message.mode 决定档位，
-        // 后端 lead-agent 自主判断是否进入深度研究。
         await chatWithAgent({
           callingMode: "reEditCall",
           inputValue: reEditValue,
@@ -327,8 +272,8 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   // loading 气泡：assistant 还没有 timeline 也没有正文
   if (
     message.role === "assistant" &&
-    (!effectiveTimeline || effectiveTimeline.steps.length === 0) &&
-    !effectiveArtifact &&
+    (!message.timeline || message.timeline.steps.length === 0) &&
+    !message.artifact &&
     (message.content === "" ||
       (Array.isArray(message.content) && !message.content.length))
   ) {
@@ -349,7 +294,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
         {/* 工作流时间线（reasoning / tool_call / subagent_task） */}
-        <MessageTimeline timeline={effectiveTimeline} />
+        <MessageTimeline timeline={message.timeline} />
 
         {/* 正文 */}
         {typeof message.content === "string" && message.content.length > 0 && (
@@ -357,7 +302,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         )}
 
         {/* 产物入口（点击打开右侧 ArtifactPanel） */}
-        {effectiveArtifact && (
+        {message.artifact && (
           <button
             type="button"
             onClick={handleOpenArtifact}
@@ -366,7 +311,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             <div className="flex items-center gap-2">
               <FileTextOutlined className="text-blue-500" />
               <span className="text-sm font-medium text-gray-700 truncate">
-                {effectiveArtifact.title}
+                {message.artifact.title}
               </span>
             </div>
             <span className="text-xs text-blue-500 shrink-0">查看产物 →</span>

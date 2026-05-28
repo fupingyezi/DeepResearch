@@ -6,21 +6,12 @@ import { ChatInputProps } from "@/types";
 import { useConversationStore } from "@/store";
 import ModelSelector from "../model-selector/model-selector";
 
-/**
- * ChatInput —— 对齐 deer-flow 2.0
- *
- * 单一输入入口：用户只输入文本（含可选附件），是否走深度研究 / 是否联网搜索
- * 完全交给后端 lead-agent 自主判断。前端不再呈现"联网搜索 / 深度研究"两档。
- */
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
   onSend,
   disabled = false,
   className,
 }) => {
-  // 仅订阅渲染需要的字段，避免不带 selector 的 useConversationStore() 在
-  // 流式 setCurrentMessages 高频触发时引发整个 ChatInput re-render（含
-  // 子组件 ModelSelector 等）。
   const isChating = useConversationStore((s) => s.isChating);
   const currentAbortController = useConversationStore(
     (s) => s.currentAbortController
@@ -30,8 +21,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // 中文/日文等输入法 composition（候选词）状态。处于组合中时，回车用于
-  // 选词/确认候选，不应触发发送。
   const isComposingRef = useRef(false);
   const {
     localUploadedFiles,
@@ -42,7 +31,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   } = useFileUpload();
 
   // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内，
-  // 避免在 onInput 里每次按键都触发同步 reflow。
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -54,7 +42,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
     e.preventDefault();
     // 统一前置守卫：disabled 状态下任何路径都不应产生副作用
     if (disabled) return;
-    // IME 组合中（包括 compositionend 之后的同 tick 残余），不发送
     if (isComposingRef.current) return;
 
     if (!localUploadedFiles.every((file) => file.parsedStatus === "success")) {
@@ -135,10 +122,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
           isComposingRef.current = true;
         }}
         onCompositionEnd={() => {
-          // compositionend 之后，部分浏览器还会再派发一次 keydown(Enter)。
-          // 用 setTimeout(0) 跨过整个事件循环当前任务，比 queueMicrotask
-          // 更稳——后者在某些 IME / React 18 同步事件批处理下仍可能早于
-          // 那次补发的 keydown 执行，从而误判为发送。
           setTimeout(() => {
             isComposingRef.current = false;
           }, 0);

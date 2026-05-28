@@ -15,25 +15,18 @@ import type {
 import type {
   ChatMessageType,
   ChatSessionType,
-  taskType,
-  searchResultItem,
-  deepResearchResultType,
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
   CoTStep,
   MessageTimeline,
   MessageArtifact,
-  ResearchTimeline,
 } from "./chat-info-define";
 
 //函数参数相关
 import type {
   chatWithAgentProps,
   reChatWithAgentProps,
-  chatWithChatAssistantProps,
-  chatWithDeepResearchProps,
-  reChatWithAssistantProps,
 } from "./chat-utils-params";
 
 export {
@@ -51,23 +44,12 @@ export {
 export {
   ChatMessageType,
   ChatSessionType,
-  taskType,
-  searchResultItem,
-  deepResearchResultType,
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
   CoTStep,
   MessageTimeline,
   MessageArtifact,
-  ResearchTimeline,
 };
 
-export {
-  chatWithAgentProps,
-  reChatWithAgentProps,
-  chatWithChatAssistantProps,
-  chatWithDeepResearchProps,
-  reChatWithAssistantProps,
-};
-
+export { chatWithAgentProps, reChatWithAgentProps };

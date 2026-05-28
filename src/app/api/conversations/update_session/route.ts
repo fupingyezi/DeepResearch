@@ -63,36 +63,6 @@ export async function DELETE(request: NextRequest) {
 
       await client.query(
         `
-        delete from research_task_search_result 
-        where task_id in (
-          select rt.id 
-          from research_task rt
-          join deep_research_result drr on rt.research_result_id = drr.id
-          where drr.session_id = $1
-        )
-      `,
-        [sessionId]
-      );
-
-      await client.query(
-        `
-        delete from research_task 
-        where research_result_id in (
-          select id from deep_research_result where session_id = $1
-        )
-      `,
-        [sessionId]
-      );
-
-      await client.query(
-        `
-        delete from deep_research_result where session_id = $1
-      `,
-        [sessionId]
-      );
-
-      await client.query(
-        `
         delete from chat_message where session_id = $1
       `,
         [sessionId]

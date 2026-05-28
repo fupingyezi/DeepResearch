@@ -24,10 +24,6 @@ interface Props {
   timeline?: MessageTimelineType;
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Step 渲染                                                                  */
-/* -------------------------------------------------------------------------- */
-
 const ReasoningStep: React.FC<{ step: Extract<CoTStep, { kind: "reasoning" }> }> = ({
   step,
 }) => {
@@ -223,10 +219,6 @@ const SubagentTaskStep: React.FC<{
   );
 };
 
-/* -------------------------------------------------------------------------- */
-/*  主组件                                                                     */
-/* -------------------------------------------------------------------------- */
-
 const MessageTimeline: React.FC<Props> = ({ timeline }) => {
   if (!timeline) return null;
   const { steps, status, interrupt } = timeline;
@@ -279,7 +271,7 @@ const MessageTimeline: React.FC<Props> = ({ timeline }) => {
               type="info"
               message={interrupt!.question || "请确认是否继续？"}
               showIcon
-              className="!mb-2"
+              className="mb-2!"
             />
             <HumanDecision />
           </div>

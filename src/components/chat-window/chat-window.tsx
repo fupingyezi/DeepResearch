@@ -39,12 +39,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     [setShouldAutoScroll]
   );
 
-  /**
-   * 发送消息：对齐 deer-flow 2.0 单一入口。
-   * - 不再有"联网搜索 / 深度研究"档位；
-   * - 是否走深度研究由后端 lead-agent 自主判断；
-   * - 前端只透传文本和附件状态。
-   */
   const handleSendMessage = useCallback(
     async (
       inputValue: string,

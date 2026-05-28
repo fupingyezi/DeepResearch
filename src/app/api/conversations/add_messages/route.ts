@@ -26,12 +26,8 @@ export async function POST(request: NextRequest) {
             id,
             session_id,
             role,
-            content,
-            file_count,
-            accumulated_token_usage,
-            mode,
-            research_status
-          ) values ($1, $2, $3, $4, $5, $6, $7, $8);
+            content
+          ) values ($1, $2, $3, $4);
         `;
 
         const contentString =
@@ -44,90 +40,9 @@ export async function POST(request: NextRequest) {
           message.sessionId,
           message.role,
           contentString,
-          message.files?.length || 0,
-          message.accumulatedTokenUsage || 0,
-          message.mode || "chat",
-          message.researchStatus || "failed",
         ];
 
         await client.query(insertMsgQuery, msgValues);
-
-        if (
-          message.mode === "deepResearch" &&
-          message.researchStatus === "finished"
-        ) {
-          const dr = message.deepResearchResult;
-
-          const cleanResearchTarget = (dr.researchTarget || "")
-            .toString()
-            .trim();
-          const cleanReport = (dr.report || "").toString().trim();
-
-          // 插入 deep_research_result
-          const insertDRQuery = `
-            insert into deep_research_result (session_id, message_id, research_target, report)
-            values ($1, $2, $3, $4)
-            returning id;
-          `;
-
-          const drRes = await client.query(insertDRQuery, [
-            message.sessionId,
-            message.id,
-            cleanResearchTarget,
-            cleanReport,
-          ]);
-
-          const researchResultId = drRes.rows[0].id;
-
-          // 插入对应的每个 task
-          for (const task of dr.tasks || []) {
-            const cleanDescription = (task.description || "").toString().trim();
-            const cleanResult = task.result
-              ? task.result.toString().trim()
-              : null;
-
-            const insertTaskQuery = `
-              insert into research_task (
-                id,
-                task_id,
-                research_result_id,
-                description,
-                need_search,
-                result
-              ) values ($1, $2, $3, $4, $5, $6);
-            `;
-
-            await client.query(insertTaskQuery, [
-              task.id,
-              task.taskId,
-              researchResultId,
-              cleanDescription,
-              !!task.needSearch,
-              cleanResult,
-            ]);
-
-            // 插入该 task 的搜索结果
-            for (const sr of task.searchResult || []) {
-              const insertSRQuery = `
-                insert into research_task_search_result (
-                  task_id,
-                  title,
-                  source_url,
-                  content,
-                  relative_score
-                ) values ($1, $2, $3, $4, $5);
-              `;
-
-              await client.query(insertSRQuery, [
-                task.id,
-                sr.title || null,
-                sr.sourceUrl || null,
-                sr.content || null,
-                sr.relativeScore != null ? sr.relativeScore : null,
-              ]);
-            }
-          }
-        }
       }
 
       // 如果有文件，插入文件元数据
@@ -166,7 +81,7 @@ export async function POST(request: NextRequest) {
       console.error("Database transaction failed:", dbError);
       return NextResponse.json(
         {
-          error: "Failed to save messages and research results",
+          error: "Failed to save messages",
           details: dbError,
         },
         { status: 500 }

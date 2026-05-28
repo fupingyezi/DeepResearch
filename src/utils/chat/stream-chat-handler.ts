@@ -13,10 +13,6 @@ import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 export interface StreamChatConfig {
   /** 仅作历史标识，实际请求路径固定为 /api/v3/chat/:tid */
   apiEndpoint?: string;
-  /** 后端 Agent 类型 */
-  agentType: 'basic' | 'search' | 'deep_research';
-  /** 历史消息上的 mode 标签（仅用于持久化标签，前端 UI 不再分支） */
-  mode: 'chat' | 'search' | 'deepResearch';
   callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
   inputValue: string;
   /** 研究 human 中断恢复模式 */
@@ -35,7 +31,7 @@ export interface StreamChatConfig {
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
 
-  /** plan-mode 三开关等扩展 metadata（deerflow2 重构后已不再使用 plan-mode 字段，仅保留通用业务 metadata） */
+  /** 通用业务 metadata（如 modelKey 等） */
   extraMetadata?: Record<string, any>;
 
   // 自定义 hook
@@ -139,7 +135,6 @@ export class StreamChatHandler {
       sessionId: this.sessionId,
       role: 'user',
       content: this.config.inputValue,
-      mode: this.config.mode,
     };
 
     this.assistantMessageId = newUserMessage.id + 1;
@@ -153,7 +148,6 @@ export class StreamChatHandler {
         sessionId: this.sessionId,
         role: 'assistant',
         content: '',
-        mode: this.config.mode,
         timeline: this.cloneTimeline(),
       } as ChatMessageType,
     ];
@@ -172,9 +166,6 @@ export class StreamChatHandler {
         {
           ...this.config.currentMessages[len - 1],
           content: '',
-          mode: this.config.mode,
-          deepResearchResult: undefined,
-          researchStatus: undefined,
           artifact: undefined,
           timeline: this.cloneTimeline(),
         },
@@ -185,16 +176,10 @@ export class StreamChatHandler {
         {
           ...this.config.currentMessages[len - 2],
           content: this.config.inputValue,
-          mode: this.config.mode,
-          deepResearchResult: undefined,
-          researchStatus: undefined,
         },
         {
           ...this.config.currentMessages[len - 1],
           content: '',
-          mode: this.config.mode,
-          deepResearchResult: undefined,
-          researchStatus: undefined,
           artifact: undefined,
           timeline: this.cloneTimeline(),
         },
@@ -239,13 +224,11 @@ export class StreamChatHandler {
         uploadedFiles: this.config.uploadedFiles || [],
         deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
         isResume: this.config.isResume,
-        agentType: this.config.agentType,
         ...(this.config.extraMetadata ?? {}),
       };
 
       await this.processSseStream(`/api/v3/chat/${this.sessionId}`, {
         input: this.config.inputValue,
-        agentType: this.config.agentType,
         displayName: this.config.inputValue.slice(0, 15) || 'New thread',
         metadata,
       });
@@ -642,7 +625,6 @@ export class StreamChatHandler {
       sessionId: this.sessionId,
       role: 'assistant',
       content: this.accumulatedContent,
-      mode: this.config.mode,
       timeline: this.cloneTimeline(),
       artifact: this.artifact ?? undefined,
     };

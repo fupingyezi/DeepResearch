@@ -1,32 +1,6 @@
 import { ContentBlock } from "langchain";
 import { UUIDTypes } from "uuid";
 
-export interface searchResultItem {
-  title: string;
-  sourceUrl: string;
-  content: string;
-  relativeScore: number;
-}
-
-export interface taskType {
-  id: string; // 数据库用的UUID
-  taskId: string; // AI生成的步骤标识
-  description: string;
-  status: string;
-  needSearch?: boolean;
-  searchResult?: searchResultItem[];
-  result?: string;
-}
-
-export interface deepResearchResultType {
-  id?: number;
-  messageId: number;
-  sessionId: UUIDTypes;
-  researchTarget: string;
-  tasks: taskType[];
-  report: string;
-}
-
 export type UploadedFileStatus = "pending" | "parsing" | "success" | "failed";
 
 export interface UploadedFile {
@@ -92,7 +66,7 @@ export type CoTStep =
     };
 
 /**
- * 消息内联时间线（替代旧的 ResearchTimeline）。
+ * 消息内联时间线。
  */
 export interface MessageTimeline {
   /** 顺序事件流；空表示这条消息没有任何工具调用/思考过程，直接看正文即可 */
@@ -113,21 +87,12 @@ export interface MessageArtifact {
   content: string;
 }
 
-/** @deprecated 兼容旧名 */
-export type ResearchTimeline = MessageTimeline;
-
 export interface ChatMessageType {
   id: number;
   sessionId: UUIDTypes;
   role: string;
   content: string | ContentBlock[];
-  mode: "chat" | "search" | "deepResearch";
   files?: fileMetadataType[];
-  accumulatedTokenUsage?: number;
-  /** @deprecated 旧字段，仅用于历史消息回放兼容 */
-  deepResearchResult?: deepResearchResultType;
-  /** @deprecated 旧字段，仅用于历史消息回放兼容 */
-  researchStatus?: "finished" | "failed" | "processing" | "suspended";
   /** 工作流时序步骤（内联在气泡里展示） */
   timeline?: MessageTimeline;
   /** 产物（点击气泡入口卡片时由右侧 ArtifactPanel 打开） */
