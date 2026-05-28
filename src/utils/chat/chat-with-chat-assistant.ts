@@ -25,6 +25,7 @@ export const chatWithChatAssistant = async (
     extraMetadata: {
       is_plan_mode: false,
       subagent_enabled: false,
+      ...(params.modelKey && { modelKey: params.modelKey }),
     },
   });
 

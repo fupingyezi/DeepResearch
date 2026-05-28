@@ -20,8 +20,8 @@ export const researchConfig: SubagentConfig = {
     '3. 用结构化 markdown 输出最终结论：要点列表 + 引用来源链接。',
     '4. 不要假设可以直接访问网页；只能依赖 search_web_tool 返回的片段。',
   ].join('\n'),
-  // model 名称使用环境变量；createChatModel 内部会用 OPENAI_QWEN_* env 兜底。
-  model: process.env.SUBAGENT_RESEARCH_MODEL ?? 'qwen3.7-max',
+  // model 名称使用环境变量；createChatModel 内部默认兜底为 deepseek-chat。
+  model: process.env.SUBAGENT_RESEARCH_MODEL ?? 'deepseek-chat',
   maxTurns: 10,
   timeout: 300,
   tools: ['search_web_tool'],

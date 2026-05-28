@@ -1,8 +1,9 @@
 /**
  * threadService 全局单例
  *
- * 与 v2 路由的 `getClient()` 同模式：懒加载 + 进程内复用。
- * 所有 v3 路由通过 `getThreadService()` 获取同一份装配实例。
+ * 支持两种模式：
+ * 1. 基础单例模式（缓存 DeerFlowClient）
+ * 2. 动态模型模式：通过 metadata.modelKey 或 metadata.modelConfig 在请求时传递
  */
 
 import {
@@ -14,7 +15,14 @@ import {
   makeCheckpointer,
   setMemoryModelFactory,
   type ThreadService,
+  type ModelConfig,
 } from '@/deerflow-harness';
+import {
+  buildModelConfigFromPreset,
+  resolveModelConfig,
+  MODEL_PRESETS,
+  type ModelPresetKey,
+} from '@/config/models';
 
 let service: ThreadService | null = null;
 let initPromise: Promise<ThreadService> | null = null;
@@ -26,28 +34,64 @@ let memoryFactoryRegistered = false;
  */
 function ensureMemoryModelFactory(): void {
   if (memoryFactoryRegistered) return;
-  setMemoryModelFactory((modelName) =>
-    createChatModel({
-      modelName: modelName ?? process.env.OPENAI_MODEL_NAME ?? 'qwen3.7-max',
-      apiKey: process.env.OPENAI_QWEN_API_KEY,
-      baseUrl: process.env.OPENAI_QWEN_BASE_URL,
-      // memory updater 是 afterAgent 后台异步任务，不需要 token streaming。
-      // 关键：若开启 streaming，本次后台 invoke 会复用主请求 SSE 链上的
-      // callback handler，主请求 ReadableStream 已关闭后会抛
-      // `ERR_INVALID_STATE: Controller is already closed`。
+  setMemoryModelFactory((modelName) => {
+    // 1) 默认走全局默认 preset（deepseek-v4-flash）
+    // 2) 若 caller 显式传 modelName，先尝试当作 preset key 解析；
+    //    解析不到再回退为「按 modelName 直接构造」+ 默认 DeepSeek 凭据
+    let base: ModelConfig;
+    if (modelName && MODEL_PRESETS[modelName as ModelPresetKey]) {
+      base = buildModelConfigFromPreset(modelName as ModelPresetKey);
+    } else if (modelName) {
+      const fallback = resolveModelConfig();
+      base = { ...fallback, modelName };
+    } else {
+      base = resolveModelConfig();
+    }
+    return createChatModel({
+      ...base,
       streaming: false,
-      // memory updater 输出是结构化 JSON（user/history/facts 多段聚合），
-      // 在长对话历史下 4096 tokens 很容易被截断 → JSON 解析失败、整次更新被丢弃。
-      // 给一个明显更宽的上限；真正写入 storage 时还会按 maxFacts 收敛，所以
-      // 不会因为放宽 token 上限而无限膨胀。
       maxTokens: 8192,
-      // 这一类生成型 JSON 任务对采样多样性不敏感，反而需要更确定的输出，
-      // 降低 temperature/topP 也能减小被截断时输出半截无效 JSON 的概率。
       temperature: 0.2,
       topP: 0.8,
-    }),
-  );
+    });
+  });
   memoryFactoryRegistered = true;
+}
+
+/**
+ * 获取默认的 ModelConfig（用于基础模式或无指定时）
+ * 统一走 resolveModelConfig() —— 默认 preset 为 deepseek-v4-flash，
+ * apiKey/baseUrl 由 buildModelConfigFromPreset 按 provider 注入。
+ */
+function getDefaultModelConfig(): ModelConfig {
+  return resolveModelConfig();
+}
+
+/**
+ * 从请求元数据中解析 modelConfig
+ * 支持两种格式：
+ * 1. metadata.modelKey: string（如 'deepseek-v4-pro'）- 从 MODEL_PRESETS 查找
+ * 2. metadata.modelConfig: ModelConfig（完整配置）- 直接使用
+ */
+function resolveModelConfigFromMetadata(metadata?: Record<string, any>): ModelConfig {
+  if (!metadata) return getDefaultModelConfig();
+
+  // 方式 1：使用预设的模型 key
+  if (typeof metadata.modelKey === 'string') {
+    try {
+      return buildModelConfigFromPreset(metadata.modelKey as ModelPresetKey);
+    } catch (e) {
+      console.warn('[resolveModelConfigFromMetadata] Failed to resolve preset key:', e);
+      return getDefaultModelConfig();
+    }
+  }
+
+  // 方式 2：直接传入完整的 ModelConfig
+  if (metadata.modelConfig && typeof metadata.modelConfig === 'object') {
+    return metadata.modelConfig as ModelConfig;
+  }
+
+  return getDefaultModelConfig();
 }
 
 async function build(): Promise<ThreadService> {
@@ -55,19 +99,13 @@ async function build(): Promise<ThreadService> {
 
   ensureMemoryModelFactory();
 
-  const client = new DeerFlowClient(
-    {
-      modelName: process.env.OPENAI_MODEL_NAME ?? 'qwen3.7-max',
-      apiKey: process.env.OPENAI_QWEN_API_KEY,
-      baseUrl: process.env.OPENAI_QWEN_BASE_URL,
-    },
-    {
-      agentName: 'lead',
-      subagentEnabled: true,
-      memoryEnabled: true,
-      checkpointer,
-    },
-  );
+  const defaultModelConfig = getDefaultModelConfig();
+  const client = new DeerFlowClient(defaultModelConfig, {
+    agentName: 'lead',
+    subagentEnabled: true,
+    memoryEnabled: true,
+    checkpointer,
+  });
 
   return createThreadService({
     client,
@@ -86,4 +124,24 @@ export async function getThreadService(): Promise<ThreadService> {
     });
   }
   return initPromise;
+}
+
+/**
+ * 获取带有动态模型配置的客户端
+ * 当请求中指定了 modelKey 或 modelConfig 时使用此方法
+ */
+export async function getDeerFlowClientWithModelConfig(
+  metadata?: Record<string, any>,
+): Promise<DeerFlowClient> {
+  const modelConfig = resolveModelConfigFromMetadata(metadata);
+  const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
+
+  ensureMemoryModelFactory();
+
+  return new DeerFlowClient(modelConfig, {
+    agentName: 'lead',
+    subagentEnabled: true,
+    memoryEnabled: true,
+    checkpointer,
+  });
 }

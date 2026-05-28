@@ -5,7 +5,7 @@ import { ChatOpenAI } from '@langchain/openai';
 export function inferProvider(config: ModelConfig): ModelProvider {
   if (config.provider) return config.provider;
 
-  const url = (config.baseUrl ?? process.env.OPENAI_QWEN_BASE_URL ?? '').toLowerCase();
+  const url = (config.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? '').toLowerCase();
   const name = (config.modelName ?? '').toLowerCase();
 
   if (url.includes('dashscope') || url.includes('aliyun') || name.startsWith('qwen')) {
@@ -36,9 +36,9 @@ export function createChatModel(config: ModelConfig) {
   const provider = inferProvider(config);
   const streaming = config.streaming ?? defaultStreamingFor(provider);
 
-  const baseUrl = config?.baseUrl ?? process.env.OPENAI_QWEN_BASE_URL;
-  const apiKey = config?.apiKey ?? process.env.OPENAI_QWEN_API_KEY;
-  const modelName = config?.modelName ?? 'qwen3.7-max';
+  const baseUrl = config?.baseUrl ?? process.env.DEEPSEEK_BASE_URL;
+  const apiKey = config?.apiKey ?? process.env.DEEPSEEK_API_KEY;
+  const modelName = config?.modelName ?? 'deepseek-chat';
   const temperature = config?.temperature ?? 0.7;
 
   // === 采样默认参数 ===

@@ -10,7 +10,7 @@ export {
   researchConfig,
   type SubagentConfig,
 } from './subagents';
-export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent } from './types';
+export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider } from './types';
 
 export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';

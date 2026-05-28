@@ -53,6 +53,7 @@ export const chatWithDeepResearch = async (
       is_plan_mode: true,
       subagent_enabled: true,
       agent_name: "lead-research",
+      ...(params.modelKey && { modelKey: params.modelKey }),
     },
 
     // 自定义深度研究的数据处理

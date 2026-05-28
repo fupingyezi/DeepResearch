@@ -4,6 +4,7 @@ import Image from "next/image";
 import FileItem from "../files/file-items";
 import { ChatInputProps } from "@/types";
 import { agentMode, useChatSelectStore, useConversationStore } from "@/store";
+import ModelSelector from "../model-selector/model-selector";
 
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
@@ -41,6 +42,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     if (inputValue.trim() && onSend && !disabled) {
       const hasFiles = localUploadedFiles.length > 0;
+      // modelKey is handled from chat-window via store
       onSend(inputValue.trim(), hasFiles);
       setInputValue("");
       clearFiles();
@@ -118,7 +120,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           target.style.height = Math.min(target.scrollHeight, 100) + "px";
         }}
       />
-      <div className="flex w-full justify-between px-2">
+      <div className="flex w-full justify-between px-2 gap-2 items-center flex-wrap">
         <div className="flex items-center gap-2">
           <input
             type="file"
@@ -157,7 +159,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
           >
             深度研究
           </div>
+          {/* 模型选择器：紧挨"深度研究"，样式与胶囊按钮一致，向上展开 */}
+          <ModelSelector showLabel={false} />
         </div>
+
         <button
           type="submit"
           className={`p-2 rounded-[50%] bg-black hover:cursor-pointer`}

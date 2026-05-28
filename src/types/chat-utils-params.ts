@@ -5,6 +5,7 @@ export interface chatWithChatAssistantProps extends ConversationState {
   hasFiles?: boolean;
   uploadedFiles?: any[];
   callingMode: "direct" | "reEditCall" | "recall";
+  modelKey?: string;
 }
 
 export interface chatWithDeepResearchProps
@@ -13,6 +14,7 @@ export interface chatWithDeepResearchProps
   inputValue: string;
   callingMode: "direct" | "reEditCall" | "recall" | "resume";
   isResume?: boolean;
+  modelKey?: string;
 }
 
 export interface reChatWithAssistantProps
@@ -21,4 +23,5 @@ export interface reChatWithAssistantProps
   inputValue: string;
   callingMode: "reEditCall" | "recall";
   mode: "chat" | "search" | "deepResearch";
+  modelKey?: string;
 }

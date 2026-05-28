@@ -17,7 +17,7 @@ import {
   createSseStream,
   type ClientAgentEvent,
 } from '@/deerflow-harness';
-import { getThreadService } from '../../../threads/_service';
+import { getThreadService, getDeerFlowClientWithModelConfig } from '../../../threads/_service';
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
@@ -44,11 +44,19 @@ export async function POST(
     );
   }
 
-  const service = await getThreadService();
+  // 根据 metadata 中是否有 modelKey 来决定使用哪个客户端
+  const hasModelKey = body.metadata?.modelKey && typeof body.metadata.modelKey === 'string';
+  let dynamicClient = null;
+
+  if (hasModelKey) {
+    // 创建带有指定模型配置的客户端
+    dynamicClient = await getDeerFlowClientWithModelConfig(body.metadata);
+  }
 
   // 1) 幂等创建 thread
   try {
-    await service.createThread({
+    const threadService = await getThreadService();
+    await threadService.createThread({
       thread_id: threadId,
       user_id,
       assistant_id: body.agentType,
@@ -69,7 +77,8 @@ export async function POST(
   // 2) 提交 run（fire-and-forget，立即拿到 run_id）
   let run_id: string;
   try {
-    const r = await service.submitRun({
+    const threadService = await getThreadService();
+    const r = await threadService.submitRun({
       thread_id: threadId,
       user_id,
       input: body.input,
@@ -89,16 +98,33 @@ export async function POST(
     );
   }
 
-  // 3) 订阅 stream-bridge，并在最前面注入一个携带 run_id 的 START 帧
-  const subscription = service.subscribe({ thread_id: threadId, run_id });
+  // 3) 根据是否有指定的模型，选择使用不同的流方式
+  let merged: AsyncGenerator<ClientAgentEvent>;
 
-  const merged = (async function* (): AsyncGenerator<ClientAgentEvent> {
-    yield createClientAgentEvent(ClientAgentEventType.START, body.agentType ?? 'lead', {
-      run_id,
-      thread_id: threadId,
-    } as never);
-    for await (const ev of subscription) yield ev;
-  })();
+  if (hasModelKey && dynamicClient) {
+    // 使用动态客户端直接获取流
+    const eventStream = dynamicClient.stream(body.input, threadId, body.metadata);
+
+    merged = (async function* (): AsyncGenerator<ClientAgentEvent> {
+      yield createClientAgentEvent(ClientAgentEventType.START, body.agentType ?? 'lead', {
+        run_id,
+        thread_id: threadId,
+      } as never);
+      for await (const ev of eventStream) yield ev;
+    })();
+  } else {
+    // 使用标准流订阅
+    const service = await getThreadService();
+    const subscription = service.subscribe({ thread_id: threadId, run_id });
+
+    merged = (async function* (): AsyncGenerator<ClientAgentEvent> {
+      yield createClientAgentEvent(ClientAgentEventType.START, body.agentType ?? 'lead', {
+        run_id,
+        thread_id: threadId,
+      } as never);
+      for await (const ev of subscription) yield ev;
+    })();
+  }
 
   const stream = createSseStream(request, merged);
   return new Response(stream, {

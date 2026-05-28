@@ -9,6 +9,7 @@ import {
   useDeepResearchProcessStore,
   useChatSelectStore,
   useFileUploadStore,
+  useModelStore,
 } from "@/store";
 import {
   chatWithChatAssistant,
@@ -35,6 +36,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const currentMessages = useConversationStore((s) => s.currentMessages);
   const setShouldAutoScroll = useConversationStore((s) => s.setShouldAutoScroll);
   const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
+  const { selectedModelKey } = useModelStore();
 
   const handleChangeScroll = useCallback(
     (next: boolean) => {
@@ -54,6 +56,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           hasFiles,
           uploadedFiles,
           callingMode: "direct",
+          modelKey: selectedModelKey,
           ...conversationStore,
         });
         // 发送后清理文件状态
@@ -64,6 +67,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         await chatWithSearhAssistant({
           inputValue,
           callingMode: "direct",
+          modelKey: selectedModelKey,
           ...conversationStore,
         });
       } else if (selectedAgent === "deepResearch") {
@@ -71,12 +75,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         await chatWithDeepResearch({
           inputValue,
           callingMode: "direct",
+          modelKey: selectedModelKey,
           ...conversationStore,
           ...deepResearchStore,
         });
       }
     },
-    [uploadedFiles, clearUploadedFiles]
+    [uploadedFiles, clearUploadedFiles, selectedModelKey]
   );
 
   return (

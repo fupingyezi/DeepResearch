@@ -2,6 +2,7 @@ import useConversationStore from "./conversation-store";
 import useDeepResearchProcessStore from "./deep-research-process-store";
 import useChatSelectStore from "./chat-selector-store";
 import useFileUploadStore from "./file-upload-store";
+import { useModelStore } from "./modelStore";
 
 import type { ConversationState } from "./conversation-store";
 import type { DeepResearchProcessState } from "./deep-research-process-store";
@@ -13,6 +14,7 @@ export {
   useDeepResearchProcessStore,
   useChatSelectStore,
   useFileUploadStore,
+  useModelStore,
 };
 
 export {
