@@ -6,16 +6,10 @@ import ChatMessage from "./chat-message";
 import ChatInput from "./chat-input";
 import {
   useConversationStore,
-  useDeepResearchProcessStore,
-  useChatSelectStore,
   useFileUploadStore,
   useModelStore,
 } from "@/store";
-import {
-  chatWithChatAssistant,
-  chatWithDeepResearch,
-  chatWithSearhAssistant,
-} from "@/utils/chat";
+import { chatWithAgent } from "@/utils/chat";
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {
   return (
@@ -45,40 +39,34 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     [setShouldAutoScroll]
   );
 
+  /**
+   * 发送消息：合并版统一入口。
+   * - 不再分三套链路（chat / search / deepResearch）；
+   * - 是否启用搜索 / 深度研究由 ChatInput 通过 opts 传上来；
+   * - 默认（两开关均关闭）= 普通对话。
+   */
   const handleSendMessage = useCallback(
-    async (inputValue: string, hasFiles?: boolean) => {
-      const { selectedAgent } = useChatSelectStore.getState();
+    async (
+      inputValue: string,
+      opts?: {
+        hasFiles?: boolean;
+        enableDeepResearch?: boolean;
+        enableSearch?: boolean;
+      }
+    ) => {
       const conversationStore = useConversationStore.getState();
-      const deepResearchStore = useDeepResearchProcessStore.getState();
-      if (selectedAgent === "chat") {
-        await chatWithChatAssistant({
-          inputValue,
-          hasFiles,
-          uploadedFiles,
-          callingMode: "direct",
-          modelKey: selectedModelKey,
-          ...conversationStore,
-        });
-        // 发送后清理文件状态
-        if (hasFiles) {
-          clearUploadedFiles();
-        }
-      } else if (selectedAgent === "search") {
-        await chatWithSearhAssistant({
-          inputValue,
-          callingMode: "direct",
-          modelKey: selectedModelKey,
-          ...conversationStore,
-        });
-      } else if (selectedAgent === "deepResearch") {
-        deepResearchStore.resetState();
-        await chatWithDeepResearch({
-          inputValue,
-          callingMode: "direct",
-          modelKey: selectedModelKey,
-          ...conversationStore,
-          ...deepResearchStore,
-        });
+      await chatWithAgent({
+        inputValue,
+        callingMode: "direct",
+        modelKey: selectedModelKey,
+        hasFiles: opts?.hasFiles,
+        uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
+        enableDeepResearch: !!opts?.enableDeepResearch,
+        enableSearch: !!opts?.enableSearch,
+        ...conversationStore,
+      });
+      if (opts?.hasFiles) {
+        clearUploadedFiles();
       }
     },
     [uploadedFiles, clearUploadedFiles, selectedModelKey]
@@ -107,4 +95,3 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 };
 
 export default ChatWindow;
-

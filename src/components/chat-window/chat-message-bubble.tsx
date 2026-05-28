@@ -1,21 +1,26 @@
-import { CheckCircleOutlined, LoadingOutlined } from "@ant-design/icons";
-import { Button, Spin, message as antdMessage } from "antd";
+import { LoadingOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Button, Spin } from "antd";
 import FileItem from "../files/file-items";
 import CustomMarkdown from "../markdown/custom-markdown";
 import MessageToolBar from "../message-tool-bar/message-tool-bar";
+import MessageTimeline from "./message-timeline";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useCopy } from "@/utils/hooks";
-import { useDeepResearchProcessStore, useConversationStore } from "@/store";
-import { ChatMessageBubbleProps, SupportDownloadFileType } from "@/types";
-import { reChatWithAssistant } from "@/utils/chat";
+import { useConversationStore, useArtifactPanelStore } from "@/store";
+import {
+  ChatMessageBubbleProps,
+  MessageArtifact,
+  MessageTimeline as MessageTimelineType,
+  SupportDownloadFileType,
+} from "@/types";
+import { chatWithAgent } from "@/utils/chat";
 import {
   handleDownloadPDF,
   handleDownloadDOC,
   handleDownloadMD,
 } from "@/utils/files/file-download";
 import { getFileIcon } from "@/utils/files/file-info-handler";
-import apiClient from "@/utils/request/api";
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
@@ -24,23 +29,17 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   selectDownloadId,
   setSelectDownloadId,
 }) => {
-  const deepResearchStore = useDeepResearchProcessStore();
-  const conversationStore = useConversationStore();
-  const {
-    status,
-    report,
-    setStatus,
-    setResearchTargt,
-    setIsOpenProcessSider,
-    setTasks,
-    updateReport,
-  } = deepResearchStore;
-  const {
-    currentMessages,
-    isChating,
-    currentAbortController,
-    abortCurrentChat,
-  } = conversationStore;
+  // 仅订阅渲染必需的字段，避免不带 selector 的 useConversationStore() 在
+  // 流式 setCurrentMessages 高频触发时把所有气泡卷入级联 re-render，最终
+  // 触发 React 的 "Maximum update depth exceeded"。
+  const currentMessages = useConversationStore((s) => s.currentMessages);
+  const isChating = useConversationStore((s) => s.isChating);
+  const currentAbortController = useConversationStore(
+    (s) => s.currentAbortController
+  );
+  const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
+  const openArtifact = useArtifactPanelStore((s) => s.openArtifact);
+
   const [isShowOtherOperators, setIsShowOtherOperators] =
     useState<boolean>(false);
   const { copyToClipboard } = useCopy();
@@ -49,24 +48,55 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     message.content as string
   );
 
-  // 点击查看深度研究结果的处理逻辑
-  const hanldeShowDeepResearch = async () => {
-    if (status === "processing") return;
-    const response = await apiClient.post(
-      "/conversations/get_deep_research_result",
-      { session_id: message.sessionId, message_id: message.id }
-    );
-    const deepResearchResult = response.data;
-    if (!deepResearchResult) {
-      console.error("出错了，没有研究结果");
-      return;
+  /**
+   * 兼容旧消息：若历史消息只有 deepResearchResult 字段，把它降级为
+   * 一个最简化的 timeline + artifact，仅供历史回放。
+   */
+  const { effectiveTimeline, effectiveArtifact } = useMemo<{
+    effectiveTimeline?: MessageTimelineType;
+    effectiveArtifact?: MessageArtifact;
+  }>(() => {
+    if (message.timeline || message.artifact) {
+      return {
+        effectiveTimeline: message.timeline,
+        effectiveArtifact: message.artifact,
+      };
     }
-    setStatus("notCall");
-    setIsOpenProcessSider(true);
-    setResearchTargt(deepResearchResult.researchTarget || "");
-    setTasks(deepResearchResult.tasks || []);
-    updateReport(deepResearchResult.report);
-  };
+    if (message.mode === "deepResearch" && message.deepResearchResult) {
+      const dr = message.deepResearchResult;
+      const timeline: MessageTimelineType = {
+        steps: (dr.tasks || []).map((t, idx) => ({
+          kind: "subagent_task" as const,
+          id: t.id || t.taskId || String(idx),
+          taskId: t.taskId || String(idx),
+          description: t.description,
+          status: t.result ? "completed" : "running",
+          result: t.result,
+        })),
+        status:
+          message.researchStatus === "finished"
+            ? "end"
+            : message.researchStatus === "failed"
+            ? "failed"
+            : message.researchStatus === "suspended"
+            ? "interrupt"
+            : "processing",
+      };
+      return {
+        effectiveTimeline: timeline,
+        effectiveArtifact: dr.report
+          ? { title: dr.researchTarget || "研究报告", content: dr.report }
+          : undefined,
+      };
+    }
+    return {};
+  }, [
+    message.timeline,
+    message.artifact,
+    message.mode,
+    message.deepResearchResult,
+    message.researchStatus,
+  ]);
 
   const renderContent = () => {
     if (typeof message.content === "string") {
@@ -75,9 +105,21 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     return JSON.stringify(message.content);
   };
 
+  const handleOpenArtifact = () => {
+    if (!effectiveArtifact) return;
+    openArtifact({
+      sessionId:
+        typeof message.sessionId === "string"
+          ? message.sessionId
+          : String(message.sessionId ?? ""),
+      messageId: message.id,
+      title: effectiveArtifact.title,
+      report: effectiveArtifact.content,
+    });
+  };
+
   // 处理复制等其他操作
   const renderAdditionalOperator = (role: string) => {
-    //常量
     const userMessagesTools: ("copy" | "edit")[] = ["copy"];
     const aiMessagesTools: ("copy" | "recall" | "download")[] = [
       "copy",
@@ -109,13 +151,15 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           return;
         }
         case "recall": {
-          await reChatWithAssistant({
+          await chatWithAgent({
             callingMode: "recall",
             inputValue: message.content as string,
-            mode: message.mode,
-            ...conversationStore,
-            ...deepResearchStore,
+            enableDeepResearch: message.mode === "deepResearch",
+            enableSearch: message.mode === "search",
+            // 事件回调里取最新 store 快照，无需把整个 store 作为响应式依赖。
+            ...useConversationStore.getState(),
           });
+          return;
         }
         case "download": {
           if (selectDownloadId === message.id) {
@@ -127,41 +171,32 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       }
     };
 
+    /** 下载内容来源：优先 artifact.content，其次正文 */
+    const getDownloadSource = () => {
+      if (effectiveArtifact?.content) return effectiveArtifact.content;
+      return (message.content as string) || "";
+    };
+
     const handleDownloadFiles = (fileType: SupportDownloadFileType) => {
+      const src = getDownloadSource();
       switch (fileType) {
-        case "pdf": {
-          handleDownloadPDF(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case "pdf":
+          handleDownloadPDF(src);
           return;
-        }
-        case "word": {
-          handleDownloadDOC(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case "word":
+          handleDownloadDOC(src);
           return;
-        }
-        case "md": {
-          handleDownloadMD(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case "md":
+          handleDownloadMD(src);
           return;
-        }
-        case "cancel": {
+        case "cancel":
           return;
-        }
       }
     };
 
     return (
       <div
-        className={`absolute -bottom-10  flex transition-all  ${
+        className={`absolute -bottom-10 flex transition-all ${
           role === "user" ? "justify-end" : "justify-start"
         } ${isShowOtherOperators ? "opacity-100" : "opacity-0"}`}
         onMouseEnter={() => setIsShowOtherOperators(true)}
@@ -188,103 +223,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     );
   };
 
-  // 深度研究状态显示框展示逻辑
-  const renderShowDeepResearch = () => {
-    if (
-      message.mode !== "deepResearch" ||
-      message.role !== "assistant" ||
-      message.researchStatus === "failed"
-    ) {
-      return null;
-    }
-
-    // 历史已经完成的深度研究
-    if (
-      message.researchStatus === "finished" &&
-      message.deepResearchResult?.report
-    ) {
-      return (
-        <>
-          <Button
-            className="h-4 w-2xs rounded-2xl"
-            onClick={() => hanldeShowDeepResearch()}
-          >
-            <CheckCircleOutlined style={{ color: "green" }} />{" "}
-            深度研究完成,查看研究过程
-          </Button>
-          <div className="mt-4 p-6 border-2 border-gray-200 rounded-md bg-white relative">
-            <div className="text-gray-800 leading-relaxed">
-              <CustomMarkdown
-                content={message.deepResearchResult?.report.slice(0, 300) || ""}
-              />
-            </div>
-            <div
-              onClick={() => hanldeShowDeepResearch()}
-              className="h-1/2 w-full absolute left-0 bottom-0 z-10 flex items-center justify-center"
-              style={{
-                background:
-                  "linear-gradient(to top, rgba(255, 255, 255, 1), transparent)",
-              }}
-            >
-              <Button
-                className="h-6 w-30 rounded-2xl"
-                onClick={() => hanldeShowDeepResearch()}
-              >
-                展开文档
-              </Button>
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    // 当前正在进行的深度研究
-    if (status !== "notCall") {
-      return (
-        <>
-          <Button
-            className="h-4 w-2xs rounded-2xl"
-            onClick={() => hanldeShowDeepResearch()}
-          >
-            {status === "end" ? (
-              <>
-                <CheckCircleOutlined style={{ color: "green" }} />{" "}
-                深度研究完成,查看研究过程
-              </>
-            ) : (
-              <>
-                <LoadingOutlined />
-                正在进行深度研究
-              </>
-            )}
-          </Button>
-          {status === "end" && report && (
-            <div className="mt-4 p-6 border-2 border-gray-200 rounded-md bg-white relative">
-              <div className="text-gray-800 leading-relaxed">
-                <CustomMarkdown content={report.slice(0, 300) || ""} />
-              </div>
-              <div
-                onClick={() => hanldeShowDeepResearch()}
-                className="h-1/2 w-full absolute left-0 bottom-0 z-10 flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(to top, rgba(255, 255, 255, 1), transparent)",
-                }}
-              >
-                <Button
-                  className="h-6 w-30 rounded-2xl"
-                  onClick={() => hanldeShowDeepResearch()}
-                >
-                  展开文档
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
-      );
-    }
-  };
-
   // user气泡
   if (message.role === "user") {
     const handleSubmit = async (e: React.FormEvent) => {
@@ -299,12 +237,14 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
-        await reChatWithAssistant({
+        const lastMode =
+          currentMessages[currentMessages.length - 1]?.mode || "chat";
+        await chatWithAgent({
           callingMode: "reEditCall",
           inputValue: reEditValue,
-          mode: currentMessages[currentMessages.length - 1].mode,
-          ...conversationStore,
-          ...deepResearchStore,
+          enableDeepResearch: lastMode === "deepResearch",
+          enableSearch: lastMode === "search",
+          ...useConversationStore.getState(),
         });
       }
     };
@@ -325,7 +265,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       }
     };
 
-    // 正常气泡
     if (!isEditing) {
       return (
         <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
@@ -355,7 +294,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         </div>
       );
     } else {
-      // 编辑气泡
       return (
         <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
           <textarea
@@ -392,30 +330,54 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     }
   }
 
-  // loading气泡
+  // loading 气泡：assistant 还没有 timeline 也没有正文
   if (
     message.role === "assistant" &&
+    (!effectiveTimeline || effectiveTimeline.steps.length === 0) &&
+    !effectiveArtifact &&
     (message.content === "" ||
-      (Array.isArray(message) && !message.content.length))
+      (Array.isArray(message.content) && !message.content.length))
   ) {
     return (
       <Spin
         indicator={<LoadingOutlined style={{ color: "#828282" }} />}
         size="large"
-      ></Spin>
+      />
     );
   }
 
-  // ai气泡
+  // ai 气泡（含内联工作流时间线 + 产物入口）
   return (
     <div className="w-full flex px-3 mb-5 justify-start flex-wrap relative">
       <div
-        className="max-w-2/3 p-3 rounded-3xl bg-white flex flex-col gap-4"
+        className="max-w-2/3 p-3 rounded-3xl bg-white flex flex-col gap-2"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
-        <CustomMarkdown content={renderContent()} />
-        {renderShowDeepResearch()}
+        {/* 工作流时间线（reasoning / tool_call / subagent_task） */}
+        <MessageTimeline timeline={effectiveTimeline} />
+
+        {/* 正文 */}
+        {typeof message.content === "string" && message.content.length > 0 && (
+          <CustomMarkdown content={renderContent()} />
+        )}
+
+        {/* 产物入口（点击打开右侧 ArtifactPanel） */}
+        {effectiveArtifact && (
+          <button
+            type="button"
+            onClick={handleOpenArtifact}
+            className="w-full mt-1 flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FileTextOutlined className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 truncate">
+                {effectiveArtifact.title}
+              </span>
+            </div>
+            <span className="text-xs text-blue-500 shrink-0">查看产物 →</span>
+          </button>
+        )}
       </div>
       {renderAdditionalOperator(message.role)}
     </div>

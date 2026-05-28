@@ -21,10 +21,16 @@ import type {
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
+  CoTStep,
+  MessageTimeline,
+  MessageArtifact,
+  ResearchTimeline,
 } from "./chat-info-define";
 
 //函数参数相关
 import type {
+  chatWithAgentProps,
+  reChatWithAgentProps,
   chatWithChatAssistantProps,
   chatWithDeepResearchProps,
   reChatWithAssistantProps,
@@ -51,9 +57,15 @@ export {
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
+  CoTStep,
+  MessageTimeline,
+  MessageArtifact,
+  ResearchTimeline,
 };
 
 export {
+  chatWithAgentProps,
+  reChatWithAgentProps,
   chatWithChatAssistantProps,
   chatWithDeepResearchProps,
   reChatWithAssistantProps,

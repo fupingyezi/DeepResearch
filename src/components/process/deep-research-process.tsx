@@ -1,127 +1,53 @@
 "use client";
 
-import { LoadingOutlined } from "@ant-design/icons";
-import { Title } from "./title";
-import { TaskProcessingItem } from "./task-processing-item";
-import { Report } from "./report";
-import { ProcessHeader } from "./process-header";
-import { HumanDecision } from "./human-decision";
+import { CloseOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Button } from "antd";
+import CustomMarkdown from "../markdown/custom-markdown";
+import { useArtifactPanelStore } from "@/store";
 
-import useDeepResearchProcessStore from "@/store/deep-research-process-store";
-import { useState, useEffect } from "react";
+/**
+ * 右侧 Artifact 产物面板（对齐 deer-flow 的 ArtifactFileDetail）。
+ *
+ * 仅承担"产物展示"职责：
+ *   - 不再渲染过程（plan/tasks/interrupt）——这些已内联在 chat 气泡的 ResearchTimeline；
+ *   - 展示由 chat 气泡里的"查看产物"按钮触发的 currentArtifact（一般是 markdown report）；
+ *   - 关闭按钮把面板收起。
+ */
+const ArtifactPanel = () => {
+  const isOpen = useArtifactPanelStore((s) => s.isOpenArtifactPanel);
+  const currentArtifact = useArtifactPanelStore((s) => s.currentArtifact);
+  const closeArtifact = useArtifactPanelStore((s) => s.closeArtifact);
 
-const DeepResearchProcess = () => {
-  // 精细订阅：避免每次 store 任意字段变化都让本组件重渲染（SSE task_update
-  // 高频触发 isOpenProcessSider/tasks 等更新，下面挂的 effect 会被反复唤醒）。
-  const isOpenProcessSider = useDeepResearchProcessStore(
-    (s) => s.isOpenProcessSider
-  );
-  const setIsOpenProcessSider = useDeepResearchProcessStore(
-    (s) => s.setIsOpenProcessSider
-  );
-  const researchTarget = useDeepResearchProcessStore((s) => s.researchTarget);
-  const tasks = useDeepResearchProcessStore((s) => s.tasks);
-  const report = useDeepResearchProcessStore((s) => s.report);
-  const status = useDeepResearchProcessStore((s) => s.status);
-
-  const [selectedTab, setSelectedTab] = useState<"process" | "report">(
-    "process"
-  );
-
-  // report 第一次出现时自动切换到「报告」Tab。
-  // 之前 deps 漏写 selectedTab，effect 在每次 report 引用变化时都会跑，
-  // 高频 SSE 写 store 时容易把 selectedTab 反复设置回 "report" 形成 setState 抖动。
-  useEffect(() => {
-    if (selectedTab === "process" && report) {
-      setSelectedTab("report");
-    }
-  }, [report, selectedTab]);
-
-  // 抽屉切换/重置时，若 report 已被清空则回到 process Tab。
-  // 之前 deps 只有 isOpenProcessSider，且体内同时读 selectedTab+report，
-  // 是 React 经典 deps lint 漏配置——本质上只关心抽屉打开瞬间，
-  // 而不是 report 任意变化。这里改用 isOpenProcessSider+report 两个真实依赖，
-  // 但加显式条件 `!report` 保证不会跟上面那条 effect 形成"打 report 后立刻被切回 process"的回路。
-  useEffect(() => {
-    if (isOpenProcessSider && !report && selectedTab === "report") {
-      setSelectedTab("process");
-    }
-  }, [isOpenProcessSider, report, selectedTab]);
-
-  if (!isOpenProcessSider) return null;
+  if (!isOpen || !currentArtifact) return null;
 
   return (
-    <div className="h-screen w-6xl px-4 flex flex-col overflow-y-scroll overflow-x-hidden relative border-l-2 border-[#f3f3f3]">
+    <div className="h-screen w-[45%] min-w-[420px] max-w-3xl flex flex-col border-l-2 border-[#f3f3f3] bg-white">
       {/* header */}
-      <ProcessHeader
-        selectedTab={selectedTab}
-        report={report}
-        setSelectedTab={setSelectedTab}
-        setIsOpen={setIsOpenProcessSider}
-        researchTarget={researchTarget}
-      />
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#f3f3f3]">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileTextOutlined className="text-blue-500 shrink-0" />
+          <span className="font-medium text-gray-800 truncate">
+            {currentArtifact.title || "研究报告"}
+          </span>
+        </div>
+        <Button
+          type="text"
+          icon={<CloseOutlined />}
+          onClick={() => closeArtifact()}
+          aria-label="关闭产物面板"
+        />
+      </div>
 
-      {selectedTab === "process" && (
-        <>
-          {/* outline */}
-          {tasks.length !== 0 && (
-            <div className="w-full mt-4 p-4 space-y-2 bg-[#f4f4f4] rounded-xl">
-              <div className="flex">
-                <div>
-                  <Title title="🔍生成大纲并按需搜索互联网公开信息" />
-                  <ul className="mt-1.5 space-y-1.5 pl-8">
-                    {tasks.map((task) => (
-                      <li
-                        key={task.id}
-                        className="text-sm text-gray-600 list-item list-disc marker:text-gray-400"
-                      >
-                        {task.description}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="flex">
-                <Title title="💡根据搜索到的内容进行分析" />
-              </div>
-
-              <div className="flex">
-                <Title title="📄生成分析研究报告" />
-              </div>
-            </div>
-          )}
-
-          {/* research */}
-          {tasks.length !== 0 && (
-            <div className="w-full flex flex-col">
-              {tasks.map((task, index) => (
-                <TaskProcessingItem
-                  key={task.id}
-                  task={task}
-                  isShow={
-                    (status !== "interrupt" &&
-                      (index === 0 || tasks[index - 1].result !== "")) ||
-                    task.result !== ""
-                  }
-                />
-              ))}
-              {tasks.every((task) => task.result) && !report && (
-                <div className="w-full flex items-center mt-3">
-                  <LoadingOutlined />
-                  <Title title="正在生成最终报告"></Title>
-                </div>
-              )}
-            </div>
-          )}
-          {status === "interrupt" && <HumanDecision />}
-        </>
-      )}
-
-      {/* report */}
-      {report && selectedTab === "report" && <Report report={report} />}
+      {/* body */}
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {currentArtifact.report ? (
+          <CustomMarkdown content={currentArtifact.report} />
+        ) : (
+          <div className="text-gray-400 text-sm">该产物暂无内容</div>
+        )}
+      </div>
     </div>
   );
 };
 
-export default DeepResearchProcess;
+export default ArtifactPanel;

@@ -1,6 +1,6 @@
 import "./globals.css";
 import Sider from "@/components/sider/sider";
-import DeepResearchProcess from "@/components/process/deep-research-process";
+import ArtifactPanel from "@/components/process/deep-research-process";
 import { initialDB } from "@/lib/db";
 
 // 初始化数据库
@@ -20,8 +20,10 @@ export default async function RootLayout({
     <html lang="en">
       <body className="flex overflow-hidden">
         <Sider />
+        {/* chat 主体 */}
         {children}
-        <DeepResearchProcess />
+        {/* 右侧产物面板（仅在 isOpenArtifactPanel 为真时渲染） */}
+        <ArtifactPanel />
       </body>
     </html>
   );

@@ -1,81 +1,78 @@
-import { ChatMessageType, ChatSessionType } from '@/types';
+import {
+  ChatMessageType,
+  ChatSessionType,
+  CoTStep,
+  MessageArtifact,
+  MessageTimeline,
+} from '@/types';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 import apiClient from '../request/api';
-import { deepResearchResultType } from '@/types';
-import { processStatusType } from '@/store/deep-research-process-store';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 
 export interface StreamChatConfig {
-  /**
-   * @deprecated v3 thread service 接管后，此字段不再被使用，保留仅为向后兼容。
-   * 实际请求路径为 /api/threads/:tid/runs 与 /api/threads/:tid/runs/:rid/stream。
-   */
+  /** 仅作历史标识，实际请求路径固定为 /api/v3/chat/:tid */
   apiEndpoint?: string;
+  /** 后端 Agent 类型 */
   agentType: 'basic' | 'search' | 'deep_research';
+  /** 历史消息上的 mode 标签（仅用于持久化标签，前端 UI 不再分支） */
   mode: 'chat' | 'search' | 'deepResearch';
   callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
   inputValue: string;
-  isResume?: boolean; // 研究human中断恢复模式
+  /** 研究 human 中断恢复模式 */
+  isResume?: boolean;
   sessionId?: UUIDTypes;
-  hasFiles?: boolean; // "chat模式是否携带文件"
-  uploadedFiles?: any[]; // 上传的文件信息
+  hasFiles?: boolean;
+  uploadedFiles?: any[];
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
-  // 需要的全局store方法
+  // 全局 store 注入
   setIsChating: (loading: boolean) => void;
   setShouldAutoScroll: (scroll: boolean) => void;
   addChatSession: (session: ChatSessionType) => void;
   setCurrentSessionId: (id: UUIDTypes) => void;
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
-  setCurrentDeepResearchId: (id: string) => void;
 
-  // 自定义处理器
-  onStreamData?: (data: any, accumulatedContent: string) => string;
-  onStreamComplete?: (data: Record<string, any>) => void;
-  onStreamError?: (error: any) => void;
-
-  /**
-   * 额外注入到后端的 metadata（与默认 metadata 合并，调用方覆盖优先）。
-   * deep-research 入口通过该字段写入 `is_plan_mode / subagent_enabled / agent_name`
-   * 三个 plan-mode 开关。
-   */
+  /** plan-mode 三开关等扩展 metadata */
   extraMetadata?: Record<string, any>;
 
-  // 获取深度研究结果
-  getDeepResearchResult?: (
-    sessionId: UUIDTypes,
-    messageId: number,
-  ) => deepResearchResultType | undefined;
-
-  getDeepResearchStatus?: () => processStatusType;
+  // 自定义 hook
+  onStreamComplete?: (data: Record<string, any>) => void;
+  onStreamError?: (error: any) => void;
 }
 
+/**
+ * StreamChatHandler（deer-flow 对齐版）
+ *
+ * 所有后端事件按到达时序追加为 `timeline.steps[]`，由 ChatMessageBubble 内联
+ * 渲染（reasoning / tool_call / subagent_task）。前端不再有 simpleAnalysis /
+ * tasks / report 等概念字段，也不再做 mode 屏蔽。
+ *
+ * - STREAM_CHUNK.text       → 累积到 accumulatedContent（正文）
+ * - STREAM_CHUNK.reasoning  → append/合并最后一个 reasoning step
+ * - TOOL_CALL               → 新增 tool_call step（status=running）
+ * - TOOL_RESULT             → 通过 toolCallId 关联回写 result
+ * - TASK_PROGRESS           → upsert subagent_task step
+ * - STATE_UPDATE.simple_analysis  → 一条 reasoning step
+ * - STATE_UPDATE.tasks_initial    → 批量补 subagent_task 占位
+ * - STATE_UPDATE.task_update      → upsert subagent_task step
+ * - STATE_UPDATE.report           → 写入 message.artifact，status=end
+ * - HUMAN_INTERRUPT         → timeline.interrupt，status=interrupt
+ */
 export class StreamChatHandler {
   private config: StreamChatConfig;
   private abortController: AbortController | null = null;
-  private accumulatedContent = ''; //新的ai消息
+  private accumulatedContent = ''; // assistant 消息正文
   private sessionId: UUIDTypes = '';
   private assistantMessageId: number = 0;
   private initialUpdateMessages: ChatMessageType[] = [];
-  private deepResearchResult: deepResearchResultType | undefined = undefined;
-  private lastPushedContent: string | null = null;
-  /**
-   * deepResearch 模式下，标记 lead-agent 是否已经发布过最终 report。
-   *
-   * 用于把父图 messages channel 里的 STREAM_CHUNK 切成两段：
-   *   - emit_report 之前：lead 在 emit_plan / 各 task 委派之间夹的"过程态过渡语"，
-   *     与右栏 ProcessHeader / 任务进度大量重复，**屏蔽**，避免左气泡出现"过程倾倒"。
-   *   - emit_report 之后：prompt 强约束 lead "可以再说一两句简短结束语"，
-   *     这段就是用户视角的最终收尾，**放行**到左气泡。
-   *
-   * 注意：simpleAnalysis（plan 阶段开场）走的是 STATE_UPDATE 而不是 STREAM_CHUNK，
-   * 由 chat-with-deep-research.ts 在 start_analyse 分支显式 append，
-   * 不受此标志位影响——所以开场分析始终可见。
-   */
-  private deepResearchReportEmitted = false;
+
+  /** 流式期间维护在内存里的 timeline；每次更新都同步到对应消息 */
+  private timeline: MessageTimeline = { steps: [], status: 'idle' };
+  /** 最终产物（report 等），同步到对应消息的 artifact 字段 */
+  private artifact: MessageArtifact | null = null;
 
   constructor(config: StreamChatConfig) {
     this.config = config;
@@ -99,7 +96,8 @@ export class StreamChatHandler {
     await this.executeStreamRequest();
   }
 
-  // 处理session逻辑：没有 chat_session 则创建；并以同一 UUID 在 thread service 侧幂等创建 thread。
+  // -------------------- session / messages bootstrap --------------------
+
   private async handleSession(): Promise<void> {
     this.sessionId = this.config.sessionId || '';
 
@@ -129,14 +127,12 @@ export class StreamChatHandler {
     }
   }
 
-  // 处理中断逻辑
   private setupAbortController(): void {
     this.abortController = new AbortController();
     this.config.setAbortController(this.abortController);
     this.config.setIsChating(true);
   }
 
-  // dirct模式初始化user和ai信息
   private initializeMessages(): void {
     const newUserMessage: ChatMessageType = {
       id: this.config.currentMessages.length + 1,
@@ -147,6 +143,7 @@ export class StreamChatHandler {
     };
 
     this.assistantMessageId = newUserMessage.id + 1;
+    this.timeline = { steps: [], status: 'processing' };
 
     this.initialUpdateMessages = [
       ...this.config.currentMessages,
@@ -157,16 +154,17 @@ export class StreamChatHandler {
         role: 'assistant',
         content: '',
         mode: this.config.mode,
+        timeline: this.cloneTimeline(),
       } as ChatMessageType,
     ];
 
-    this.config.setCurrentMessages(JSON.parse(JSON.stringify(this.initialUpdateMessages)));
+    this.config.setCurrentMessages(this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
   }
 
-  // recall和reEditCall模式下初始化user和ai消息
   private reInitializeMessages(): void {
     const len = this.config.currentMessages.length;
+    this.timeline = { steps: [], status: 'processing' };
 
     if (this.config.callingMode === 'recall') {
       this.initialUpdateMessages = [
@@ -176,7 +174,9 @@ export class StreamChatHandler {
           content: '',
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: 'failed',
+          researchStatus: undefined,
+          artifact: undefined,
+          timeline: this.cloneTimeline(),
         },
       ];
     } else if (this.config.callingMode === 'reEditCall') {
@@ -187,32 +187,50 @@ export class StreamChatHandler {
           content: this.config.inputValue,
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: 'failed',
+          researchStatus: undefined,
         },
         {
           ...this.config.currentMessages[len - 1],
           content: '',
           mode: this.config.mode,
           deepResearchResult: undefined,
-          researchStatus: 'failed',
+          researchStatus: undefined,
+          artifact: undefined,
+          timeline: this.cloneTimeline(),
         },
       ];
     }
 
     this.assistantMessageId = len;
-    this.config.setCurrentMessages(JSON.parse(JSON.stringify(this.initialUpdateMessages)));
+    this.config.setCurrentMessages(this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
   }
 
-  // 研究过程决策恢复
   private resumeMessages(): void {
     const len = this.config.currentMessages.length;
-    this.initialUpdateMessages = this.config.currentMessages;
-    this.assistantMessageId = len;
-    this.accumulatedContent = this.config.currentMessages[len - 1].content as string;
+    const last = this.config.currentMessages[len - 1];
+    // 继承上一轮 timeline（interrupt → processing）
+    if (last?.role === 'assistant' && last.timeline) {
+      this.timeline = {
+        steps: [...last.timeline.steps],
+        status: 'processing',
+        interrupt: null,
+      };
+    } else {
+      this.timeline = { steps: [], status: 'processing' };
+    }
+    this.initialUpdateMessages = this.config.currentMessages.map((msg, idx) =>
+      idx === len - 1 && msg.role === 'assistant'
+        ? { ...msg, timeline: this.cloneTimeline() }
+        : msg,
+    );
+    this.assistantMessageId = (last?.id as number) ?? len;
+    this.accumulatedContent = (last?.content as string) ?? '';
+    this.artifact = last?.artifact ?? null;
   }
 
-  // 执行 SSE：v3 chat 合并端点 —— 一次 POST 即拿到事件流（服务端在内部完成 createThread + submitRun + subscribe）
+  // -------------------- SSE --------------------
+
   private async executeStreamRequest(): Promise<void> {
     try {
       const metadata: Record<string, any> = {
@@ -222,8 +240,6 @@ export class StreamChatHandler {
         deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
         isResume: this.config.isResume,
         agentType: this.config.agentType,
-        // 调用方注入的 plan-mode 三开关 / 其它扩展字段；
-        // 放在末尾以便覆盖默认值（如某些场景显式禁用 subagent）。
         ...(this.config.extraMetadata ?? {}),
       };
 
@@ -240,9 +256,6 @@ export class StreamChatHandler {
     }
   }
 
-  /**
-   * 消费后端 ClientAgentEvent 流（POST SSE 订阅 v3 chat 合并端点）
-   */
   private async processSseStream(streamUrl: string, body: Record<string, any>): Promise<void> {
     const stream = createAgentEventStream({
       endpoint: streamUrl,
@@ -251,58 +264,84 @@ export class StreamChatHandler {
       signal: this.abortController!.signal,
     });
 
-    const dispatchStreamData = (type: string, payload: any) => {
-      const newContent = this.config.onStreamData?.({ type, payload }, this.accumulatedContent);
-      if (typeof newContent === 'string' && newContent !== this.accumulatedContent) {
-        this.accumulatedContent = newContent;
-        this.updateMessages();
-      }
-    };
-
     for await (const event of stream) {
       switch (event.eventType) {
         case ClientAgentEventType.STREAM_CHUNK: {
-          if (this.config.mode === 'deepResearch' && !this.deepResearchReportEmitted) {
-            break;
+          const { text, reasoning } = event.payload;
+          if (typeof reasoning === 'string' && reasoning.length > 0) {
+            this.appendReasoning(reasoning);
           }
-          this.accumulatedContent += event.payload.text;
-          this.updateMessages();
+          if (typeof text === 'string' && text.length > 0) {
+            this.accumulatedContent += text;
+          }
+          this.flushMessage();
+          break;
+        }
+
+        case ClientAgentEventType.TOOL_CALL: {
+          const { toolCallId, toolName, arguments: argsStr } = event.payload;
+          let parsedArgs: any = undefined;
+          if (typeof argsStr === 'string') {
+            try {
+              parsedArgs = JSON.parse(argsStr);
+            } catch {
+              parsedArgs = argsStr;
+            }
+          }
+          this.timeline.steps = [
+            ...this.timeline.steps,
+            {
+              kind: 'tool_call',
+              id: toolCallId || uuidv4(),
+              toolCallId,
+              name: toolName,
+              args: parsedArgs,
+              status: 'running',
+            },
+          ];
+          this.timeline.status = 'processing';
+          this.flushMessage();
+          break;
+        }
+
+        case ClientAgentEventType.TOOL_RESULT: {
+          const { toolCallId, result, success, errorMessage } = event.payload;
+          this.timeline.steps = this.timeline.steps.map((step) =>
+            step.kind === 'tool_call' && step.toolCallId === toolCallId
+              ? {
+                  ...step,
+                  result,
+                  success,
+                  errorMessage,
+                  status: success === false ? 'failed' : 'done',
+                }
+              : step,
+          );
+          this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.STATE_UPDATE: {
           const { stateType, data } = event.payload;
-          if (this.config.mode === 'deepResearch' && stateType === 'report') {
-            this.deepResearchReportEmitted = true;
-          }
-          if (!this.config.onStreamData) break;
-          // simple_analysis → start_analyse；其余按 stateType 直接转发
-          const dispatchType = stateType === 'simple_analysis' ? 'start_analyse' : stateType;
-          dispatchStreamData(dispatchType, data);
+          this.applyStateUpdate(stateType, data);
           break;
         }
 
         case ClientAgentEventType.TASK_PROGRESS: {
-          if (!this.config.onStreamData) break;
-          dispatchStreamData('task_update', event.payload);
+          this.upsertSubagentTask(event.payload);
+          this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.HUMAN_INTERRUPT: {
-          if (!this.config.onStreamData) break;
-          dispatchStreamData('interrupt', event.payload);
-          break;
-        }
-
-        case ClientAgentEventType.TOOL_CALL:
-        case ClientAgentEventType.TOOL_RESULT: {
-          // 工具调用展示能力暂未在 StreamChatHandler 中使用，先忽略
+          this.timeline.interrupt = event.payload as any;
+          this.timeline.status = 'interrupt';
+          this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.ERROR: {
           console.error('[StreamChatHandler] stream error:', event.payload.errorMessage);
-          // 抛出以走 handleError 分支
           throw Object.assign(new Error(event.payload.errorMessage), {
             name: event.payload.errorCode,
           });
@@ -310,16 +349,17 @@ export class StreamChatHandler {
 
         case ClientAgentEventType.START:
         case ClientAgentEventType.HEARTBEAT:
-          // start / heartbeat 仅作保活，不需 UI 处理
           break;
 
         case ClientAgentEventType.END: {
-          console.log('[StreamChatHandler] stream completed');
+          if (this.timeline.status === 'processing') {
+            this.timeline.status = 'end';
+          }
+          this.flushMessageSync();
           return;
         }
 
         default: {
-          // exhaustive check
           const _never: never = event;
           void _never;
         }
@@ -327,25 +367,190 @@ export class StreamChatHandler {
     }
   }
 
-  // 更新UI
-  private updateMessages(): void {
-    if (this.accumulatedContent === this.lastPushedContent) {
-      return;
-    }
-    this.lastPushedContent = this.accumulatedContent;
+  // -------------------- timeline updates --------------------
 
-    const updateMessages = this.initialUpdateMessages.map((msg) =>
-      msg.id === this.assistantMessageId ? { ...msg, content: this.accumulatedContent } : msg,
-    );
-    this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
+  /** 把 reasoning 文本合并/追加到最后一个 reasoning step */
+  private appendReasoning(text: string): void {
+    const last = this.timeline.steps[this.timeline.steps.length - 1];
+    if (last && last.kind === 'reasoning') {
+      this.timeline.steps = [
+        ...this.timeline.steps.slice(0, -1),
+        { ...last, text: last.text + text },
+      ];
+    } else {
+      this.timeline.steps = [
+        ...this.timeline.steps,
+        { kind: 'reasoning', id: uuidv4(), text },
+      ];
+    }
+    this.timeline.status = 'processing';
   }
 
-  //处理中断和错误
+  /** upsert 一个 subagent_task step（按 taskId 关联） */
+  private upsertSubagentTask(payload: any): void {
+    const taskId: string = payload?.taskId ?? '';
+    const idx = this.timeline.steps.findIndex(
+      (s) => s.kind === 'subagent_task' && s.taskId === taskId,
+    );
+    const next: CoTStep = {
+      kind: 'subagent_task',
+      id: taskId || uuidv4(),
+      taskId,
+      description:
+        typeof payload?.description === 'string' ? payload.description : undefined,
+      subagentType:
+        typeof payload?.subagentType === 'string' ? payload.subagentType : undefined,
+      status: payload?.status ?? 'running',
+      result:
+        typeof payload?.result === 'string' && payload.result.length > 0
+          ? payload.result
+          : undefined,
+      error:
+        typeof payload?.error === 'string' && payload.error.length > 0
+          ? payload.error
+          : undefined,
+    };
+
+    if (idx === -1) {
+      this.timeline.steps = [...this.timeline.steps, next];
+    } else {
+      const prev = this.timeline.steps[idx] as Extract<
+        CoTStep,
+        { kind: 'subagent_task' }
+      >;
+      // 用新值覆盖，但 undefined 字段保留旧值
+      const merged: CoTStep = {
+        kind: 'subagent_task',
+        id: prev.id,
+        taskId: next.taskId || prev.taskId,
+        description: next.description ?? prev.description,
+        subagentType: next.subagentType ?? prev.subagentType,
+        status: next.status ?? prev.status,
+        result: next.result ?? prev.result,
+        error: next.error ?? prev.error,
+      };
+      this.timeline.steps = [
+        ...this.timeline.steps.slice(0, idx),
+        merged,
+        ...this.timeline.steps.slice(idx + 1),
+      ];
+    }
+    this.timeline.status = 'processing';
+  }
+
+  private applyStateUpdate(stateType: string, data: any): void {
+    switch (stateType) {
+      case 'simple_analysis': {
+        const text =
+          typeof data === 'string'
+            ? data
+            : typeof data?.simpleAnalysis === 'string'
+              ? data.simpleAnalysis
+              : '';
+        if (text) this.appendReasoning(text);
+        this.flushMessage();
+        break;
+      }
+      case 'tasks_initial': {
+        if (Array.isArray(data)) {
+          for (const task of data) {
+            this.upsertSubagentTask({
+              taskId: task?.taskId ?? task?.id ?? '',
+              description: task?.description,
+              status: task?.status ?? 'pending',
+            });
+          }
+        }
+        this.flushMessage();
+        break;
+      }
+      case 'task_update': {
+        this.upsertSubagentTask(data);
+        this.flushMessage();
+        break;
+      }
+      case 'report': {
+        const content = typeof data === 'string' ? data : data?.report;
+        const title =
+          typeof data === 'object' && data && typeof data.title === 'string'
+            ? data.title
+            : '研究报告';
+        if (typeof content === 'string' && content.length > 0) {
+          this.artifact = { title, content };
+        }
+        this.timeline.status = 'end';
+        this.flushMessage();
+        break;
+      }
+      case 'research_target':
+      case 'custom':
+      default:
+        // 其余 state_update 统一忽略（与 deer-flow 对齐：不再前端做概念分支）
+        break;
+    }
+  }
+
+  private cloneTimeline(): MessageTimeline {
+    return {
+      steps: this.timeline.steps.map((s) => ({ ...s }) as CoTStep),
+      status: this.timeline.status,
+      interrupt: this.timeline.interrupt,
+    };
+  }
+
+  /** 把当前 accumulatedContent + timeline + artifact 推送到 store。
+   *
+   * 注意：
+   * 1. 不做 JSON.parse(JSON.stringify(...)) 深拷贝。timeline 已在 cloneTimeline
+   *    里做了浅拷，配合外层 .map 产生新数组/新对象，足以让 React diff 正确识别变化；
+   *    深拷会让所有 message 的引用每次都变，触发 ChatMessageBubble 全列表 re-render。
+   * 2. 用 microtask 合并同一帧内的多次 SSE 事件（高频 STREAM_CHUNK），避免
+   *    每个 token 都触发一次 store 通知，叠加多组件订阅时容易踩到 React 的
+   *    "Maximum update depth exceeded"。
+   */
+  private flushScheduled = false;
+
+  private flushMessage(): void {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    queueMicrotask(() => {
+      this.flushScheduled = false;
+      const updateMessages = this.initialUpdateMessages.map((msg) =>
+        msg.id === this.assistantMessageId
+          ? {
+              ...msg,
+              content: this.accumulatedContent,
+              timeline: this.cloneTimeline(),
+              artifact: this.artifact ?? msg.artifact,
+            }
+          : msg,
+      );
+      this.config.setCurrentMessages(updateMessages);
+    });
+  }
+
+  /** 同步 flush（用于流末尾、错误等需要立即落地的场景） */
+  private flushMessageSync(): void {
+    this.flushScheduled = false;
+    const updateMessages = this.initialUpdateMessages.map((msg) =>
+      msg.id === this.assistantMessageId
+        ? {
+            ...msg,
+            content: this.accumulatedContent,
+            timeline: this.cloneTimeline(),
+            artifact: this.artifact ?? msg.artifact,
+          }
+        : msg,
+    );
+    this.config.setCurrentMessages(updateMessages);
+  }
+
+  // -------------------- error / cleanup --------------------
+
   private async handleError(error: any): Promise<void> {
     if (error.name === 'AbortError' || error.name === 'AGENT_STREAM_ABORTED') {
       console.log('Chat was Interrupted by user');
       if (this.config.onStreamComplete) {
-        //自定义结束处理
         this.config.onStreamComplete({
           finalContent: this.accumulatedContent,
           sessionId: this.sessionId,
@@ -356,17 +561,11 @@ export class StreamChatHandler {
       console.error('Stream error:', error);
 
       if (this.config.onStreamError) {
-        //自定义错误处理
         this.config.onStreamError(error);
       } else {
-        // 默认错误处理
-        const updateMessages = this.initialUpdateMessages.map((msg) =>
-          msg.id === this.assistantMessageId
-            ? { ...msg, content: '出错了，哎嘿。', researchStatus: 'failed' }
-            : msg,
-        );
+        this.timeline.status = 'failed';
         this.accumulatedContent = '出错了，哎嘿。';
-        this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
+        this.flushMessageSync();
       }
     }
   }
@@ -375,7 +574,7 @@ export class StreamChatHandler {
     this.config.setIsChating(false);
     this.config.setAbortController(null);
 
-    if (this.accumulatedContent) {
+    if (this.accumulatedContent || this.artifact) {
       if (this.abortController?.signal.aborted) this.accumulatedContent += '\n 消息已被停止。';
       await this.saveMessages();
     }
@@ -389,7 +588,6 @@ export class StreamChatHandler {
     }
   }
 
-  //数据库保存
   private async saveMessages(): Promise<void> {
     const newUserMessage = this.initialUpdateMessages.findLast((msg) => msg.role === 'user');
     const newAssistantMessage: ChatMessageType = {
@@ -398,26 +596,9 @@ export class StreamChatHandler {
       role: 'assistant',
       content: this.accumulatedContent,
       mode: this.config.mode,
+      timeline: this.cloneTimeline(),
+      artifact: this.artifact ?? undefined,
     };
-
-    if (
-      this.config.mode === 'deepResearch' &&
-      this.config.getDeepResearchResult
-      // &&this.config.getDeepResearchStatus?.() === "end"
-    ) {
-      this.deepResearchResult = this.config.getDeepResearchResult(
-        this.sessionId,
-        this.assistantMessageId,
-      );
-      if (this.deepResearchResult) {
-        newAssistantMessage.deepResearchResult = this.deepResearchResult;
-        newAssistantMessage.researchStatus = 'finished';
-        const updateMessages = this.initialUpdateMessages.map((msg) =>
-          msg.id === this.assistantMessageId ? newAssistantMessage : msg,
-        );
-        this.config.setCurrentMessages(JSON.parse(JSON.stringify(updateMessages)));
-      }
-    }
 
     try {
       if (this.config.callingMode === 'direct') {

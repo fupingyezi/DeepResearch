@@ -3,8 +3,10 @@ import { useFileUpload } from "@/utils/hooks";
 import Image from "next/image";
 import FileItem from "../files/file-items";
 import { ChatInputProps } from "@/types";
-import { agentMode, useChatSelectStore, useConversationStore } from "@/store";
+import { useConversationStore } from "@/store";
 import ModelSelector from "../model-selector/model-selector";
+
+type ModeKey = "search" | "deepResearch";
 
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
@@ -12,10 +14,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
   disabled = false,
   className,
 }) => {
-  const { isChating, currentAbortController, abortCurrentChat } =
-    useConversationStore();
-  const { selectedAgent, setSelectedAgent } = useChatSelectStore();
+  // 仅订阅渲染需要的字段，避免不带 selector 的 useConversationStore() 在
+  // 流式 setCurrentMessages 高频触发时引发整个 ChatInput re-render（含
+  // 子组件 ModelSelector 等）。
+  const isChating = useConversationStore((s) => s.isChating);
+  const currentAbortController = useConversationStore(
+    (s) => s.currentAbortController
+  );
+  const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
   const [inputValue, setInputValue] = useState("");
+  /** 模式开关（互斥）：null = 普通对话 */
+  const [activeMode, setActiveMode] = useState<ModeKey | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -25,7 +34,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
     clearFiles,
     getFileIcon,
   } = useFileUpload();
-  const supportUploadFiles = selectedAgent === "chat";
+  /** 仅普通对话支持文件上传（与原行为保持一致） */
+  const supportUploadFiles = activeMode === null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +52,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     if (inputValue.trim() && onSend && !disabled) {
       const hasFiles = localUploadedFiles.length > 0;
-      // modelKey is handled from chat-window via store
-      onSend(inputValue.trim(), hasFiles);
+      onSend(inputValue.trim(), {
+        hasFiles,
+        enableSearch: activeMode === "search",
+        enableDeepResearch: activeMode === "deepResearch",
+      });
       setInputValue("");
       clearFiles();
     }
@@ -57,14 +70,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const hanleSelect = (e: any, agent: agentMode) => {
+  const toggleMode = (e: React.MouseEvent, mode: ModeKey) => {
     e.stopPropagation();
-    console.log("select agent:", agent);
-    if (selectedAgent === agent) {
-      setSelectedAgent("chat");
-    } else {
-      setSelectedAgent(agent);
-    }
+    setActiveMode((cur) => (cur === mode ? null : mode));
   };
 
   const handleUploadClick = () => {
@@ -135,31 +143,34 @@ const ChatInput: React.FC<ChatInputProps> = ({
             alt="添加附件"
             width={30}
             height={30}
-            className="p-2 w-10 h-8 rounded-3xl hover:bg-[#e7e7e7] hover:cursor-pointer"
+            className={`p-2 w-10 h-8 rounded-3xl ${
+              supportUploadFiles
+                ? "hover:bg-[#e7e7e7] hover:cursor-pointer"
+                : "opacity-40 cursor-not-allowed"
+            }`}
             onClick={() => handleUploadClick()}
-          ></Image>
+          />
           <div
             className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => hanleSelect(e, "search")}
+            onClick={(e) => toggleMode(e, "search")}
             style={{
-              backgroundColor: selectedAgent === "search" ? "#eceaff" : "",
-              color: selectedAgent === "search" ? "#4433ff" : "",
+              backgroundColor: activeMode === "search" ? "#eceaff" : "",
+              color: activeMode === "search" ? "#4433ff" : "",
             }}
           >
             联网搜索
           </div>
           <div
             className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => hanleSelect(e, "deepResearch")}
+            onClick={(e) => toggleMode(e, "deepResearch")}
             style={{
               backgroundColor:
-                selectedAgent === "deepResearch" ? "#eceaff" : "",
-              color: selectedAgent === "deepResearch" ? "#4433ff" : "",
+                activeMode === "deepResearch" ? "#eceaff" : "",
+              color: activeMode === "deepResearch" ? "#4433ff" : "",
             }}
           >
             深度研究
           </div>
-          {/* 模型选择器：紧挨"深度研究"，样式与胶囊按钮一致，向上展开 */}
           <ModelSelector showLabel={false} />
         </div>
 
@@ -172,7 +183,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               <div className="w-3.5 h-3.5 bg-white rounded-xs"></div>
             </div>
           ) : (
-            <Image src="/send.svg" alt="发送" width={25} height={25}></Image>
+            <Image src="/send.svg" alt="发送" width={25} height={25} />
           )}
         </button>
       </div>

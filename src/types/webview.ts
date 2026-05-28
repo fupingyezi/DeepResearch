@@ -18,9 +18,15 @@ export interface ChatMessagesProps {
   className?: string;
 }
 
+export interface ChatInputSendOptions {
+  hasFiles?: boolean;
+  enableDeepResearch?: boolean;
+  enableSearch?: boolean;
+}
+
 export interface ChatInputProps {
   placeholder?: string;
-  onSend?: (message: string, hasFiles?: boolean) => void;
+  onSend?: (message: string, opts?: ChatInputSendOptions) => void;
   disabled?: boolean;
   className?: string;
 }
