@@ -10,7 +10,7 @@ import {
   toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
   memoryMiddleware,
-  subagentLimitMiddleware,
+  createSubagentLimitMiddleware,
   loopDetectionMiddleware,
   clarificationMiddleware,
   qwenToolCallRecoveryMiddleware,
@@ -151,7 +151,14 @@ export function assembleFromFeatures(
   // [10] SubagentLimitMiddleware (始终启用)
   //   lead-agent 永远具备 task 能力，必须挂上并发/总量上限兜底，
   //   防止模型 prompt 失控产生过多 task。
-  chain.push(subagentLimitMiddleware);
+  //
+  //   注意：必须为每个 agent 实例创建**独立的** middleware 实例 ——
+  //   模块级单例会让 CounterRegistry 跨请求 / 跨 agent 共享，
+  //   一旦异常路径（客户端断流、上游 promise rejection 跑到外层）
+  //   导致 `inflight` 没有走到 finally 被回收，下一次请求一进来就会
+  //   误报 `subagent task concurrency limit reached`。每个 agent 独立
+  //   counter 后，agent 重建（cacheKey 命中重建分支）即可天然清零。
+  chain.push(createSubagentLimitMiddleware());
 
   // [11] LoopDetectionMiddleware (始终启用)
   chain.push(loopDetectionMiddleware);

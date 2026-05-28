@@ -240,6 +240,7 @@ export class DeerFlowClient {
       const config = {
         configurable: {
           thread_id: effectiveThreadId,
+          currentModelConfig: this.modelConfig,
         },
         // 把 agentName / userId 透传给 LangGraph runtime.context，
         // 供 memoryMiddleware.afterAgent 在入队时读取。

@@ -48,7 +48,11 @@ export { todoMiddleware } from './todo-middleware';
 export { titleMiddleware } from './title-middleware';
 export { memoryMiddleware } from './memory-middleware';
 export { viewImageMiddleware } from './view-image-middleware';
-export { subagentLimitMiddleware } from './subagent-limit-middleware';
+export {
+  subagentLimitMiddleware,
+  createSubagentLimitMiddleware,
+  type SubagentLimitOptions,
+} from './subagent-limit-middleware';
 export { loopDetectionMiddleware } from './loop-detection-middleware';
 export { clarificationMiddleware } from './clarification-middleware';
 export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
@@ -66,6 +70,8 @@ import { todoMiddleware } from './todo-middleware';
 import { titleMiddleware } from './title-middleware';
 import { memoryMiddleware } from './memory-middleware';
 import { viewImageMiddleware } from './view-image-middleware';
+// 引用模块级单例仅用于位序文档常量 ORDERED_MIDDLEWARES。
+// 真实链路装配请用 createSubagentLimitMiddleware()，详见 ../factory.ts。
 import { subagentLimitMiddleware } from './subagent-limit-middleware';
 import { loopDetectionMiddleware } from './loop-detection-middleware';
 import { clarificationMiddleware } from './clarification-middleware';

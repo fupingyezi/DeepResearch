@@ -142,8 +142,19 @@ export const taskTool = tool(
     }
 
     // ---- 4) 创建 executor 并消费事件流 ------------------------------------
-    // 透传 lead 当前 ModelConfig：仅当 cfg.model='inherit' 时被使用
-    const inheritedModelConfig = getContext()?.currentModelConfig;
+    const ctxModelConfig = getContext()?.currentModelConfig;
+    const configurableModelConfig =
+      (cfgObj.configurable as Record<string, any> | undefined)
+        ?.currentModelConfig as
+        | typeof ctxModelConfig
+        | undefined;
+    const inheritedModelConfig = ctxModelConfig ?? configurableModelConfig;
+    if (process.env.NODE_ENV !== 'production' && !inheritedModelConfig) {
+      console.warn(
+        `[taskTool] no inheritedModelConfig found from ALS or configurable; ` +
+          `subagent with model='inherit' will fall back to default in createChatModel.`,
+      );
+    }
     const executor = new SubagentExecutor({
       config: cfg,
       tools,
