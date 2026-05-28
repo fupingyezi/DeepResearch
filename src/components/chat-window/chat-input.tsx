@@ -27,6 +27,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [activeMode, setActiveMode] = useState<ModeKey | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 中文/日文等输入法 composition（候选词）状态。处于组合中时，回车用于
+  // 选词/确认候选，不应触发发送。
+  const isComposingRef = useRef(false);
   const {
     localUploadedFiles,
     handleFiles,
@@ -64,6 +67,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isChating) return;
+    // 输入法组合中按回车（选词/上屏）不应触发发送：
+    // 1. e.nativeEvent.isComposing：现代浏览器标准
+    // 2. e.keyCode === 229：老内核（Safari/部分 IME）兜底
+    // 3. isComposingRef：compositionend 之后浏览器还会派发一次 keydown(Enter)，
+    //    用 ref 在 compositionend 里短暂保留状态，避免该次回车被误判为发送。
+    if (
+      e.nativeEvent.isComposing ||
+      e.keyCode === 229 ||
+      isComposingRef.current
+    ) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -114,6 +129,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          queueMicrotask(() => {
+            isComposingRef.current = false;
+          });
+        }}
         placeholder={placeholder}
         rows={1}
         className="w-full px-3 py-2 border border-transparent rounded-md focus:outline-none resize-none overflow-y-auto scrollbar-hide"
