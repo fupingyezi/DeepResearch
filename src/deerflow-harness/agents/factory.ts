@@ -7,7 +7,7 @@ import { RuntimeFeatures, DEFAULT_FEATURES } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool } from '../tools';
 import {
-  danglingToolCallMiddleware,
+  toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
   memoryMiddleware,
   subagentLimitMiddleware,
@@ -119,13 +119,21 @@ export function assembleFromFeatures(
     chain.push(qwenToolCallRecoveryMiddleware);
   }
 
-  // [3] DanglingToolCallMiddleware (始终启用)
-  chain.push(danglingToolCallMiddleware);
+  // [3] ToolCallIntegrityMiddleware (始终启用)
+  //   统一处理消息层面的工具调用完整性问题（IntegrityRule 形式可插拔）：
+  //     - DanglingToolCallRule —— AIMessage 有 tool_calls 但缺 ToolMessage
+  //       （中断/取消/断流场景）
+  //     - UnknownToolCallRule —— tool_call 引用了"当前工具集合外"的工具
+  //       （跨轮 metadata 切换 e.g. subagent_enabled true→false 时，
+  //        PostgreSQL checkpointer 残留 task tool_call 会让 LangGraph
+  //        抛 "Tool task not found"）
+  //   新增此类问题请追加 IntegrityRule，不要新加中间件。
+  chain.push(toolCallIntegrityMiddleware);
 
-  // [5] ToolErrorHandlingMiddleware (始终启用)
+  // [4] ToolErrorHandlingMiddleware (始终启用)
   chain.push(toolErrorHandlingMiddleware);
 
-  // [9] MemoryMiddleware (features.memory)
+  // [8] MemoryMiddleware (features.memory)
   const memoryFeat = features.memory;
   if (memoryFeat === true) {
     chain.push(memoryMiddleware);
@@ -133,17 +141,17 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // [11] SubagentLimitMiddleware (features.subagent)
+  // [10] SubagentLimitMiddleware (features.subagent)
   //   plan-mode 下 lead-agent 通过 task 工具调度 research subagent，
   //   必须用并发/总量上限兜底，防止模型 prompt 失控产生过多 task。
   if (features.subagent === true) {
     chain.push(subagentLimitMiddleware);
   }
 
-  // [12] LoopDetectionMiddleware (始终启用)
+  // [11] LoopDetectionMiddleware (始终启用)
   chain.push(loopDetectionMiddleware);
 
-  // [13] ClarificationMiddleware (始终最后)
+  // [12] ClarificationMiddleware (始终最后)
   chain.push(clarificationMiddleware);
 
   // subagent 工具化注入 lead Agent

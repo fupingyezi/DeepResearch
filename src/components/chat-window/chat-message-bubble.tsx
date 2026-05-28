@@ -29,10 +29,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   selectDownloadId,
   setSelectDownloadId,
 }) => {
-  // 仅订阅渲染必需的字段，避免不带 selector 的 useConversationStore() 在
-  // 流式 setCurrentMessages 高频触发时把所有气泡卷入级联 re-render，最终
-  // 触发 React 的 "Maximum update depth exceeded"。
-  const currentMessages = useConversationStore((s) => s.currentMessages);
   const isChating = useConversationStore((s) => s.isChating);
   const currentAbortController = useConversationStore(
     (s) => s.currentAbortController
@@ -237,8 +233,11 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
+        // 通过快照读取最新 messages（无需响应式订阅）
+        const latestMessages =
+          useConversationStore.getState().currentMessages;
         const lastMode =
-          currentMessages[currentMessages.length - 1]?.mode || "chat";
+          latestMessages[latestMessages.length - 1]?.mode || "chat";
         await chatWithAgent({
           callingMode: "reEditCall",
           inputValue: reEditValue,

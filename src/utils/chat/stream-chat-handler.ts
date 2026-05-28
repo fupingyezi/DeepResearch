@@ -498,50 +498,59 @@ export class StreamChatHandler {
     };
   }
 
-  /** 把当前 accumulatedContent + timeline + artifact 推送到 store。
-   *
-   * 注意：
-   * 1. 不做 JSON.parse(JSON.stringify(...)) 深拷贝。timeline 已在 cloneTimeline
-   *    里做了浅拷，配合外层 .map 产生新数组/新对象，足以让 React diff 正确识别变化；
-   *    深拷会让所有 message 的引用每次都变，触发 ChatMessageBubble 全列表 re-render。
-   * 2. 用 microtask 合并同一帧内的多次 SSE 事件（高频 STREAM_CHUNK），避免
-   *    每个 token 都触发一次 store 通知，叠加多组件订阅时容易踩到 React 的
-   *    "Maximum update depth exceeded"。
-   */
-  private flushScheduled = false;
+  // 把当前 accumulatedContent + timeline + artifact 推送到 store。
 
+  private rafHandle: number | null = null;
+  private pendingFlush = false;
+
+  /** 调度一次 rAF 合并 flush；同一帧内多次调用只生效一次。 */
   private flushMessage(): void {
-    if (this.flushScheduled) return;
-    this.flushScheduled = true;
-    queueMicrotask(() => {
-      this.flushScheduled = false;
-      const updateMessages = this.initialUpdateMessages.map((msg) =>
-        msg.id === this.assistantMessageId
-          ? {
-              ...msg,
-              content: this.accumulatedContent,
-              timeline: this.cloneTimeline(),
-              artifact: this.artifact ?? msg.artifact,
-            }
-          : msg,
-      );
-      this.config.setCurrentMessages(updateMessages);
+    this.pendingFlush = true;
+    if (this.rafHandle !== null) return;
+
+    const schedule =
+      typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame.bind(window)
+        : (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16) as unknown as number;
+
+    this.rafHandle = schedule(() => {
+      this.rafHandle = null;
+      if (!this.pendingFlush) return;
+      this.pendingFlush = false;
+      this.commitFlush();
     });
   }
 
-  /** 同步 flush（用于流末尾、错误等需要立即落地的场景） */
+  /** 同步 flush（用于流末尾、错误等需要立即落地的场景）。 */
   private flushMessageSync(): void {
-    this.flushScheduled = false;
-    const updateMessages = this.initialUpdateMessages.map((msg) =>
-      msg.id === this.assistantMessageId
-        ? {
-            ...msg,
-            content: this.accumulatedContent,
-            timeline: this.cloneTimeline(),
-            artifact: this.artifact ?? msg.artifact,
-          }
-        : msg,
-    );
+    if (this.rafHandle !== null) {
+      const cancel =
+        typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function"
+          ? window.cancelAnimationFrame.bind(window)
+          : (id: number) => clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+      cancel(this.rafHandle);
+      this.rafHandle = null;
+    }
+    this.pendingFlush = false;
+    this.commitFlush();
+  }
+
+  private commitFlush(): void {
+    const target = this.assistantMessageId;
+    let mutated = false;
+    const updateMessages = this.initialUpdateMessages.map((msg) => {
+      if (msg.id !== target) return msg; // 关键：保持原引用
+      mutated = true;
+      return {
+        ...msg,
+        content: this.accumulatedContent,
+        timeline: this.cloneTimeline(),
+        artifact: this.artifact ?? msg.artifact,
+      };
+    });
+    // 找不到 assistant 消息（异常重置场景）就不写，避免无意义的列表新引用
+    if (!mutated) return;
+    this.initialUpdateMessages = updateMessages;
     this.config.setCurrentMessages(updateMessages);
   }
 
