@@ -268,8 +268,6 @@ export interface TaskTimedOutPayload {
 export interface AgentEventMetadata {
   /** 会话 ID */
   sessionId?: string;
-  /** 深度研究 ID */
-  deepResearchId?: string;
   /** 其他自定义元数据 */
   [key: string]: any;
 }

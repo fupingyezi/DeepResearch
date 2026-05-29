@@ -1,7 +1,7 @@
 'use client';
 
 import ChatWindow from '@/components/chat-window/chat-window';
-import ArtifactPanel from '@/components/process/deep-research-process';
+import ArtifactPanel from '@/components/process/artifact-panel';
 import { useArtifactPanelStore } from '@/store';
 
 export default function Home() {

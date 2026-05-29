@@ -1,4 +1,3 @@
-import { ContentBlock } from 'langchain';
 import { UUIDTypes } from 'uuid';
 
 export type UploadedFileStatus = 'pending' | 'parsing' | 'success' | 'failed';
@@ -11,9 +10,14 @@ export interface UploadedFile {
   error?: string;
 }
 
+/**
+ * file_metadata 行的前端形态。
+ *
+ * 注：`messageId` / `id` 均为 uuid 字符串（与 chat_message.id 同构）。
+ */
 export interface fileMetadataType {
-  id: UUIDTypes;
-  messageId: number;
+  id: string;
+  messageId: string;
   sessionId: UUIDTypes;
   filename: string;
   mimeType: string;
@@ -24,26 +28,14 @@ export interface fileMetadataType {
 }
 
 /**
- * 内联在 chat 气泡里的"工作流时序步骤"
- *
- * 完全对齐 deer-flow 的 ChainOfThought：所有 reasoning / tool_call / subagent
- * 子任务等都按照后端事件到达的时序追加为 step，由 ChatMessageBubble 内嵌
- * 渲染。前端**不再做任何"研究/搜索/聊天"的概念区分**。
- *
- * 三种 step 形态：
- * - reasoning：思考/计划/简要分析等模型内省文本（合并相邻 chunk）
- * - tool_call：单次工具调用（用 toolCallId 关联 result）
- * - subagent_task：基于 task_progress / state_update.task_* 的子代理任务，
- *   带 children 子工具调用 + 解析后的结构化报告
+ * subagent 内部工具调用（嵌套在 subagent_task part.content.children 里）
  */
-
-/** subagent 内部工具调用（嵌套在 subagent_task.children 里） */
 export interface SubagentToolCall {
   id: string;
   toolCallId: string;
   name: string;
-  args?: any;
-  result?: any;
+  args?: unknown;
+  result?: unknown;
   success?: boolean;
   errorMessage?: string;
   status: 'running' | 'done' | 'failed';
@@ -51,7 +43,7 @@ export interface SubagentToolCall {
 
 /**
  * subagent 解析自 final-report fenced block 的结构化报告，
- * 与 backend SubagentReportSchema 保持字段一致（type-only mirror，无运行期校验）。
+ * 与 backend SubagentReportSchema 字段一致（type-only mirror，无运行期校验）。
  */
 export interface SubagentStructuredReport {
   summary: string;
@@ -60,74 +52,156 @@ export interface SubagentStructuredReport {
   issues?: string[];
 }
 
-export type CoTStep =
+/**
+ * MessagePart —— 消息分块单元（前后端共享契约）
+ *
+ * 一条 ChatMessageType 由一个 parts[] 时序数组组成，每个 part 用 partId 唯一标识。
+ *
+ * 八种 part_type：
+ *  - text          AI/用户的正文文本片段（同类相邻合并）
+ *  - reasoning     AI 推理/规划（同类相邻合并）
+ *  - tool_call     单次工具调用，结果回写到本 part 的 content（status / result / success）
+ *  - tool_result   仅当 result 先于 call 到达且无法关联时作为兜底独立 part
+ *  - subagent_task 子代理任务，按 taskId upsert；children 内嵌子工具调用
+ *  - file / image  用户上传的附件块（仅在 user message 中出现）
+ *  - artifact      最终产物（如研究报告 markdown）
+ */
+export type MessagePart =
   | {
-      kind: 'reasoning';
-      id: string;
-      text: string;
+      partId: string;
+      type: 'text';
+      createdAt: number;
+      content: { text: string };
     }
   | {
-      kind: 'tool_call';
-      id: string;
-      /** 后端 toolCallId（用于把 TOOL_RESULT 关联回来） */
-      toolCallId?: string;
-      name: string;
-      args?: any;
-      result?: any;
-      success?: boolean;
-      errorMessage?: string;
-      status: 'running' | 'done' | 'failed';
+      partId: string;
+      type: 'reasoning';
+      createdAt: number;
+      content: { text: string };
     }
   | {
-      kind: 'subagent_task';
-      id: string;
-      /** 后端 taskId（用于 upsert） */
-      taskId: string;
-      description?: string;
-      subagentType?: string;
-      status: string; // started / running / completed / failed / cancelled / timed_out
-      result?: string;
-      error?: string;
-      /** subagent 内部工具调用按时序追加 */
-      children?: SubagentToolCall[];
-      /** 解析自 final-report 的结构化报告（completed 后有值） */
-      structured?: SubagentStructuredReport | null;
-      /** sub-agent 执行过程中的思考/规划文本（可折叠显示） */
-      reasoning?: string;
+      partId: string;
+      type: 'tool_call';
+      createdAt: number;
+      content: {
+        toolCallId: string;
+        name: string;
+        args?: unknown;
+        result?: unknown;
+        success?: boolean;
+        errorMessage?: string;
+        status: 'running' | 'done' | 'failed';
+      };
+    }
+  | {
+      partId: string;
+      type: 'tool_result';
+      createdAt: number;
+      content: {
+        toolCallId: string;
+        result: unknown;
+        success: boolean;
+        errorMessage?: string;
+      };
+    }
+  | {
+      partId: string;
+      type: 'subagent_task';
+      createdAt: number;
+      content: {
+        taskId: string;
+        description?: string;
+        subagentType?: string;
+        status: string;
+        result?: string;
+        error?: string;
+        reasoning?: string;
+        children?: SubagentToolCall[];
+        structured?: SubagentStructuredReport | null;
+      };
+    }
+  | {
+      partId: string;
+      type: 'file';
+      createdAt: number;
+      content: {
+        fileId: string;
+        filename?: string;
+        mimeType?: string;
+        sizeBytes?: number;
+      };
+    }
+  | {
+      partId: string;
+      type: 'image';
+      createdAt: number;
+      content: {
+        fileId: string;
+        filename?: string;
+        mimeType?: string;
+        sizeBytes?: number;
+      };
+    }
+  | {
+      partId: string;
+      type: 'artifact';
+      createdAt: number;
+      content: { title: string; markdown: string };
     };
 
-/**
- * 消息内联时间线。
- */
-export interface MessageTimeline {
-  /** 顺序事件流；空表示这条消息没有任何工具调用/思考过程，直接看正文即可 */
-  steps: CoTStep[];
-  /** 当前阶段总状态 */
+export type MessagePartType = MessagePart['type'];
+
+/** 渲染层用的派生 timeline step 子集（不含 text/file/image/artifact/tool_result） */
+export type TimelineStepPart = Extract<
+  MessagePart,
+  { type: 'reasoning' | 'tool_call' | 'subagent_task' }
+>;
+
+/** MessageTimeline 渲染组件 props（组件名保留，类型重命名以避免冲突） */
+export interface MessageTimelineProps {
+  steps: TimelineStepPart[];
   status: 'idle' | 'processing' | 'interrupt' | 'end' | 'failed';
-  /** human-in-the-loop 中断（仅 status==='interrupt' 时有效） */
-  interrupt?: { question: string; details: any } | null;
+  interrupt?: { question: string; details: unknown } | null;
 }
+
+// 类型守卫
+
+export const isTextPart = (p: MessagePart): p is Extract<MessagePart, { type: 'text' }> =>
+  p.type === 'text';
+export const isReasoningPart = (p: MessagePart): p is Extract<MessagePart, { type: 'reasoning' }> =>
+  p.type === 'reasoning';
+export const isToolCallPart = (p: MessagePart): p is Extract<MessagePart, { type: 'tool_call' }> =>
+  p.type === 'tool_call';
+export const isToolResultPart = (
+  p: MessagePart,
+): p is Extract<MessagePart, { type: 'tool_result' }> => p.type === 'tool_result';
+export const isSubagentTaskPart = (
+  p: MessagePart,
+): p is Extract<MessagePart, { type: 'subagent_task' }> => p.type === 'subagent_task';
+export const isFilePart = (p: MessagePart): p is Extract<MessagePart, { type: 'file' }> =>
+  p.type === 'file';
+export const isImagePart = (p: MessagePart): p is Extract<MessagePart, { type: 'image' }> =>
+  p.type === 'image';
+export const isArtifactPart = (p: MessagePart): p is Extract<MessagePart, { type: 'artifact' }> =>
+  p.type === 'artifact';
 
 /**
- * 最终产物（如研究报告 / 文件等），脱离工作流时序，独立挂在消息上。
- * 由右侧 ArtifactPanel 展示，气泡里仅给一个入口卡片。
+ * ChatMessageType —— 一条消息（user / assistant 同构）
+ *
+ * - id / sessionId：均为 uuid 字符串
+ * - parts：按到达时序排列的内容块数组（持久化在 chat_message.parts jsonb）
+ * - interrupt：human-in-the-loop 中断（独立挂顶层，不进入 parts；仅 assistant 消息可有）
  */
-export interface MessageArtifact {
-  title: string;
-  /** markdown 文本内容 */
-  content: string;
-}
-
 export interface ChatMessageType {
-  id: number;
+  id: string;
   sessionId: UUIDTypes;
-  role: string;
-  content: string | ContentBlock[];
+  role: 'user' | 'assistant';
+  parts: MessagePart[];
+  createdAt: number;
+  /** 与消息关联的文件元信息（由 history 接口在 user message 上补全；流式期间不维护） */
   files?: fileMetadataType[];
-  /** 工作流时序步骤（内联在气泡里展示） */
-  timeline?: MessageTimeline;
-  /** 产物（点击气泡入口卡片时由右侧 ArtifactPanel 打开） */
-  artifact?: MessageArtifact;
+  /** human-in-the-loop 中断（仅流式 assistant 消息可有） */
+  interrupt?: { question: string; details: unknown } | null;
 }
 
 export interface ChatSessionType {

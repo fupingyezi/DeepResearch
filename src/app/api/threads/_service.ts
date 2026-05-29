@@ -3,7 +3,7 @@
  *
  * 支持两种模式：
  * 1. 基础单例模式（缓存 DeerFlowClient）
- * 2. 动态模型模式：通过 metadata.modelKey 或 metadata.modelConfig 在请求时传递
+ * 2. 动态模型模式：通过 body.configuration.model.value 在请求时传递
  */
 
 import {
@@ -64,26 +64,23 @@ function getDefaultModelConfig(): ModelConfig {
 }
 
 /**
- * 从请求 metadata 中解析 modelConfig：
- * - metadata.modelKey: string  → 在 MODEL_PRESETS 中查找
- * - metadata.modelConfig: ModelConfig → 直接使用
+ * 从请求 body 的 configuration 中解析 modelConfig：
+ * - body.configuration.model.value: string  → 在 MODEL_PRESETS 中查找
+ *
+ * 兼容直接传入 ModelPresetKey 字符串的旧调用风格（仅供内部 helper 复用）。
  */
-function resolveModelConfigFromMetadata(metadata?: Record<string, any>): ModelConfig {
-  if (!metadata) return getDefaultModelConfig();
-
-  if (typeof metadata.modelKey === 'string') {
+function resolveModelConfigFromConfiguration(
+  configuration?: { model?: { value?: string } } | null,
+): ModelConfig {
+  const value = configuration?.model?.value;
+  if (typeof value === 'string' && value.length > 0) {
     try {
-      return buildModelConfigFromPreset(metadata.modelKey as ModelPresetKey);
+      return buildModelConfigFromPreset(value as ModelPresetKey);
     } catch (e) {
-      console.warn('[resolveModelConfigFromMetadata] Failed to resolve preset key:', e);
+      console.warn('[resolveModelConfigFromConfiguration] Failed to resolve preset key:', e);
       return getDefaultModelConfig();
     }
   }
-
-  if (metadata.modelConfig && typeof metadata.modelConfig === 'object') {
-    return metadata.modelConfig as ModelConfig;
-  }
-
   return getDefaultModelConfig();
 }
 
@@ -119,12 +116,12 @@ export async function getThreadService(): Promise<ThreadService> {
 }
 
 /**
- * 按 metadata 动态构造一个 DeerFlowClient（用于一次性切换模型的请求）。
+ * 按 configuration 动态构造一个 DeerFlowClient（用于一次性切换模型的请求）。
  */
 export async function getDeerFlowClientWithModelConfig(
-  metadata?: Record<string, any>,
+  configuration?: { model?: { value?: string } } | null,
 ): Promise<DeerFlowClient> {
-  const modelConfig = resolveModelConfigFromMetadata(metadata);
+  const modelConfig = resolveModelConfigFromConfiguration(configuration);
   const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
 
   ensureMemoryModelFactory();

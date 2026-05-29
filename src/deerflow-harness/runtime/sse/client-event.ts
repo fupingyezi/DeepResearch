@@ -39,6 +39,33 @@ export enum ClientAgentEventType {
 
 export interface StartPayload {
   sessionId?: string;
+  /**
+   * 完整的 chat_session 元信息，仅在新建 session 场景下由后端首次下发，
+   * 前端据此把临时 session 替换为真实记录并加入侧栏。
+   *
+   * - 若 `sessionId` 与前端当前 sessionId 一致，前端应跳过替换。
+   * - `created_at` / `updated_at` 为毫秒时间戳。
+   */
+  chatSession?: {
+    id: string;
+    seq_id: number;
+    title: string;
+    created_at: number;
+    updated_at: number;
+  };
+  /**
+   * 后端为本轮对话分配的真实 message id（UUID 字符串）。
+   *
+   * - `userMessageId`：后端在收到请求后立即写入 chat_message 后回传的 id。
+   *   前端据此把临时 user message 的 id 替换为真实 id（用于后续删除/截断）。
+   * - `assistantMessageId`：后端预生成的 assistant message id（在 END 时写入 DB
+   *   时使用同一个 id）。前端据此把占位 assistant message 的 id 替换为真实 id，
+   *   保持 React key 稳定与 DB 一致。
+   *
+   * 仅在普通发送 / recall / reEditCall 场景下下发；resume 场景按原行为不变。
+   */
+  userMessageId?: string;
+  assistantMessageId?: string;
 }
 
 export interface StreamChunkPayload {

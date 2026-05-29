@@ -6,11 +6,13 @@ import { ConversationState } from '@/store';
  */
 export interface chatWithAgentProps extends ConversationState {
   inputValue: string;
-  hasFiles?: boolean;
-  uploadedFiles?: any[];
-  callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
-  isResume?: boolean;
-  /** 模型选择 */
+  /** 用户上传的文件（前端上传后拿到的元信息列表），仅在普通发送（无 operation）时生效 */
+  uploadedFiles?: Array<{ fileId: string; mimeType?: string; [k: string]: any }>;
+  /** 操作类型：'resume' / 'recall' / 'reEditCall'，无 operation 时默认为 'direct'*/
+  operation?: 'resume' | 'recall' | 'reEditCall';
+  /** 仅 operation === 'resume' 时使用：'确认'/'拒绝' 等 */
+  resumeDecision?: string;
+  /** 模型选择（前端 UI 层语法糖，由 chat-with-agent 映射成 configuration.model.value） */
   modelKey?: string;
 }
 
@@ -19,6 +21,6 @@ export interface chatWithAgentProps extends ConversationState {
  */
 export interface reChatWithAgentProps extends ConversationState {
   inputValue: string;
-  callingMode: 'reEditCall' | 'recall';
+  operation: 'reEditCall' | 'recall';
   modelKey?: string;
 }

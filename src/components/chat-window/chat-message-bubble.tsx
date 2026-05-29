@@ -5,10 +5,23 @@ import CustomMarkdown from '../markdown/custom-markdown';
 import MessageToolBar from '../message-tool-bar/message-tool-bar';
 import MessageTimeline from './message-timeline';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useCopy } from '@/utils/hooks';
 import { useConversationStore, useArtifactPanelStore } from '@/store';
-import { ChatMessageBubbleProps, SupportDownloadFileType } from '@/types';
+import {
+  ChatMessageBubbleProps,
+  SupportDownloadFileType,
+  isArtifactPart,
+  isFilePart,
+  isImagePart,
+  isReasoningPart,
+  isSubagentTaskPart,
+  isTextPart,
+  isToolCallPart,
+  type MessagePart,
+  type MessageTimelineProps,
+  type TimelineStepPart,
+} from '@/types';
 import { chatWithAgent } from '@/utils/chat';
 import {
   handleDownloadPDF,
@@ -16,6 +29,51 @@ import {
   handleDownloadMD,
 } from '@/utils/files/file-download';
 import { getFileIcon } from '@/utils/files/file-info-handler';
+
+/**
+ * 从 parts[] 派生：
+ *   - bodyText：所有 text part 拼接（用于正文渲染 + 复制 + 下载兜底）
+ *   - timelineSteps：reasoning / tool_call / subagent_task 三类 part 子集
+ *   - artifactPart：第一个 artifact part（点击右侧入口卡片打开 ArtifactPanel）
+ */
+function deriveFromParts(parts: MessagePart[]): {
+  bodyText: string;
+  timelineSteps: TimelineStepPart[];
+  artifactPart: Extract<MessagePart, { type: 'artifact' }> | null;
+  filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>>;
+} {
+  const textSegments: string[] = [];
+  const timelineSteps: TimelineStepPart[] = [];
+  let artifactPart: Extract<MessagePart, { type: 'artifact' }> | null = null;
+  const filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>> = [];
+
+  for (const part of parts) {
+    if (isTextPart(part)) {
+      if (part.content.text.length > 0) textSegments.push(part.content.text);
+      continue;
+    }
+    if (isReasoningPart(part) || isToolCallPart(part) || isSubagentTaskPart(part)) {
+      timelineSteps.push(part);
+      continue;
+    }
+    if (isArtifactPart(part)) {
+      if (!artifactPart) artifactPart = part;
+      continue;
+    }
+    if (isFilePart(part) || isImagePart(part)) {
+      filePartsForUser.push(part);
+      continue;
+    }
+    // tool_result 兜底 part 不在 timeline 中显示
+  }
+
+  return {
+    bodyText: textSegments.join('\n\n'),
+    timelineSteps,
+    artifactPart,
+    filePartsForUser,
+  };
+}
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
@@ -32,27 +90,35 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   const [isShowOtherOperators, setIsShowOtherOperators] = useState<boolean>(false);
   const { copyToClipboard } = useCopy();
   const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [reEditValue, setReEditValue] = useState<string>(message.content as string);
 
-  const renderContent = () => {
-    if (typeof message.content === 'string') {
-      return message.content;
-    }
-    return JSON.stringify(message.content);
-  };
+  const derived = useMemo(() => deriveFromParts(message.parts ?? []), [message.parts]);
+  const { bodyText, timelineSteps, artifactPart, filePartsForUser } = derived;
+
+  const [reEditValue, setReEditValue] = useState<string>(bodyText);
+
+  /**
+   * timeline 顶部状态：
+   * - assistant 消息有 interrupt → 'interrupt'
+   * - 当前正在 chating 且本条是最后一条 assistant → 'processing'
+   * - 否则 → 'end'
+   */
+  const timelineStatus: MessageTimelineProps['status'] = (() => {
+    if (message.interrupt) return 'interrupt';
+    if (isLastAIMessage && isChating) return 'processing';
+    return 'end';
+  })();
 
   const handleOpenArtifact = () => {
-    if (!message.artifact) return;
+    if (!artifactPart) return;
     openArtifact({
       sessionId:
         typeof message.sessionId === 'string' ? message.sessionId : String(message.sessionId ?? ''),
       messageId: message.id,
-      title: message.artifact.title,
-      report: message.artifact.content,
+      title: artifactPart.content.title,
+      report: artifactPart.content.markdown,
     });
   };
 
-  // 处理复制等其他操作
   const renderAdditionalOperator = (role: string) => {
     const userMessagesTools: ('copy' | 'edit')[] = ['copy'];
     const aiMessagesTools: ('copy' | 'recall' | 'download')[] = ['copy', 'download'];
@@ -63,26 +129,25 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     const handleOperator = async (op: 'copy' | 'edit' | 'recall' | 'download') => {
       switch (op) {
         case 'copy': {
-          copyToClipboard(renderContent());
+          copyToClipboard(bodyText);
           return;
         }
         case 'edit': {
+          setReEditValue(bodyText);
           setIsEditing(true);
           return;
         }
         case 'recall': {
-          // 是否进入深度研究流程由后端 lead-agent 自主判断。
           await chatWithAgent({
-            callingMode: 'recall',
-            inputValue: message.content as string,
-            // 事件回调里取最新 store 快照，无需把整个 store 作为响应式依赖。
+            operation: 'recall',
+            inputValue: bodyText,
             ...useConversationStore.getState(),
           });
           return;
         }
         case 'download': {
           if (selectDownloadId === message.id) {
-            setSelectDownloadId(0);
+            setSelectDownloadId('');
           } else {
             setSelectDownloadId(message.id);
           }
@@ -90,10 +155,10 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       }
     };
 
-    /** 下载内容来源：优先 artifact.content，其次正文 */
+    /** 下载内容来源：优先 artifact.markdown，其次正文 */
     const getDownloadSource = () => {
-      if (message.artifact?.content) return message.artifact.content;
-      return (message.content as string) || '';
+      if (artifactPart) return artifactPart.content.markdown;
+      return bodyText;
     };
 
     const handleDownloadFiles = (fileType: SupportDownloadFileType) => {
@@ -140,7 +205,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     );
   };
 
-  // user气泡
+  // user 气泡
   if (message.role === 'user') {
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -155,7 +220,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       if (reEditValue.trim()) {
         setIsEditing(false);
         await chatWithAgent({
-          callingMode: 'reEditCall',
+          operation: 'reEditCall',
           inputValue: reEditValue,
           ...useConversationStore.getState(),
         });
@@ -168,7 +233,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         setIsEditing(false);
         return;
       }
-      if (e.key === 'Enter' && !e.shiftKey && reEditValue.trim() !== renderContent()) {
+      if (e.key === 'Enter' && !e.shiftKey && reEditValue.trim() !== bodyText) {
         e.preventDefault();
         handleSubmit(e);
       }
@@ -177,13 +242,13 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     if (!isEditing) {
       return (
         <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
-          <div className="grid w-1/3 grid-cols-1 gap-2">
-            {message.files &&
-              message.files.length !== 0 &&
-              message.files.map((file) => (
+          {/* 历史加载场景：file_metadata 表里的文件 */}
+          {message.files && message.files.length !== 0 && (
+            <div className="grid w-1/3 grid-cols-1 gap-2">
+              {message.files.map((file) => (
                 <FileItem
-                  id={file.id as string}
-                  key={file.id as KeyType}
+                  id={file.id}
+                  key={file.id}
                   fileName={file.filename}
                   parsedStatus={'success'}
                   sizeBytes={file.sizeBytes}
@@ -191,61 +256,75 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                   canClose={false}
                 />
               ))}
-          </div>
+            </div>
+          )}
+          {/* 实时发送场景：parts 中的 file/image part */}
+          {(!message.files || message.files.length === 0) && filePartsForUser.length > 0 && (
+            <div className="grid w-1/3 grid-cols-1 gap-2">
+              {filePartsForUser.map((part) => (
+                <FileItem
+                  id={part.content.fileId}
+                  key={part.partId}
+                  fileName={part.content.filename ?? part.content.fileId}
+                  parsedStatus={'success'}
+                  sizeBytes={part.content.sizeBytes}
+                  ImgComponent={getFileIcon(
+                    part.content.mimeType ?? '',
+                    part.content.filename ?? '',
+                  )}
+                  canClose={false}
+                />
+              ))}
+            </div>
+          )}
           <div
             className="max-w-2/3 rounded-3xl bg-sky-100 p-3"
             onMouseEnter={() => setIsShowOtherOperators(true)}
             onMouseLeave={() => setIsShowOtherOperators(false)}
           >
-            <CustomMarkdown content={renderContent()} />
+            <CustomMarkdown content={bodyText} />
           </div>
           {renderAdditionalOperator(message.role)}
         </div>
       );
-    } else {
-      return (
-        <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
-          <textarea
-            value={reEditValue}
-            onChange={(e) => setReEditValue(e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e)}
-            rows={1}
-            className="scrollbar-hide w-2/3 resize-none overflow-y-auto rounded-md border-2 border-sky-400 px-3 py-2 focus:outline-none"
-            style={{
-              minHeight: '40px',
-              maxHeight: '100px',
-              height: 'auto',
-            }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = Math.min(target.scrollHeight, 100) + 'px';
-            }}
-          />
-          <div className="flex gap-2">
-            <Button onClick={(e) => handleSubmit(e)}>确定</Button>
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                setReEditValue(message.content as string);
-                setIsEditing(false);
-              }}
-            >
-              取消
-            </Button>
-          </div>
-        </div>
-      );
     }
+    return (
+      <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+        <textarea
+          value={reEditValue}
+          onChange={(e) => setReEditValue(e.target.value)}
+          onKeyDown={(e) => handleKeyDown(e)}
+          rows={1}
+          className="scrollbar-hide w-2/3 resize-none overflow-y-auto rounded-md border-2 border-sky-400 px-3 py-2 focus:outline-none"
+          style={{
+            minHeight: '40px',
+            maxHeight: '100px',
+            height: 'auto',
+          }}
+          onInput={(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            target.style.height = Math.min(target.scrollHeight, 100) + 'px';
+          }}
+        />
+        <div className="flex gap-2">
+          <Button onClick={(e) => handleSubmit(e)}>确定</Button>
+          <Button
+            onClick={(e) => {
+              e.stopPropagation();
+              setReEditValue(bodyText);
+              setIsEditing(false);
+            }}
+          >
+            取消
+          </Button>
+        </div>
+      </div>
+    );
   }
 
-  // loading 气泡：assistant 还没有 timeline 也没有正文
-  if (
-    message.role === 'assistant' &&
-    (!message.timeline || message.timeline.steps.length === 0) &&
-    !message.artifact &&
-    (message.content === '' || (Array.isArray(message.content) && !message.content.length))
-  ) {
+  // loading 气泡：assistant 还没有任何 part
+  if (message.role === 'assistant' && (!message.parts || message.parts.length === 0)) {
     return <Spin indicator={<LoadingOutlined style={{ color: '#828282' }} />} size="large" />;
   }
 
@@ -258,15 +337,17 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
         {/* 工作流时间线（reasoning / tool_call / subagent_task） */}
-        <MessageTimeline timeline={message.timeline} />
+        <MessageTimeline
+          steps={timelineSteps}
+          status={timelineStatus}
+          interrupt={message.interrupt ?? null}
+        />
 
         {/* 正文 */}
-        {typeof message.content === 'string' && message.content.length > 0 && (
-          <CustomMarkdown content={renderContent()} />
-        )}
+        {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
 
         {/* 产物入口（点击打开右侧 ArtifactPanel） */}
-        {message.artifact && (
+        {artifactPart && (
           <button
             type="button"
             onClick={handleOpenArtifact}
@@ -275,7 +356,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             <div className="flex items-center gap-2">
               <FileTextOutlined className="text-blue-500" />
               <span className="truncate text-sm font-medium text-gray-700">
-                {message.artifact.title}
+                {artifactPart.content.title}
               </span>
             </div>
             <span className="shrink-0 text-xs text-blue-500">查看产物 →</span>

@@ -31,13 +31,17 @@ export async function POST(request: NextRequest) {
     uploadedKey = minioKey;
 
     // 先插入file_content记录，状态为parsing
+    // 同时写入 fileId / filename / mime_type / size_bytes，
+    // 供后续 chat 路由按 fileId 反查到完整文件元信息（替代旧的前端 uploadedFiles 透传）。
+    const mimeType = file.type || 'application/octet-stream';
+    const sizeBytes = buffer.length;
     await query(
       `
         INSERT INTO file_content (
-          minio_bucket, minio_key, status
-        ) VALUES ($1, $2, $3)
+          minio_bucket, minio_key, status, file_id, filename, mime_type, size_bytes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       `,
-      [process.env.MINIO_BUCKET!, minioKey, 'parsing'],
+      [process.env.MINIO_BUCKET!, minioKey, 'parsing', fileId, file.name, mimeType, sizeBytes],
     );
 
     // 解析文件内容
@@ -45,7 +49,7 @@ export async function POST(request: NextRequest) {
       const content = await extractTextFromFile(
         process.env.MINIO_BUCKET!,
         minioKey,
-        file.type || 'application/octet-stream',
+        mimeType,
         file.name,
       );
 
@@ -64,8 +68,8 @@ export async function POST(request: NextRequest) {
           fileId,
           minioKey,
           filename: file.name,
-          mimeType: file.type || 'application/octet-stream',
-          sizeBytes: buffer.length,
+          mimeType,
+          sizeBytes,
           content: content.substring(0, 200) + (content.length > 200 ? '...' : ''),
         },
         { status: 200 },
@@ -88,8 +92,8 @@ export async function POST(request: NextRequest) {
           fileId,
           minioKey,
           filename: file.name,
-          mimeType: file.type || 'application/octet-stream',
-          sizeBytes: buffer.length,
+          mimeType,
+          sizeBytes,
           error: parseError.message,
         },
         { status: 200 },

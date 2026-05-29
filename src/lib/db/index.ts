@@ -64,20 +64,20 @@ export async function initialDB() {
     // 2. chat_message
     await query(`
       create table if not exists chat_message (
-        id integer not null,
+        id uuid primary key,
         session_id uuid not null references chat_session(id) on delete cascade,
         role varchar(50) not null,
-        content text not null,
-        created_at timestamp with time zone default current_timestamp,
-        primary key (session_id, id)
+        parts jsonb not null default '[]'::jsonb,
+        created_at timestamp with time zone default current_timestamp
       );
     `);
 
     // 3. file_metadata
+    //    message_id 同步为 uuid 外键，对齐 chat_message.id 单列主键。
     await query(`
       create table if not exists file_metadata (
         id uuid primary key,
-        message_id integer not null,
+        message_id uuid not null,
         session_id uuid not null,
         filename varchar(255) not null,
         mime_type varchar(100),
@@ -86,9 +86,7 @@ export async function initialDB() {
         minio_key text not null,
         uploaded_at timestamp with time zone default current_timestamp,
 
-        foreign key (session_id, message_id) 
-          references chat_message(session_id, id) 
-          on delete cascade
+        foreign key (message_id) references chat_message(id) on delete cascade
       );
     `);
 
@@ -106,7 +104,20 @@ export async function initialDB() {
       );
     `);
 
-    await query(`create index if not exists idx_chat_message_session on chat_message(session_id);`);
+    // 4.1 file_content 扩展列：用于按 fileId 反查（chat 路由把 message.contents 中
+    // 的 file/image block 解析为完整元信息再落 file_metadata）。
+    // 已存在的 row 默认 NULL，不影响旧数据。
+    await query(`alter table file_content add column if not exists file_id uuid;`);
+    await query(`alter table file_content add column if not exists filename varchar(255);`);
+    await query(`alter table file_content add column if not exists mime_type varchar(100);`);
+    await query(`alter table file_content add column if not exists size_bytes bigint;`);
+    await query(
+      `create unique index if not exists file_content_file_id_uidx on file_content(file_id) where file_id is not null;`,
+    );
+
+    await query(
+      `create index if not exists idx_chat_message_session on chat_message(session_id, created_at);`,
+    );
     await query(
       `create index if not exists idx_file_by_message on file_metadata(session_id, message_id);`,
     );

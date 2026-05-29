@@ -6,12 +6,7 @@ import CustomMarkdown from '../markdown/custom-markdown';
 import { useArtifactPanelStore } from '@/store';
 
 /**
- * 右侧 Artifact 产物面板（对齐 deer-flow 的 ArtifactFileDetail）。
- *
- * 仅承担"产物展示"职责：
- *   - 不再渲染过程（plan/tasks/interrupt）——这些已内联在 chat 气泡的 ResearchTimeline；
- *   - 展示由 chat 气泡里的"查看产物"按钮触发的 currentArtifact（一般是 markdown report）；
- *   - 关闭按钮把面板收起。
+ * 右侧 Artifact 产物面板
  */
 const ArtifactPanel = () => {
   const isOpen = useArtifactPanelStore((s) => s.isOpenArtifactPanel);

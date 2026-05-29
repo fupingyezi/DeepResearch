@@ -7,11 +7,11 @@ export { chatWithAgent, StreamChatHandler };
 
 /**
  * 重新编辑 / 重新生成入口：与 chatWithAgent 共用同一条链路。
- * 上层只需要把 callingMode 设为 'reEditCall' 或 'recall' 即可。
+ * 上层只需要把 operation 设为 'reEditCall' 或 'recall' 即可。
  */
 export async function reChatWithAgent(params: reChatWithAgentProps) {
   await chatWithAgent({
     ...params,
-    callingMode: params.callingMode,
+    operation: params.operation,
   });
 }

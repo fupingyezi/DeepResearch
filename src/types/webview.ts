@@ -6,8 +6,8 @@ export interface ChatMessageBubbleProps {
   message: ChatMessageType;
   isLastAIMessage: boolean;
   isLastHumanMessage: boolean;
-  selectDownloadId: number;
-  setSelectDownloadId: (selectDownloadId: number) => void;
+  selectDownloadId: string;
+  setSelectDownloadId: (selectDownloadId: string) => void;
 }
 
 export interface ChatMessagesProps {

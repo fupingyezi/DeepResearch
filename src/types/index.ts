@@ -18,11 +18,23 @@ import type {
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
-  CoTStep,
-  MessageTimeline,
-  MessageArtifact,
+  MessagePart,
+  MessagePartType,
+  TimelineStepPart,
+  MessageTimelineProps,
   SubagentToolCall,
   SubagentStructuredReport,
+} from './chat-info-define';
+
+import {
+  isTextPart,
+  isReasoningPart,
+  isToolCallPart,
+  isToolResultPart,
+  isSubagentTaskPart,
+  isFilePart,
+  isImagePart,
+  isArtifactPart,
 } from './chat-info-define';
 
 //函数参数相关
@@ -46,11 +58,23 @@ export {
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
-  CoTStep,
-  MessageTimeline,
-  MessageArtifact,
+  MessagePart,
+  MessagePartType,
+  TimelineStepPart,
+  MessageTimelineProps,
   SubagentToolCall,
   SubagentStructuredReport,
+};
+
+export {
+  isTextPart,
+  isReasoningPart,
+  isToolCallPart,
+  isToolResultPart,
+  isSubagentTaskPart,
+  isFilePart,
+  isImagePart,
+  isArtifactPart,
 };
 
 export { chatWithAgentProps, reChatWithAgentProps };

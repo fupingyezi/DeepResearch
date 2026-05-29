@@ -52,8 +52,9 @@ const SessionBubble: React.FC<{
     const handleSelectSession = async (sessionId: UUIDTypes) => {
       setCurrentSessionId(sessionId);
       try {
-        const response = await apiClient.post('/conversations/get_current_messages', { sessionId });
-        // console.log(response.data);
+        const response = await apiClient.get(
+          `/conversations/history?sessionId=${encodeURIComponent(String(sessionId))}`,
+        );
         setCurrentMessages(response.data);
       } catch (error) {
         console.error('error:', error);

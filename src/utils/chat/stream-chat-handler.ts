@@ -1,27 +1,29 @@
 import {
   ChatMessageType,
   ChatSessionType,
-  CoTStep,
-  MessageArtifact,
-  MessageTimeline,
-  SubagentStructuredReport,
+  MessagePart,
   SubagentToolCall,
+  SubagentStructuredReport,
 } from '@/types';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
-import apiClient from '../request/api';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 
 export interface StreamChatConfig {
-  /** 仅作历史标识，实际请求路径固定为 /api/v3/chat/:tid */
-  apiEndpoint?: string;
-  callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
+  /**
+   * 操作类型：
+   * - 缺省 = 普通发送（原 'direct'）
+   * - 'resume'     = 中断恢复
+   * - 'recall'     = 重新生成
+   * - 'reEditCall' = 重新编辑
+   */
+  operation?: 'resume' | 'recall' | 'reEditCall';
   inputValue: string;
-  /** 研究 human 中断恢复模式 */
-  isResume?: boolean;
+  /** operation === 'resume' 时使用：'确认'/'拒绝'等 human-in-the-loop 决策文本 */
+  resumeDecision?: string;
   sessionId?: UUIDTypes;
-  hasFiles?: boolean;
-  uploadedFiles?: any[];
+  /** 已上传文件的元信息（前端上传后拿到，转成 message.contents 中的 file/image block，仅传 fileId） */
+  uploadedFiles?: Array<{ fileId: string; mimeType?: string; [k: string]: unknown }>;
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
@@ -33,59 +35,62 @@ export interface StreamChatConfig {
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
 
-  /** 通用业务 metadata（如 modelKey 等） */
-  extraMetadata?: Record<string, any>;
+  /** 模型/参数等运行配置（映射成 configuration.model.value 等） */
+  modelKey?: string;
 
   // 自定义 hook
-  onStreamComplete?: (data: Record<string, any>) => void;
-  onStreamError?: (error: any) => void;
+  onStreamComplete?: (data: Record<string, unknown>) => void;
+  onStreamError?: (error: unknown) => void;
 }
 
+type ToolCallPart = Extract<MessagePart, { type: 'tool_call' }>;
+type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
+type ArtifactPart = Extract<MessagePart, { type: 'artifact' }>;
+
 /**
- * StreamChatHandler（deer-flow 对齐版）
+ * StreamChatHandler
  *
- * 所有后端事件按到达时序追加为 `timeline.steps[]`，由 ChatMessageBubble 内联
- * 渲染（reasoning / tool_call / subagent_task）。前端不再有 simpleAnalysis /
- * tasks / report 等概念字段，也不再做 mode 屏蔽。
+ * 把 SSE 事件实时聚合为消息的 parts[]，并通过 rAF 合帧把最新 parts 写回
+ * conversation-store。所有持久化由后端 /api/v3/chat 在 END 时统一完成，前端不
+ * 再发起 update_messages / add_messages 等任何 DB 写请求。
  *
- * - STREAM_CHUNK.text       → 累积到 accumulatedContent（正文）
- * - STREAM_CHUNK.reasoning  → append/合并最后一个 reasoning step
- * - TOOL_CALL               → 新增 tool_call step（status=running）
- * - TOOL_RESULT             → 通过 toolCallId 关联回写 result
- * - TASK_PROGRESS           → upsert subagent_task step
- * - STATE_UPDATE.simple_analysis  → 一条 reasoning step
- * - STATE_UPDATE.tasks_initial    → 批量补 subagent_task 占位
- * - STATE_UPDATE.task_update      → upsert subagent_task step
- * - STATE_UPDATE.report           → 写入 message.artifact，status=end
- * - HUMAN_INTERRUPT         → timeline.interrupt，status=interrupt
+ * 合并规则与后端 AssistantPartsCollector 等价：
+ *  - 连续 STREAM_CHUNK.text → 合并到一个 text part；
+ *  - 连续 STREAM_CHUNK.reasoning → 合并到一个 reasoning part；
+ *  - 被其它类型 part 打断后再次出现 text/reasoning 必须新建 part；
+ *  - TOOL_RESULT 通过 toolCallId 反查写回对应 tool_call.content；
+ *  - TASK_PROGRESS upsert 到 subagent_task part（其内部 children 维护子工具调用）；
+ *  - STATE_UPDATE.report 追加 artifact part；
+ *  - HUMAN_INTERRUPT 写顶层 message.interrupt（不入 parts）。
  */
 export class StreamChatHandler {
   private config: StreamChatConfig;
   private abortController: AbortController | null = null;
-  private accumulatedContent = ''; // assistant 消息正文
   private sessionId: UUIDTypes = '';
-  private assistantMessageId: number = 0;
+  private isNewSession = false;
+  private assistantMessageId: string = '';
   private initialUpdateMessages: ChatMessageType[] = [];
 
-  /** 流式期间维护在内存里的 timeline；每次更新都同步到对应消息 */
-  private timeline: MessageTimeline = { steps: [], status: 'idle' };
-  /** 最终产物（report 等），同步到对应消息的 artifact 字段 */
-  private artifact: MessageArtifact | null = null;
+  /** 流式期间维护在内存里的 parts；每次更新都同步到对应消息 */
+  private parts: MessagePart[] = [];
+  private lastPartType: MessagePart['type'] | null = null;
+  private partIndexByToolCallId = new Map<string, number>();
+  private partIndexByTaskId = new Map<string, number>();
+  private interrupt: ChatMessageType['interrupt'] = null;
 
   constructor(config: StreamChatConfig) {
     this.config = config;
   }
 
   async execute(): Promise<void> {
-    if (this.config.inputValue === '' && this.config.isResume === undefined) return;
+    if (this.config.inputValue === '' && this.config.operation !== 'resume') return;
 
-    await this.handleSession();
-
+    this.handleSession();
     this.setupAbortController();
 
-    if (this.config.callingMode === 'direct') {
+    if (this.config.operation === undefined) {
       this.initializeMessages();
-    } else if (this.config.callingMode === 'resume') {
+    } else if (this.config.operation === 'resume') {
       this.resumeMessages();
     } else {
       this.reInitializeMessages();
@@ -94,35 +99,20 @@ export class StreamChatHandler {
     await this.executeStreamRequest();
   }
 
+  // ──────────────────────────────────────────────────────
   // session / messages 初始化
+  // ──────────────────────────────────────────────────────
 
-  private async handleSession(): Promise<void> {
-    this.sessionId = this.config.sessionId || '';
-
-    if (!this.sessionId) {
-      this.sessionId = uuidv4();
-      const chat_session: ChatSessionType = {
-        id: this.sessionId,
-        seq_id: this.config.chatSessions.length + 1,
-        title: this.config.inputValue.slice(0, 15),
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      };
-
-      try {
-        const res = await apiClient.post('/conversations/create_session', {
-          chat_session: chat_session,
-        });
-
-        if (res.success) {
-          this.config.addChatSession(chat_session);
-          this.config.setCurrentSessionId(chat_session.id);
-        }
-      } catch (error) {
-        console.error('Failed to create session:', error);
-        throw error;
-      }
+  private handleSession(): void {
+    const existing = this.config.sessionId || '';
+    if (existing) {
+      this.sessionId = existing;
+      this.isNewSession = false;
+      return;
     }
+
+    this.sessionId = uuidv4();
+    this.isNewSession = true;
   }
 
   private setupAbortController(): void {
@@ -132,27 +122,37 @@ export class StreamChatHandler {
   }
 
   private initializeMessages(): void {
-    const newUserMessage: ChatMessageType = {
-      id: this.config.currentMessages.length + 1,
+    const userMessage: ChatMessageType = {
+      id: uuidv4(),
       sessionId: this.sessionId,
       role: 'user',
-      content: this.config.inputValue,
+      parts: [
+        {
+          partId: uuidv4(),
+          type: 'text',
+          createdAt: Date.now(),
+          content: { text: this.config.inputValue },
+        },
+      ],
+      createdAt: Date.now(),
     };
 
-    this.assistantMessageId = newUserMessage.id + 1;
-    this.timeline = { steps: [], status: 'processing' };
+    this.assistantMessageId = uuidv4();
+    this.parts = [];
+    this.lastPartType = null;
+    this.partIndexByToolCallId.clear();
+    this.partIndexByTaskId.clear();
+    this.interrupt = null;
 
-    this.initialUpdateMessages = [
-      ...this.config.currentMessages,
-      newUserMessage,
-      {
-        id: this.assistantMessageId,
-        sessionId: this.sessionId,
-        role: 'assistant',
-        content: '',
-        timeline: this.cloneTimeline(),
-      } as ChatMessageType,
-    ];
+    const assistantMessage: ChatMessageType = {
+      id: this.assistantMessageId,
+      sessionId: this.sessionId,
+      role: 'assistant',
+      parts: [],
+      createdAt: Date.now(),
+    };
+
+    this.initialUpdateMessages = [...this.config.currentMessages, userMessage, assistantMessage];
 
     this.config.setCurrentMessages(this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
@@ -160,80 +160,143 @@ export class StreamChatHandler {
 
   private reInitializeMessages(): void {
     const len = this.config.currentMessages.length;
-    this.timeline = { steps: [], status: 'processing' };
+    this.parts = [];
+    this.lastPartType = null;
+    this.partIndexByToolCallId.clear();
+    this.partIndexByTaskId.clear();
+    this.interrupt = null;
 
-    if (this.config.callingMode === 'recall') {
+    if (this.config.operation === 'recall') {
+      const lastAssistant = this.config.currentMessages[len - 1];
+      this.assistantMessageId = String(lastAssistant?.id ?? uuidv4());
       this.initialUpdateMessages = [
         ...this.config.currentMessages.slice(0, len - 1),
         {
-          ...this.config.currentMessages[len - 1],
-          content: '',
-          artifact: undefined,
-          timeline: this.cloneTimeline(),
+          ...lastAssistant,
+          id: this.assistantMessageId,
+          parts: [],
+          interrupt: null,
         },
       ];
-    } else if (this.config.callingMode === 'reEditCall') {
+    } else {
+      // reEditCall：覆盖最近的 user message + 重置最后一条 assistant
+      const lastAssistant = this.config.currentMessages[len - 1];
+      const lastUser = this.config.currentMessages[len - 2];
+      this.assistantMessageId = String(lastAssistant?.id ?? uuidv4());
+      const replacedUser: ChatMessageType = {
+        ...lastUser,
+        parts: [
+          {
+            partId: uuidv4(),
+            type: 'text',
+            createdAt: Date.now(),
+            content: { text: this.config.inputValue },
+          },
+        ],
+      };
       this.initialUpdateMessages = [
         ...this.config.currentMessages.slice(0, len - 2),
+        replacedUser,
         {
-          ...this.config.currentMessages[len - 2],
-          content: this.config.inputValue,
-        },
-        {
-          ...this.config.currentMessages[len - 1],
-          content: '',
-          artifact: undefined,
-          timeline: this.cloneTimeline(),
+          ...lastAssistant,
+          id: this.assistantMessageId,
+          parts: [],
+          interrupt: null,
         },
       ];
     }
 
-    this.assistantMessageId = len;
     this.config.setCurrentMessages(this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
   }
 
+  /**
+   * resume 场景：继承上一轮的 parts（去掉 interrupt 标记），继续累积新增事件。
+   *
+   * 同时重建 partIndexByToolCallId / partIndexByTaskId 索引，确保后续 TOOL_RESULT
+   * 与 TASK_PROGRESS upsert 能命中已有 part。
+   */
   private resumeMessages(): void {
     const len = this.config.currentMessages.length;
     const last = this.config.currentMessages[len - 1];
-    // 继承上一轮 timeline（interrupt → processing）
-    if (last?.role === 'assistant' && last.timeline) {
-      this.timeline = {
-        steps: [...last.timeline.steps],
-        status: 'processing',
-        interrupt: null,
-      };
+    if (last?.role === 'assistant' && Array.isArray(last.parts)) {
+      this.parts = last.parts.map((p) => clonePart(p));
+      this.lastPartType = this.parts[this.parts.length - 1]?.type ?? null;
+      this.rebuildIndexes();
+      this.assistantMessageId = String(last.id);
+      this.interrupt = null;
     } else {
-      this.timeline = { steps: [], status: 'processing' };
+      this.parts = [];
+      this.lastPartType = null;
+      this.partIndexByToolCallId.clear();
+      this.partIndexByTaskId.clear();
+      this.interrupt = null;
+      this.assistantMessageId = String(last?.id ?? uuidv4());
     }
     this.initialUpdateMessages = this.config.currentMessages.map((msg, idx) =>
       idx === len - 1 && msg.role === 'assistant'
-        ? { ...msg, timeline: this.cloneTimeline() }
+        ? { ...msg, parts: this.parts.map((p) => clonePart(p)), interrupt: null }
         : msg,
     );
-    this.assistantMessageId = (last?.id as number) ?? len;
-    this.accumulatedContent = (last?.content as string) ?? '';
-    this.artifact = last?.artifact ?? null;
   }
 
+  private rebuildIndexes(): void {
+    this.partIndexByToolCallId.clear();
+    this.partIndexByTaskId.clear();
+    for (let i = 0; i < this.parts.length; i++) {
+      const part = this.parts[i];
+      if (part.type === 'tool_call') {
+        this.partIndexByToolCallId.set(part.content.toolCallId, i);
+      } else if (part.type === 'subagent_task') {
+        this.partIndexByTaskId.set(part.content.taskId, i);
+      }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────
   // SSE 处理
+  // ──────────────────────────────────────────────────────
 
   private async executeStreamRequest(): Promise<void> {
     try {
-      const metadata: Record<string, any> = {
-        sessionId: this.sessionId,
-        hasFiles: this.config.hasFiles,
-        uploadedFiles: this.config.uploadedFiles || [],
-        deepResearchId: `dr-${this.sessionId}-${this.assistantMessageId}`,
-        isResume: this.config.isResume,
-        ...(this.config.extraMetadata ?? {}),
+      const isResumeOp = this.config.operation === 'resume';
+      const inputText = isResumeOp
+        ? (this.config.resumeDecision ?? this.config.inputValue ?? '')
+        : this.config.inputValue;
+
+      const contents: Array<
+        | { type: 'text'; text: string }
+        | { type: 'file'; fileId: string }
+        | { type: 'image'; fileId: string }
+      > = [{ type: 'text', text: inputText }];
+
+      if (this.config.operation === undefined && Array.isArray(this.config.uploadedFiles)) {
+        for (const file of this.config.uploadedFiles) {
+          if (!file || typeof file.fileId !== 'string' || file.fileId.length === 0) continue;
+          const mimeType = typeof file.mimeType === 'string' ? file.mimeType : '';
+          const isImage = mimeType.startsWith('image/');
+          contents.push({ type: isImage ? 'image' : 'file', fileId: file.fileId });
+        }
+      }
+
+      const requestBody: Record<string, unknown> = {
+        message: { contents },
+        stream: true,
       };
 
-      await this.processSseStream(`/api/v3/chat/${this.sessionId}`, {
-        input: this.config.inputValue,
-        displayName: this.config.inputValue.slice(0, 15) || 'New thread',
-        metadata,
-      });
+      if (!this.isNewSession && this.sessionId) {
+        requestBody.sessionId = this.sessionId;
+      }
+
+      if (typeof this.config.modelKey === 'string' && this.config.modelKey.length > 0) {
+        requestBody.configuration = { model: { value: this.config.modelKey } };
+      }
+
+      if (this.config.operation !== undefined) {
+        requestBody.operation = this.config.operation;
+      }
+
+      await this.processSseStream('/api/v3/chat', requestBody);
     } catch (error) {
       await this.handleError(error);
     } finally {
@@ -241,7 +304,7 @@ export class StreamChatHandler {
     }
   }
 
-  private async processSseStream(streamUrl: string, body: Record<string, any>): Promise<void> {
+  private async processSseStream(streamUrl: string, body: Record<string, unknown>): Promise<void> {
     const stream = createAgentEventStream({
       endpoint: streamUrl,
       method: 'POST',
@@ -254,73 +317,44 @@ export class StreamChatHandler {
         case ClientAgentEventType.STREAM_CHUNK: {
           const { text, reasoning } = event.payload;
           if (typeof reasoning === 'string' && reasoning.length > 0) {
-            this.appendReasoning(reasoning);
+            this.appendOrMergeReasoningPart(reasoning);
           }
           if (typeof text === 'string' && text.length > 0) {
-            this.accumulatedContent += text;
+            this.appendOrMergeTextPart(text);
           }
           this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.TOOL_CALL: {
-          const { toolCallId, toolName, arguments: argsStr } = event.payload;
-          let parsedArgs: any = undefined;
-          if (typeof argsStr === 'string') {
-            try {
-              parsedArgs = JSON.parse(argsStr);
-            } catch {
-              parsedArgs = argsStr;
-            }
-          }
-          this.timeline.steps = [
-            ...this.timeline.steps,
-            {
-              kind: 'tool_call',
-              id: toolCallId || uuidv4(),
-              toolCallId,
-              name: toolName,
-              args: parsedArgs,
-              status: 'running',
-            },
-          ];
-          this.timeline.status = 'processing';
+          this.pushToolCallPart(event.payload);
           this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.TOOL_RESULT: {
-          const { toolCallId, result, success, errorMessage } = event.payload;
-          this.timeline.steps = this.timeline.steps.map((step) =>
-            step.kind === 'tool_call' && step.toolCallId === toolCallId
-              ? {
-                  ...step,
-                  result,
-                  success,
-                  errorMessage,
-                  status: success === false ? 'failed' : 'done',
-                }
-              : step,
-          );
+          this.attachToolResult(event.payload);
           this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.STATE_UPDATE: {
-          const { stateType, data } = event.payload;
-          this.applyStateUpdate(stateType, data);
+          this.applyStateUpdate(event.payload.stateType, event.payload.data);
+          this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.TASK_PROGRESS: {
-          this.upsertSubagentTask(event.payload);
+          this.upsertSubagentTaskPart(event.payload);
           this.flushMessage();
           break;
         }
 
         case ClientAgentEventType.HUMAN_INTERRUPT: {
-          this.timeline.interrupt = event.payload;
-          this.timeline.status = 'interrupt';
+          this.interrupt = {
+            question: event.payload.question,
+            details: event.payload.details,
+          };
           this.flushMessage();
           break;
         }
@@ -332,18 +366,15 @@ export class StreamChatHandler {
           });
         }
 
-        case ClientAgentEventType.START:
+        case ClientAgentEventType.START: {
+          this.applyStartEvent(event.payload);
+          break;
+        }
         case ClientAgentEventType.HEARTBEAT:
           break;
 
         case ClientAgentEventType.END: {
-          if (this.timeline.status === 'processing') {
-            this.timeline.status = 'end';
-          }
-          // 启发式 artifact 抽取（仅当后端没有通过 STATE_UPDATE.report
-          // 显式塞入 artifact 时才尝试）：
-          // 较长且含层级标题的 markdown 视为"研究报告"，自动塞入右侧产物面板。
-          this.maybeExtractArtifactFromContent();
+          this.maybeExtractArtifactFromText();
           this.flushMessageSync();
           return;
         }
@@ -356,340 +387,489 @@ export class StreamChatHandler {
     }
   }
 
-  // timeline 更新
-
-  /** 把 reasoning 文本合并/追加到最后一个 reasoning step */
-  private appendReasoning(text: string): void {
-    const last = this.timeline.steps[this.timeline.steps.length - 1];
-    if (last && last.kind === 'reasoning') {
-      this.timeline.steps = [
-        ...this.timeline.steps.slice(0, -1),
-        { ...last, text: last.text + text },
-      ];
-    } else {
-      this.timeline.steps = [...this.timeline.steps, { kind: 'reasoning', id: uuidv4(), text }];
-    }
-    this.timeline.status = 'processing';
-  }
+  // ──────────────────────────────────────────────────────
+  // START 事件处理（sessionId / messageId 替换）
+  // ──────────────────────────────────────────────────────
 
   /**
-   * upsert 一个 subagent_task step（按 taskId 关联）
+   * 处理 START 事件：把临时 sessionId / 占位 messageId 替换为后端下发的真实 uuid。
    *
-   * 支持的 status：
-   *  - 'started' / 'running' / 'completed' / 'failed' / 'cancelled' / 'timed_out'
-   *  - 'tool_call' / 'tool_result'：subagent 内部工具调用，挂到该 task 的
-   *    children 数组下；不会改变父 task 自身的状态。
-   *  - 'pending'：占位（仅来自 STATE_UPDATE.tasks_initial）
+   * - sessionId：仅当与当前不同才替换
+   * - userMessageId：替换 currentMessages 中倒数第二条 user 消息的 id
+   * - assistantMessageId：替换最后一条 assistant 消息（流式占位）的 id，并同步
+   *   `this.assistantMessageId`，确保后续 commitFlush 能命中
    */
-  private upsertSubagentTask(payload: any): void {
-    const taskId: string = payload?.taskId ?? '';
-    const incomingStatus: string = payload?.status ?? 'running';
+  private applyStartEvent(payload: {
+    sessionId?: string;
+    chatSession?: ChatSessionType;
+    userMessageId?: string;
+    assistantMessageId?: string;
+  }): void {
+    const realId = payload?.sessionId;
+    const tempId = this.sessionId;
+    const sessionChanged = !!realId && realId !== tempId;
 
-    const idx = this.timeline.steps.findIndex(
-      (s) => s.kind === 'subagent_task' && s.taskId === taskId,
-    );
-    const prev =
-      idx === -1 ? null : (this.timeline.steps[idx] as Extract<CoTStep, { kind: 'subagent_task' }>);
+    if (sessionChanged && realId) {
+      this.sessionId = realId;
+      this.config.setCurrentSessionId(realId);
+    }
 
-    // 子工具调用：维护 children 数组，不动父任务状态
+    const realUserId =
+      typeof payload?.userMessageId === 'string' ? payload.userMessageId : undefined;
+    const realAssistantId =
+      typeof payload?.assistantMessageId === 'string' ? payload.assistantMessageId : undefined;
+
+    const tempAssistantId = this.assistantMessageId;
+    let tempUserId: string | undefined;
+    for (let i = this.initialUpdateMessages.length - 1; i >= 0; i--) {
+      const msg = this.initialUpdateMessages[i];
+      if (msg.role === 'user') {
+        tempUserId = String(msg.id);
+        break;
+      }
+    }
+
+    if (typeof realAssistantId === 'string') {
+      this.assistantMessageId = realAssistantId;
+    }
+
+    let mutated = false;
+    const updated = this.initialUpdateMessages.map((msg) => {
+      let next = msg;
+      if (sessionChanged && msg.sessionId === tempId) {
+        next = { ...next, sessionId: realId! };
+        mutated = true;
+      }
+      if (typeof realUserId === 'string' && msg.role === 'user' && msg.id === tempUserId) {
+        next = { ...next, id: realUserId };
+        mutated = true;
+      }
+      if (
+        typeof realAssistantId === 'string' &&
+        msg.role === 'assistant' &&
+        msg.id === tempAssistantId
+      ) {
+        next = { ...next, id: realAssistantId };
+        mutated = true;
+      }
+      return next;
+    });
+    if (mutated) {
+      this.initialUpdateMessages = updated;
+      this.config.setCurrentMessages(updated);
+    }
+
+    const cs = payload?.chatSession;
+    if (cs && typeof cs === 'object' && typeof cs.id === 'string') {
+      this.config.addChatSession({
+        id: cs.id,
+        seq_id: typeof cs.seq_id === 'number' ? cs.seq_id : this.config.chatSessions.length + 1,
+        title:
+          typeof cs.title === 'string' && cs.title.length > 0
+            ? cs.title
+            : this.config.inputValue.slice(0, 15) || 'New thread',
+        created_at: typeof cs.created_at === 'number' ? cs.created_at : Date.now(),
+        updated_at: typeof cs.updated_at === 'number' ? cs.updated_at : Date.now(),
+      });
+    }
+  }
+
+  // ──────────────────────────────────────────────────────
+  // parts 维护
+  // ──────────────────────────────────────────────────────
+
+  private appendOrMergeTextPart(text: string): void {
+    if (this.lastPartType === 'text') {
+      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'text' }>;
+      this.parts = [
+        ...this.parts.slice(0, -1),
+        { ...last, content: { text: last.content.text + text } },
+      ];
+      return;
+    }
+    this.parts = [
+      ...this.parts,
+      {
+        partId: uuidv4(),
+        type: 'text',
+        createdAt: Date.now(),
+        content: { text },
+      },
+    ];
+    this.lastPartType = 'text';
+  }
+
+  private appendOrMergeReasoningPart(text: string): void {
+    if (this.lastPartType === 'reasoning') {
+      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'reasoning' }>;
+      this.parts = [
+        ...this.parts.slice(0, -1),
+        { ...last, content: { text: last.content.text + text } },
+      ];
+      return;
+    }
+    this.parts = [
+      ...this.parts,
+      {
+        partId: uuidv4(),
+        type: 'reasoning',
+        createdAt: Date.now(),
+        content: { text },
+      },
+    ];
+    this.lastPartType = 'reasoning';
+  }
+
+  private pushToolCallPart(payload: {
+    toolCallId: string;
+    toolName: string;
+    arguments?: string;
+  }): void {
+    const args = parseJsonSafe(payload.arguments);
+    const part: ToolCallPart = {
+      partId: uuidv4(),
+      type: 'tool_call',
+      createdAt: Date.now(),
+      content: {
+        toolCallId: payload.toolCallId,
+        name: payload.toolName,
+        args,
+        status: 'running',
+      },
+    };
+    this.parts = [...this.parts, part];
+    this.partIndexByToolCallId.set(payload.toolCallId, this.parts.length - 1);
+    this.lastPartType = 'tool_call';
+  }
+
+  private attachToolResult(payload: {
+    toolCallId: string;
+    result: unknown;
+    success: boolean;
+    errorMessage?: string;
+  }): void {
+    const idx = this.partIndexByToolCallId.get(payload.toolCallId);
+    if (typeof idx === 'number') {
+      const target = this.parts[idx];
+      if (target && target.type === 'tool_call') {
+        const updated: ToolCallPart = {
+          ...target,
+          content: {
+            ...target.content,
+            result: payload.result,
+            success: payload.success,
+            errorMessage: payload.errorMessage,
+            status: payload.success === false ? 'failed' : 'done',
+          },
+        };
+        this.parts = [...this.parts.slice(0, idx), updated, ...this.parts.slice(idx + 1)];
+        return;
+      }
+    }
+    // 时序错乱兜底
+    this.parts = [
+      ...this.parts,
+      {
+        partId: uuidv4(),
+        type: 'tool_result',
+        createdAt: Date.now(),
+        content: {
+          toolCallId: payload.toolCallId,
+          result: payload.result,
+          success: payload.success,
+          errorMessage: payload.errorMessage,
+        },
+      },
+    ];
+    this.lastPartType = 'tool_result';
+  }
+
+  private upsertSubagentTaskPart(payload: Record<string, unknown>): void {
+    const taskId = typeof payload.taskId === 'string' ? payload.taskId : '';
+    const incomingStatus = typeof payload.status === 'string' ? payload.status : 'running';
+
     if (incomingStatus === 'tool_call' || incomingStatus === 'tool_result') {
-      const next = this.applySubToolEvent(prev, payload, incomingStatus);
-      this.writeSubagentTaskStep(idx, next);
-      this.timeline.status = 'processing';
+      this.applySubagentToolEvent(taskId, payload, incomingStatus);
       return;
     }
 
-    // 终态/进行态：正常 upsert
+    const idx = this.partIndexByTaskId.get(taskId);
+    const prev = typeof idx === 'number' ? (this.parts[idx] as SubagentTaskPart) : null;
+
     const incomingReasoning =
-      typeof payload?.reasoning === 'string' && payload.reasoning.length > 0
+      typeof payload.reasoning === 'string' && payload.reasoning.length > 0
         ? payload.reasoning
         : undefined;
-    // running 时追加 reasoning（多次 ai_message 会逐步拼合）
-    const prevReasoning = prev?.reasoning ?? '';
+    const prevReasoning = prev?.content.reasoning ?? '';
     const nextReasoning = incomingReasoning
       ? prevReasoning + incomingReasoning
       : prevReasoning || undefined;
 
-    const next: CoTStep = {
-      kind: 'subagent_task',
-      id: prev?.id ?? taskId ?? uuidv4(),
-      taskId,
-      description:
-        typeof payload?.description === 'string' ? payload.description : prev?.description,
-      subagentType:
-        typeof payload?.subagentType === 'string' ? payload.subagentType : prev?.subagentType,
-      status: incomingStatus,
-      result:
-        typeof payload?.result === 'string' && payload.result.length > 0
-          ? payload.result
-          : prev?.result,
-      error:
-        typeof payload?.error === 'string' && payload.error.length > 0
-          ? payload.error
-          : prev?.error,
-      children: prev?.children ?? [],
-      structured:
-        payload?.structured && typeof payload.structured === 'object'
-          ? (payload.structured as SubagentStructuredReport)
-          : prev?.structured,
-      reasoning: nextReasoning,
+    const next: SubagentTaskPart = {
+      partId: prev?.partId ?? uuidv4(),
+      type: 'subagent_task',
+      createdAt: prev?.createdAt ?? Date.now(),
+      content: {
+        taskId,
+        description:
+          typeof payload.description === 'string' ? payload.description : prev?.content.description,
+        subagentType:
+          typeof payload.subagentType === 'string'
+            ? payload.subagentType
+            : prev?.content.subagentType,
+        status: incomingStatus,
+        result:
+          typeof payload.result === 'string' && payload.result.length > 0
+            ? payload.result
+            : prev?.content.result,
+        error:
+          typeof payload.error === 'string' && payload.error.length > 0
+            ? payload.error
+            : prev?.content.error,
+        reasoning: nextReasoning,
+        children: prev?.content.children ?? [],
+        structured:
+          payload.structured && typeof payload.structured === 'object'
+            ? (payload.structured as SubagentStructuredReport)
+            : (prev?.content.structured ?? null),
+      },
     };
 
-    this.writeSubagentTaskStep(idx, next);
-    this.timeline.status = 'processing';
+    if (typeof idx === 'number') {
+      this.parts = [...this.parts.slice(0, idx), next, ...this.parts.slice(idx + 1)];
+    } else {
+      this.parts = [...this.parts, next];
+      this.partIndexByTaskId.set(taskId, this.parts.length - 1);
+    }
+    this.lastPartType = 'subagent_task';
   }
 
-  /**
-   * 把子工具调用事件应用到当前 subagent_task 上。
-   * - 如果 prev 不存在，就先建一个占位 task，再把这条子调用挂上去（容错时序乱序）
-   * - tool_call：children push 一条 status='running' 的子项
-   * - tool_result：找到匹配的 toolCallId 子项，写回 result + status
-   */
-  private applySubToolEvent(
-    prev: Extract<CoTStep, { kind: 'subagent_task' }> | null,
-    payload: any,
+  private applySubagentToolEvent(
+    taskId: string,
+    payload: Record<string, unknown>,
     incomingStatus: 'tool_call' | 'tool_result',
-  ): CoTStep {
-    const taskId: string = payload?.taskId ?? '';
-    const baseId = prev?.id ?? taskId ?? uuidv4();
-    const children: SubagentToolCall[] = [...(prev?.children ?? [])];
-
-    const toolCallId: string = payload?.toolCallId ?? '';
+  ): void {
+    let idx = this.partIndexByTaskId.get(taskId);
+    if (typeof idx !== 'number') {
+      const placeholder: SubagentTaskPart = {
+        partId: uuidv4(),
+        type: 'subagent_task',
+        createdAt: Date.now(),
+        content: { taskId, status: 'running', children: [] },
+      };
+      this.parts = [...this.parts, placeholder];
+      idx = this.parts.length - 1;
+      this.partIndexByTaskId.set(taskId, idx);
+    }
+    const part = this.parts[idx] as SubagentTaskPart;
+    const children: SubagentToolCall[] = [...(part.content.children ?? [])];
+    const toolCallId = typeof payload.toolCallId === 'string' ? payload.toolCallId : '';
 
     if (incomingStatus === 'tool_call') {
-      // 解析 args（来自 JSON 字符串）
-      let parsedArgs: any = undefined;
-      const rawArgs = payload?.arguments;
-      if (typeof rawArgs === 'string') {
-        try {
-          parsedArgs = JSON.parse(rawArgs);
-        } catch {
-          parsedArgs = rawArgs;
-        }
-      } else if (rawArgs && typeof rawArgs === 'object') {
-        parsedArgs = rawArgs;
-      }
-      const exists = children.findIndex((c) => c.toolCallId === toolCallId);
+      const args = parseJsonSafe(payload.arguments);
+      const existIdx = children.findIndex((c) => c.toolCallId === toolCallId);
       const item: SubagentToolCall = {
         id: toolCallId || uuidv4(),
         toolCallId,
-        name: payload?.toolName ?? '',
-        args: parsedArgs,
+        name: typeof payload.toolName === 'string' ? payload.toolName : '',
+        args,
         status: 'running',
       };
-      if (exists === -1) {
-        children.push(item);
-      } else {
-        children[exists] = { ...children[exists], ...item, status: children[exists].status };
-      }
+      if (existIdx === -1) children.push(item);
+      else
+        children[existIdx] = { ...children[existIdx], ...item, status: children[existIdx].status };
     } else {
-      // tool_result：找到对应子项写回
-      const exists = children.findIndex((c) => c.toolCallId === toolCallId);
-      const success = payload?.toolSuccess !== false;
-      const result = payload?.toolResult;
-      const errMsg =
-        typeof payload?.toolErrorMessage === 'string' ? payload.toolErrorMessage : undefined;
-      if (exists === -1) {
+      const success = payload.toolSuccess !== false;
+      const result = payload.toolResult;
+      const errorMessage =
+        typeof payload.toolErrorMessage === 'string' ? payload.toolErrorMessage : undefined;
+      const existIdx = children.findIndex((c) => c.toolCallId === toolCallId);
+      if (existIdx === -1) {
         children.push({
           id: toolCallId || uuidv4(),
           toolCallId,
-          name: payload?.toolName ?? '',
+          name: typeof payload.toolName === 'string' ? payload.toolName : '',
           result,
           success,
-          errorMessage: errMsg,
+          errorMessage,
           status: success ? 'done' : 'failed',
         });
       } else {
-        children[exists] = {
-          ...children[exists],
+        children[existIdx] = {
+          ...children[existIdx],
           result,
           success,
-          errorMessage: errMsg,
+          errorMessage,
           status: success ? 'done' : 'failed',
         };
       }
     }
 
-    return {
-      kind: 'subagent_task',
-      id: baseId,
-      taskId,
-      description: prev?.description,
-      subagentType: prev?.subagentType,
-      // 子工具事件不动父状态；若 prev 不存在，给个 'running' 占位
-      status: prev?.status ?? 'running',
-      result: prev?.result,
-      error: prev?.error,
-      children,
-      structured: prev?.structured,
-      reasoning: prev?.reasoning,
+    const next: SubagentTaskPart = {
+      ...part,
+      content: { ...part.content, children },
     };
+    this.parts = [...this.parts.slice(0, idx), next, ...this.parts.slice(idx + 1)];
+    this.lastPartType = 'subagent_task';
   }
 
-  /** 把 subagent_task step 写回 timeline.steps（idx===-1 时 push） */
-  private writeSubagentTaskStep(idx: number, step: CoTStep): void {
-    if (idx === -1) {
-      this.timeline.steps = [...this.timeline.steps, step];
-    } else {
-      this.timeline.steps = [
-        ...this.timeline.steps.slice(0, idx),
-        step,
-        ...this.timeline.steps.slice(idx + 1),
-      ];
-    }
-  }
-
-  private applyStateUpdate(stateType: string, data: any): void {
+  private applyStateUpdate(stateType: string, data: unknown): void {
     switch (stateType) {
       case 'simple_analysis': {
         const text =
           typeof data === 'string'
             ? data
-            : typeof data?.simpleAnalysis === 'string'
+            : isObjectWithStringKey(data, 'simpleAnalysis')
               ? data.simpleAnalysis
               : '';
-        if (text) this.appendReasoning(text);
-        this.flushMessage();
+        if (text) this.appendOrMergeReasoningPart(text);
         break;
       }
       case 'tasks_initial': {
         if (Array.isArray(data)) {
           for (const task of data) {
-            this.upsertSubagentTask({
-              taskId: task?.taskId ?? task?.id ?? '',
-              description: task?.description,
-              status: task?.status ?? 'pending',
+            const taskId = isObjectWithStringKey(task, 'taskId')
+              ? task.taskId
+              : isObjectWithStringKey(task, 'id')
+                ? task.id
+                : '';
+            this.upsertSubagentTaskPart({
+              taskId,
+              description: isObjectWithStringKey(task, 'description')
+                ? task.description
+                : undefined,
+              status: isObjectWithStringKey(task, 'status') ? task.status : 'pending',
             });
           }
         }
-        this.flushMessage();
         break;
       }
       case 'task_update': {
-        this.upsertSubagentTask(data);
-        this.flushMessage();
+        this.upsertSubagentTaskPart((data ?? {}) as Record<string, unknown>);
         break;
       }
       case 'report': {
-        const content = typeof data === 'string' ? data : data?.report;
+        const content =
+          typeof data === 'string'
+            ? data
+            : isObjectWithStringKey(data, 'report')
+              ? data.report
+              : '';
         const title =
-          typeof data === 'object' && data && typeof data.title === 'string'
-            ? data.title
-            : '研究报告';
+          isObjectWithStringKey(data, 'title') && data.title.length > 0 ? data.title : '研究报告';
         if (typeof content === 'string' && content.length > 0) {
-          this.artifact = { title, content };
+          this.pushArtifactPart(title, content);
         }
-        this.timeline.status = 'end';
-        this.flushMessage();
         break;
       }
-      case 'research_target':
-      case 'custom':
       default:
-        // 其余 state_update 统一忽略（与 deer-flow 对齐：不再前端做概念分支）
         break;
     }
   }
 
-  private cloneTimeline(): MessageTimeline {
-    return {
-      steps: this.timeline.steps.map((s) => {
-        if (s.kind === 'subagent_task') {
-          return {
-            ...s,
-            children: s.children ? s.children.map((c) => ({ ...c })) : undefined,
-          } as CoTStep;
-        }
-        return { ...s } as CoTStep;
-      }),
-      status: this.timeline.status,
-      interrupt: this.timeline.interrupt,
+  private pushArtifactPart(title: string, markdown: string): void {
+    const part: ArtifactPart = {
+      partId: uuidv4(),
+      type: 'artifact',
+      createdAt: Date.now(),
+      content: { title, markdown },
     };
+    this.parts = [...this.parts, part];
+    this.lastPartType = 'artifact';
   }
-
-  // 启发式 artifact 抽取
 
   /**
-   * 精确 + 启发式 artifact 抽取：
+   * 启发式 artifact 抽取：
    *
-   * 1. **优先识别显式标记**（命中即精确提取并从正文剥离）：
-   *    a) `<final_report>...</final_report>` HTML 标签包裹（提示词约定）
-   *    b) ```` ```final_report ... ``` ```` 代码块包裹（LLM 偶尔会偏成这种）
-   * 2. **Fallback 启发式**：无标记时沿用原逻辑（>800字符 + ≥2个##标题）。
+   * 1. 优先识别显式标记（命中即精确提取并从 text part 剥离）：
+   *    a) `<final_report>...</final_report>` 标签
+   *    b) ```` ```final_report ... ``` ```` 代码块
+   * 2. Fallback：若已有 artifact part 则跳过；否则把所有 text parts 拼接判断
+   *    （>800 字符 + ≥2 个 H2 标题）→ 视为研究报告并追加 artifact part。
    */
-  private maybeExtractArtifactFromContent(): void {
-    if (this.artifact) return;
-    const text = this.accumulatedContent ?? '';
+  private maybeExtractArtifactFromText(): void {
+    if (this.parts.some((p) => p.type === 'artifact')) return;
 
-    // ① 精确模式 A：<final_report>...</final_report>
+    const textIndices: number[] = [];
+    let combined = '';
+    for (let i = 0; i < this.parts.length; i++) {
+      const part = this.parts[i];
+      if (part.type === 'text') {
+        textIndices.push(i);
+        combined += (combined ? '\n' : '') + part.content.text;
+      }
+    }
+    if (combined.length === 0) return;
+
     const tagRegex = /<final_report>([\s\S]*?)<\/final_report>/;
-    const tagMatch = text.match(tagRegex);
+    const tagMatch = combined.match(tagRegex);
     if (tagMatch) {
       const reportContent = tagMatch[1].trim();
-      this.accumulatedContent = text.replace(tagRegex, '').trim();
-      this.commitArtifact(reportContent, '<final_report>');
+      this.stripFromTextParts(textIndices, tagRegex);
+      this.commitArtifact(reportContent);
       return;
     }
 
-    // ① 精确模式 B：```final_report ... ``` 代码块
     const fenceRegex = /```final_report\s*\n([\s\S]*?)```/;
-    const fenceMatch = text.match(fenceRegex);
+    const fenceMatch = combined.match(fenceRegex);
     if (fenceMatch) {
       const reportContent = fenceMatch[1].trim();
-      this.accumulatedContent = text.replace(fenceRegex, '').trim();
-      this.commitArtifact(reportContent, 'final_report fence');
+      this.stripFromTextParts(textIndices, fenceRegex);
+      this.commitArtifact(reportContent);
       return;
     }
 
-    // ② Fallback：原启发式逻辑
-    if (text.length <= 800) return;
-
-    const h2Matches = text.match(/^##\s+/gm);
+    if (combined.length <= 800) return;
+    const h2Matches = combined.match(/^##\s+/gm);
     if (!h2Matches || h2Matches.length < 2) return;
 
-    // 抽标题：首个 `# ` 或 `## ` 行的内容
     let title = '';
-    const headingMatch = text.match(/^#{1,2}\s+(.+?)\s*$/m);
-    if (headingMatch && headingMatch[1]) {
-      title = headingMatch[1].trim();
-    }
-    if (!title) {
-      title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
-    }
+    const headingMatch = combined.match(/^#{1,2}\s+(.+?)\s*$/m);
+    if (headingMatch && headingMatch[1]) title = headingMatch[1].trim();
+    if (!title) title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
 
-    this.artifact = { title, content: text };
+    this.pushArtifactPart(title, combined);
     if (process.env.NODE_ENV !== 'production') {
       console.log(
-        `[StreamChatHandler] heuristic artifact extracted: title="${title}" len=${text.length} h2=${h2Matches.length}`,
+        `[StreamChatHandler] heuristic artifact extracted: title="${title}" len=${combined.length} h2=${h2Matches.length}`,
       );
     }
   }
 
-  /** 共用：根据已剥离出的 reportContent 抽标题并写入 artifact。 */
-  private commitArtifact(reportContent: string, source: string): void {
+  /** 把命中的 regex 段落从所有 text parts 内容中剥离（仅命中第一处） */
+  private stripFromTextParts(textIndices: number[], regex: RegExp): void {
+    let matched = false;
+    const next = [...this.parts];
+    for (const i of textIndices) {
+      if (matched) break;
+      const part = next[i];
+      if (part.type !== 'text') continue;
+      if (regex.test(part.content.text)) {
+        next[i] = {
+          ...part,
+          content: { text: part.content.text.replace(regex, '').trim() },
+        };
+        matched = true;
+      }
+    }
+    this.parts = next;
+  }
+
+  private commitArtifact(reportContent: string): void {
     let title = '';
     const headingMatch = reportContent.match(/^#{1,2}\s+(.+?)\s*$/m);
-    if (headingMatch && headingMatch[1]) {
-      title = headingMatch[1].trim();
-    }
-    if (!title) {
-      title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
-    }
-
-    this.artifact = { title, content: reportContent };
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(
-        `[StreamChatHandler] ${source} artifact extracted: title="${title}" len=${reportContent.length}`,
-      );
-    }
+    if (headingMatch && headingMatch[1]) title = headingMatch[1].trim();
+    if (!title) title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
+    this.pushArtifactPart(title, reportContent);
   }
 
-  // 把当前 accumulatedContent + timeline + artifact 推送到 store。
+  // ──────────────────────────────────────────────────────
+  // flush（rAF 合帧）
+  // ──────────────────────────────────────────────────────
 
   private rafHandle: number | null = null;
   private pendingFlush = false;
 
-  /** 调度一次 rAF 合并 flush；同一帧内多次调用只生效一次。 */
   private flushMessage(): void {
     this.pendingFlush = true;
     if (this.rafHandle !== null) return;
@@ -698,8 +878,6 @@ export class StreamChatHandler {
       typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
         ? window.requestAnimationFrame.bind(window)
         : (cb: FrameRequestCallback): number => {
-            // SSR 环境：用 setTimeout 模拟 16ms 一帧；Node setTimeout 返回 Timeout，
-            // 转成 number 以满足 requestAnimationFrame 的返回类型契约。
             const id = setTimeout(() => cb(performance.now()), 16);
             return Number(id);
           };
@@ -712,14 +890,12 @@ export class StreamChatHandler {
     });
   }
 
-  /** 同步 flush（用于流末尾、错误等需要立即落地的场景）。 */
   private flushMessageSync(): void {
     if (this.rafHandle !== null) {
       const cancel =
         typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function'
           ? window.cancelAnimationFrame.bind(window)
           : (id: number): void => {
-              // SSR 环境：clearTimeout 在 Node 期望 Timeout 类型，但运行时接受数字 id
               clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
             };
       cancel(this.rafHandle);
@@ -733,29 +909,26 @@ export class StreamChatHandler {
     const target = this.assistantMessageId;
     let mutated = false;
     const updateMessages = this.initialUpdateMessages.map((msg) => {
-      if (msg.id !== target) return msg; // 关键：保持原引用
+      if (msg.id !== target) return msg;
       mutated = true;
       return {
         ...msg,
-        content: this.accumulatedContent,
-        timeline: this.cloneTimeline(),
-        artifact: this.artifact ?? msg.artifact,
+        parts: this.parts.map((p) => clonePart(p)),
+        interrupt: this.interrupt,
       };
     });
-    // 找不到 assistant 消息（异常重置场景）就不写，避免无意义的列表新引用
     if (!mutated) return;
     this.initialUpdateMessages = updateMessages;
     this.config.setCurrentMessages(updateMessages);
   }
 
   // error / cleanup
-
-  private async handleError(error: any): Promise<void> {
-    if (error.name === 'AbortError' || error.name === 'AGENT_STREAM_ABORTED') {
+  private async handleError(error: unknown): Promise<void> {
+    const err = error as { name?: string; message?: string };
+    if (err?.name === 'AbortError' || err?.name === 'AGENT_STREAM_ABORTED') {
       console.log('Chat was Interrupted by user');
       if (this.config.onStreamComplete) {
         this.config.onStreamComplete({
-          finalContent: this.accumulatedContent,
           sessionId: this.sessionId,
           messageId: this.assistantMessageId,
         });
@@ -766,8 +939,7 @@ export class StreamChatHandler {
       if (this.config.onStreamError) {
         this.config.onStreamError(error);
       } else {
-        this.timeline.status = 'failed';
-        this.accumulatedContent = '出错了，哎嘿。';
+        this.appendOrMergeTextPart('出错了，哎嘿。');
         this.flushMessageSync();
       }
     }
@@ -777,47 +949,11 @@ export class StreamChatHandler {
     this.config.setIsChating(false);
     this.config.setAbortController(null);
 
-    if (this.accumulatedContent || this.artifact) {
-      if (this.abortController?.signal.aborted) this.accumulatedContent += '\n 消息已被停止。';
-      await this.saveMessages();
-    }
-
     if (this.config.onStreamComplete) {
       this.config.onStreamComplete({
-        finalContent: this.accumulatedContent,
         sessionId: this.sessionId,
         messageId: this.assistantMessageId,
       });
-    }
-  }
-
-  private async saveMessages(): Promise<void> {
-    const newUserMessage = this.initialUpdateMessages.findLast((msg) => msg.role === 'user');
-    const newAssistantMessage: ChatMessageType = {
-      id: this.assistantMessageId,
-      sessionId: this.sessionId,
-      role: 'assistant',
-      content: this.accumulatedContent,
-      timeline: this.cloneTimeline(),
-      artifact: this.artifact ?? undefined,
-    };
-
-    try {
-      if (this.config.callingMode === 'direct') {
-        await apiClient.post('/conversations/add_messages', {
-          chat_messages: [newUserMessage, newAssistantMessage],
-          hasFiles: this.config.hasFiles,
-          uploadedFiles: this.config.uploadedFiles || [],
-        });
-      } else {
-        await apiClient.post('/conversations/update_messages', {
-          chat_messages: [newUserMessage, newAssistantMessage],
-          hasFiles: this.config.hasFiles,
-          uploadedFiles: this.config.uploadedFiles || [],
-        });
-      }
-    } catch (error) {
-      console.error('Failed to save messages:', error);
     }
   }
 
@@ -826,4 +962,59 @@ export class StreamChatHandler {
       this.abortController.abort();
     }
   }
+}
+
+// ──────────────────────────────────────────────────────
+// helpers
+// ──────────────────────────────────────────────────────
+
+function clonePart(part: MessagePart): MessagePart {
+  switch (part.type) {
+    case 'subagent_task':
+      return {
+        ...part,
+        content: {
+          ...part.content,
+          children: part.content.children
+            ? part.content.children.map((c) => ({ ...c }))
+            : undefined,
+        },
+      };
+    case 'text':
+    case 'reasoning':
+      return { ...part, content: { ...part.content } };
+    case 'tool_call':
+      return { ...part, content: { ...part.content } };
+    case 'tool_result':
+      return { ...part, content: { ...part.content } };
+    case 'file':
+      return { ...part, content: { ...part.content } };
+    case 'image':
+      return { ...part, content: { ...part.content } };
+    case 'artifact':
+      return { ...part, content: { ...part.content } };
+    default: {
+      const _never: never = part;
+      void _never;
+      return part;
+    }
+  }
+}
+
+function parseJsonSafe(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function isObjectWithStringKey<K extends string>(data: unknown, key: K): data is Record<K, string> {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    key in (data as Record<string, unknown>) &&
+    typeof (data as Record<string, unknown>)[key] === 'string'
+  );
 }

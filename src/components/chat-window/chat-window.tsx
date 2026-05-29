@@ -41,9 +41,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
       const conversationStore = useConversationStore.getState();
       await chatWithAgent({
         inputValue,
-        callingMode: 'direct',
         modelKey: selectedModelKey,
-        hasFiles: opts?.hasFiles,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
         ...conversationStore,
       });

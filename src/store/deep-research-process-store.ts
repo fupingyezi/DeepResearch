@@ -4,12 +4,9 @@ import { immer } from 'zustand/middleware/immer';
 /**
  * Artifact / 产物面板状态
  *
- * 改造说明（与 deer-flow 对齐）：
- *   - 工作流（任务/进度/中断）一律内联在 chat 气泡的 ResearchTimeline 中渲染；
- *   - 这里仅承载"右侧产物面板"的展示状态：当前打开的产物（report）+ 是否展开。
+ * 仅承载"右侧产物面板"的展示状态：当前打开的产物（report markdown）+ 是否展开。
  *
- * 历史的 simpleAnalysis / tasks / status / interrupt 等字段都已迁移到
- * `ChatMessageType.timeline`，不再放入全局 store。
+ * `messageId` 为 uuid 字符串（与 ChatMessageType.id 同构）。
  */
 export interface ArtifactPanelState {
   /** 是否打开右侧产物面板 */
@@ -17,14 +14,14 @@ export interface ArtifactPanelState {
   /** 当前展示的产物：来源消息 id + 内容 */
   currentArtifact: {
     sessionId?: string;
-    messageId?: number;
+    messageId?: string;
     title?: string;
     report: string;
   } | null;
   setIsOpenArtifactPanel: (open: boolean) => void;
   openArtifact: (artifact: {
     sessionId?: string;
-    messageId?: number;
+    messageId?: string;
     title?: string;
     report: string;
   }) => void;

@@ -4,9 +4,8 @@ import { chatWithAgentProps } from '@/types';
 export const chatWithAgent = async (params: chatWithAgentProps) => {
   const {
     inputValue,
-    callingMode,
-    isResume,
-    hasFiles,
+    operation,
+    resumeDecision,
     uploadedFiles,
     modelKey,
 
@@ -22,14 +21,10 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     setAbortController,
   } = params;
 
-  const extraMetadata: Record<string, any> = {};
-  if (modelKey) extraMetadata.modelKey = modelKey;
-
   const handler = new StreamChatHandler({
-    callingMode,
-    isResume,
+    operation,
+    resumeDecision,
     inputValue,
-    hasFiles,
     uploadedFiles,
     sessionId: currentSessionId,
     chatSessions,
@@ -40,7 +35,7 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     setCurrentSessionId,
     setCurrentMessages,
     setAbortController,
-    extraMetadata,
+    modelKey,
   });
 
   await handler.execute();

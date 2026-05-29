@@ -11,7 +11,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   className,
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [selectDownloadId, setSelectDownLoadId] = useState<number>(0);
+  const [selectDownloadId, setSelectDownLoadId] = useState<string>('');
 
   const programmaticScrollRef = useRef(false);
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,8 +95,6 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
     >
       {messages.map((msg, index) => (
         <ChatMessageBubble
-          // 用 message.id 作为稳定 key，避免父组件每帧重建 messages 数组引用时
-          // 列表项错位 remount，叠加 stream 高频 setCurrentMessages 会放大到无法收敛。
           key={msg.id ?? index}
           message={msg}
           isLastAIMessage={msg.role === 'assistant' && index === messages.length - 1}
