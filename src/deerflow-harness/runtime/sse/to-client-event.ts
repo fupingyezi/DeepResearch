@@ -116,6 +116,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         message: event.payload.message,
         messageIndex: event.payload.messageIndex,
         totalMessages: event.payload.totalMessages,
+        reasoning: event.payload.reasoning,
       });
 
     case AgentEventType.TASK_COMPLETED:
@@ -123,6 +124,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         taskId: event.payload.taskId,
         status: 'completed',
         result: event.payload.result,
+        structured: (event.payload as any).structured ?? null,
       });
 
     case AgentEventType.TASK_FAILED:

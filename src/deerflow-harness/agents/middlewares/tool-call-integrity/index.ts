@@ -91,14 +91,29 @@ export function createToolCallIntegrityMiddleware(
         knownToolNames: buildKnownToolNames((request as any).tools),
       };
 
-      const patched = applyHistoryRules(request.messages, rules, ctx);
-      const effectiveRequest = patched
-        ? { ...request, messages: patched }
-        : request;
+      let effectiveRequest = request;
+      try {
+        const patched = applyHistoryRules(request.messages, rules, ctx);
+        if (patched) {
+          effectiveRequest = { ...request, messages: patched };
+        }
+      } catch (err) {
+        console.error(
+          '[ToolCallIntegrityMiddleware] sanitizeHistory threw, fallback to original messages:',
+          (err as Error)?.message ?? err,
+        );
+      }
 
       const result = await handler(effectiveRequest);
 
-      applyOutputRules(result, rules, ctx);
+      try {
+        applyOutputRules(result, rules, ctx);
+      } catch (err) {
+        console.error(
+          '[ToolCallIntegrityMiddleware] sanitizeOutput threw, ignored:',
+          (err as Error)?.message ?? err,
+        );
+      }
 
       return result;
     },

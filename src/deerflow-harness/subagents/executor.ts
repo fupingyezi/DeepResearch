@@ -7,6 +7,7 @@ import { createChatModel, inferProvider } from '../models';
 import { getContext } from '../runtime/context';
 import { ModelConfig, SubagentEvent } from '../types';
 import { SubagentConfig } from './config';
+import { extractSubagentReport } from './schema';
 
 export interface SubagentExecutorOptions {
   config: SubagentConfig;
@@ -108,6 +109,7 @@ export class SubagentExecutor {
       const ctxThreadId = getContext()?.thread_id;
       const streamOpts: Record<string, any> = {
         signal: internalCtl.signal,
+        // 增加 'updates' 用于补抓 ToolMessage（subagent 内部工具结果）
         streamMode: ['messages', 'updates'],
         recursionLimit: Math.max(2, config.maxTurns) * 2,
       };
@@ -117,7 +119,31 @@ export class SubagentExecutor {
       const stream = await agent.stream(input, streamOpts);
 
       let aiMessageCount = 0;
-      let finalText: string | null = null;
+      // 累计完整文本，用于在终态尝试 schema 解析
+      let aggregatedFinalText = '';
+
+      // tool_call 分片累积器（与 lead 流处理逻辑对齐）：
+      // 子模型按 OpenAI 协议把 args 分片下发，需要按 index 累加后再 emit。
+      type ToolCallAcc = {
+        toolCallId: string;
+        toolName: string;
+        argsBuffer: string;
+        startEmitted: boolean;
+      };
+      const toolCallsByIndex = new Map<number, ToolCallAcc>();
+      const toolCallsById = new Map<string, ToolCallAcc>();
+
+      const emitToolCallStart = (acc: ToolCallAcc): SubagentEvent | null => {
+        if (acc.startEmitted || !acc.toolCallId || !acc.toolName) return null;
+        acc.startEmitted = true;
+        return {
+          kind: 'tool_call',
+          taskId,
+          toolCallId: acc.toolCallId,
+          toolName: acc.toolName,
+          arguments: acc.argsBuffer || '{}',
+        };
+      };
 
       for await (const chunk of stream) {
         const [mode, payload] = chunk as [string, any];
@@ -129,12 +155,35 @@ export class SubagentExecutor {
           const msgType = (msgChunk as any)?._getType?.() ?? (msgChunk as any)?.type;
           if (msgType !== 'ai') continue;
 
-          // 过滤"空心跳" AIMessageChunk
-          const tcChunks = (msgChunk as any).tool_call_chunks;
-          const hasToolCallChunks = Array.isArray(tcChunks) && tcChunks.length > 0;
-          // 工具调用分片进行中：跳过，等 LangGraph 推完整 AIMessage 时再发
-          if (hasToolCallChunks) continue;
+          // 5.a) 累积 tool_call 分片
+          const tcChunks = (msgChunk as any).tool_call_chunks as
+            | Array<{ index?: number; id?: string; name?: string; args?: string }>
+            | undefined;
+          if (Array.isArray(tcChunks) && tcChunks.length > 0) {
+            for (const piece of tcChunks) {
+              const idx = piece.index ?? 0;
+              let acc = toolCallsByIndex.get(idx);
+              if (!acc) {
+                acc = {
+                  toolCallId: '',
+                  toolName: '',
+                  argsBuffer: '',
+                  startEmitted: false,
+                };
+                toolCallsByIndex.set(idx, acc);
+              }
+              if (piece.id) {
+                acc.toolCallId = piece.id;
+                toolCallsById.set(piece.id, acc);
+              }
+              if (piece.name) acc.toolName = piece.name;
+              if (typeof piece.args === 'string') acc.argsBuffer += piece.args;
+            }
+            // 工具调用分片进行中：跳过本帧，等 LangGraph 推完整 AIMessage 时再发
+            continue;
+          }
 
+          // 5.b) 完整 AI 消息（可能含 tool_calls 或文本）
           const content = (msgChunk as any).content;
           const hasText =
             (typeof content === 'string' && content.trim().length > 0) ||
@@ -147,28 +196,100 @@ export class SubagentExecutor {
             continue;
           }
 
-          if (typeof content === 'string' && content.trim()) {
-            finalText = content;
+          // 5.c) 拿到完整 tool_calls 时，把每个累计完成的 acc 作为 tool_call 事件 emit
+          if (hasFinalToolCalls) {
+            for (const tc of toolCalls as Array<{ id?: string; name?: string; args?: any }>) {
+              if (!tc?.id) continue;
+              let acc = toolCallsById.get(tc.id);
+              if (!acc) {
+                // 罕见：直接非分片下发；现场构造一个 acc
+                acc = {
+                  toolCallId: tc.id,
+                  toolName: tc.name ?? '',
+                  argsBuffer:
+                    typeof tc.args === 'string'
+                      ? tc.args
+                      : tc.args
+                      ? safeJsonStringify(tc.args)
+                      : '',
+                  startEmitted: false,
+                };
+                toolCallsById.set(tc.id, acc);
+              } else {
+                if (!acc.toolName && tc.name) acc.toolName = tc.name;
+                if (!acc.argsBuffer && tc.args) {
+                  acc.argsBuffer =
+                    typeof tc.args === 'string' ? tc.args : safeJsonStringify(tc.args);
+                }
+              }
+              const ev = emitToolCallStart(acc);
+              if (ev) yield ev;
+            }
+          }
+
+          // 5.d) 文本分类：含 tool_calls → reasoning（planning），否则 → 正文（最终答案）
+          const contentStr = typeof content === 'string' && content.trim() ? content : '';
+          // deerflow 2.0 原则：含 tool_calls 的 AI message 的 content 是"思考/规划"
+          if (contentStr && !hasFinalToolCalls) {
+            aggregatedFinalText += contentStr;
           }
           aiMessageCount += 1;
           yield {
             kind: 'ai_message',
             taskId,
-            // 序列化为 plain object，避免下游持有 LC 类实例
-            message: safeSerializeMessage(msgChunk),
+            message: slimSerializeMessage(msgChunk),
             index: aiMessageCount,
             total: aiMessageCount,
+            reasoning: hasFinalToolCalls && contentStr ? contentStr : undefined,
           };
           continue;
         }
 
+        // 5.e) updates 分支：补抓 ToolMessage，发出 tool_result 事件
         if (mode !== 'updates' || !payload || typeof payload !== 'object') continue;
-        // updates 分支主要用于补抓最终消息；此处不再额外 yield，避免重复。
+        for (const nodeName of Object.keys(payload)) {
+          const msgs = payload[nodeName]?.messages;
+          if (!Array.isArray(msgs)) continue;
+          for (const msg of msgs) {
+            const t = (msg as any)?._getType?.();
+            if (t !== 'tool') continue;
+            const toolCallId: string = (msg as any).tool_call_id ?? '';
+            const acc = toolCallsById.get(toolCallId);
+            // 兜底：如果还没 emit 过 tool_call_start，就先补一次
+            if (acc) {
+              const startEvt = emitToolCallStart(acc);
+              if (startEvt) yield startEvt;
+            }
+            const toolName = (msg as any).name ?? acc?.toolName ?? '';
+            const status = (msg as any).status; // 'error' / undefined
+            yield {
+              kind: 'tool_result',
+              taskId,
+              toolCallId,
+              toolName,
+              result: (msg as any).content,
+              success: status !== 'error',
+              errorMessage: status === 'error' ? String((msg as any).content ?? '') : undefined,
+            };
+          }
+        }
       }
 
       // 6) 终态：completed -------------------------------------------------
-      yield { kind: 'completed', taskId, result: finalText };
-      console.info(`${logPrefix} completed (messages=${aiMessageCount})`);
+      // 尝试从最终输出中提取 schema 化的 final-report 块
+      const { json: structured, markdown } = extractSubagentReport(aggregatedFinalText);
+      const resultText = aggregatedFinalText.length > 0 ? markdown : null;
+      yield {
+        kind: 'completed',
+        taskId,
+        result: resultText,
+        structured: structured ?? null,
+      };
+      console.info(
+        `${logPrefix} completed (messages=${aiMessageCount}, structured=${
+          structured ? 'yes' : 'no'
+        })`,
+      );
     } catch (err: any) {
       const aborted = internalCtl.signal.aborted || parentSignal?.aborted;
 
@@ -198,17 +319,43 @@ export class SubagentExecutor {
 }
 
 /**
- * 把 LangChain message chunk 转成可安全序列化的对象，避免 writer/SSE 链路
- * 持有完整类实例（含循环引用风险）。
+ * 序列化 LangChain message chunk 为体积可控的 plain object。
+ *
+ * 历史版本会把整个 message（含原始 tool_call_chunks、additional_kwargs）
+ * 全部 dump，导致单帧体积 100KB+，前端 SSE 解析卡顿、表现像"已完成还在转"。
+ * 新版只保留前端真正需要的：text + tool_calls 摘要。
  */
-function safeSerializeMessage(msg: any): Record<string, any> {
-  if (!msg || typeof msg !== 'object') return { content: String(msg ?? '') };
-  const m = msg as Record<string, any>;
+function slimSerializeMessage(msg: any): Record<string, any> {
+  if (!msg || typeof msg !== 'object') return { type: 'unknown', text: String(msg ?? '') };
+  const text =
+    typeof msg.content === 'string'
+      ? msg.content
+      : Array.isArray(msg.content)
+      ? msg.content
+          .map((c: any) => (typeof c === 'string' ? c : c?.text ?? ''))
+          .join('')
+      : '';
+  const toolCalls = Array.isArray(msg.tool_calls)
+    ? msg.tool_calls.map((tc: any) => ({
+        id: tc?.id,
+        name: tc?.name,
+        argKeys:
+          tc?.args && typeof tc.args === 'object'
+            ? Object.keys(tc.args).slice(0, 8)
+            : undefined,
+      }))
+    : undefined;
   return {
-    type: (m as any)?._getType?.() ?? m.type ?? 'unknown',
-    content: m.content ?? '',
-    tool_calls: (m as any).tool_calls ?? undefined,
-    name: m.name ?? undefined,
-    additional_kwargs: m.additional_kwargs ?? undefined,
+    type: msg?._getType?.() ?? msg.type ?? 'ai',
+    text,
+    toolCalls,
   };
+}
+
+function safeJsonStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return '';
+  }
 }

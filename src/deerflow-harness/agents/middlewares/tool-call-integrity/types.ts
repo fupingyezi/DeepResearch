@@ -26,10 +26,6 @@ export interface IntegrityRule {
 
 /**
  * 规则上下文：从 wrapModelCall 的 request 派生的不变量，按需扩展。
- *
- * - knownToolNames：本轮 agent 真实绑定的工具名集合。规则用它判断
- *   tool_call 是否引用了一个根本不存在的工具。size === 0 时规则应保守
- *   跳过（防止 request.tools 缺失导致误删）。
  */
 export interface RuleContext {
   readonly knownToolNames: ReadonlySet<string>;

@@ -270,6 +270,17 @@ export class DeerFlowClient {
       const toolCallsById = new Map<string, ToolCallAcc>();
       const debug = process.env.NODE_ENV !== 'production';
 
+      // ── Content classification state ──
+      // deerflow 2.0 原则：含 tool_calls 的 AI message 的 content 是
+      // "思考/规划"（归入 reasoning），不含 tool_calls 的 content 是
+      // "最终答案"（归入正文）。
+      // 由于流式 chunk 中 content 可能先于 tool_call_chunks 到达，
+      // 需要短暂缓冲：tool_call_chunks 一旦出现则缓冲刷为 reasoning；
+      // 超过阈值仍未出现则刷为 text（大概率是最终答案）。
+      let stepHasToolCalls = false;
+      let pendingContent = '';
+      const PENDING_FLUSH_THRESHOLD = 200;
+
       const emitToolCallStart = (acc: ToolCallAcc): ClientAgentEvent | null => {
         if (acc.startEmitted || !acc.toolCallId || !acc.toolName) return null;
         acc.startEmitted = true;
@@ -287,23 +298,56 @@ export class DeerFlowClient {
         );
       };
 
+      /** 刷新待分类缓冲：asReasoning=true → reasoning，否则 → text */
+      const flushPendingContent = function* (asReasoning: boolean): Generator<ClientAgentEvent> {
+        if (!pendingContent) return;
+        const ev = emit(
+          createAgentEvent<AgentEvent>(
+            AgentEventType.LLM_STREAM,
+            agentId,
+            asReasoning ? { reasoning: pendingContent } : { text: pendingContent },
+            { sessionId: effectiveThreadId, ...metadata },
+          ),
+        );
+        if (ev) yield ev;
+        pendingContent = '';
+      };
+
       const handleAiChunk = function* (msgChunk: any): Generator<ClientAgentEvent> {
         const content = typeof msgChunk.content === 'string' ? msgChunk.content : '';
-        if (content) {
-          const ev = emit(
-            createAgentEvent<AgentEvent>(
-              AgentEventType.LLM_STREAM,
-              agentId,
-              { text: content },
-              { sessionId: effectiveThreadId, ...metadata },
-            ),
-          );
-          if (ev) yield ev;
-        }
-
         const tcChunks = msgChunk.tool_call_chunks as
           | Array<{ index?: number; id?: string; name?: string; args?: string }>
           | undefined;
+
+        // tool_call_chunks 首次出现 → 当前 step 确认含 tool calls，
+        // 将此前缓冲的 content 一并刷为 reasoning
+        if (tcChunks?.length && !stepHasToolCalls) {
+          stepHasToolCalls = true;
+          yield* flushPendingContent(true);
+        }
+
+        if (content) {
+          if (stepHasToolCalls) {
+            // 含 tool_calls 的 step：content 是 planning → reasoning
+            const ev = emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.LLM_STREAM,
+                agentId,
+                { reasoning: content },
+                { sessionId: effectiveThreadId, ...metadata },
+              ),
+            );
+            if (ev) yield ev;
+          } else {
+            // 尚未出现 tool_call_chunks → 缓冲，等待分类
+            pendingContent += content;
+            // 超过阈值仍未出现 tool_call_chunks → 大概率是最终答案，刷为 text
+            if (pendingContent.length > PENDING_FLUSH_THRESHOLD) {
+              yield* flushPendingContent(false);
+            }
+          }
+        }
+
         if (!tcChunks?.length) return;
         for (const piece of tcChunks) {
           const idx = piece.index ?? 0;
@@ -322,6 +366,12 @@ export class DeerFlowClient {
       };
 
       const handleToolMessage = function* (msg: any): Generator<ClientAgentEvent> {
+        // 兜底刷缓冲 & 重置 step 状态（ToolMessage 标志 step 边界）
+        if (pendingContent) {
+          yield* flushPendingContent(stepHasToolCalls);
+        }
+        stepHasToolCalls = false;
+
         const toolCallId = msg.tool_call_id ?? '';
         const acc = toolCallsById.get(toolCallId);
         if (acc) {
@@ -384,6 +434,7 @@ export class DeerFlowClient {
                   message: raw.message,
                   messageIndex: raw.message_index ?? 0,
                   totalMessages: raw.total_messages ?? 0,
+                  reasoning: raw.reasoning,
                 },
                 meta,
               ),
@@ -396,7 +447,12 @@ export class DeerFlowClient {
               createAgentEvent<AgentEvent>(
                 AgentEventType.TASK_COMPLETED,
                 agentId,
-                { taskId, result: raw.result ?? null },
+                {
+                  taskId,
+                  result: raw.result ?? null,
+                  // structured: 来自 subagent final-report fenced block 的解析结果
+                  structured: raw.structured ?? null,
+                } as any,
                 meta,
               ),
             );
@@ -433,6 +489,34 @@ export class DeerFlowClient {
                 AgentEventType.TASK_TIMED_OUT,
                 agentId,
                 { taskId, error: raw.error ?? null },
+                meta,
+              ),
+            );
+            if (ev) yield ev;
+            return;
+          }
+          case 'task_tool_call':
+          case 'task_tool_result': {
+            // subagent 内部工具调用透传：直接走 TASK_PROGRESS 通道，
+            // 前端按 status='tool_call' / 'tool_result' 挂到对应 subagent_task step 下。
+            const isCall = t === 'task_tool_call';
+            const ev = emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TASK_PROGRESS,
+                agentId,
+                {
+                  taskId,
+                  status: isCall ? 'tool_call' : 'tool_result',
+                  toolCallId: raw.tool_call_id,
+                  toolName: raw.tool_name,
+                  ...(isCall
+                    ? { arguments: raw.arguments }
+                    : {
+                        toolResult: raw.result,
+                        toolSuccess: raw.success,
+                        toolErrorMessage: raw.error_message,
+                      }),
+                } as any,
                 meta,
               ),
             );
@@ -486,9 +570,25 @@ export class DeerFlowClient {
 
           if (!Array.isArray(msgs)) continue;
           for (const msg of msgs) {
-            if (msg?._getType?.() === 'tool') yield* handleToolMessage(msg);
+            const msgType = msg?._getType?.();
+            if (msgType === 'ai') {
+              // updates 模式的完整 AIMessage 标志 agent step 结束，
+              // 刷缓冲并按 tool_calls 有无决定分类
+              const hasToolCalls = !!(msg?.tool_calls?.length);
+              if (pendingContent) {
+                yield* flushPendingContent(hasToolCalls || stepHasToolCalls);
+              }
+              stepHasToolCalls = false;
+            } else if (msgType === 'tool') {
+              yield* handleToolMessage(msg);
+            }
           }
         }
+      }
+
+      // 刷残留缓冲（最终答案可能仍在 pendingContent 中）
+      if (pendingContent) {
+        yield* flushPendingContent(stepHasToolCalls);
       }
 
       // 兜底：模型只出 tool_call 但未触发 tool node 的极端情况

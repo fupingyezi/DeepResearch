@@ -21,6 +21,8 @@ import type {
   CoTStep,
   MessageTimeline,
   MessageArtifact,
+  SubagentToolCall,
+  SubagentStructuredReport,
 } from "./chat-info-define";
 
 //函数参数相关
@@ -50,6 +52,8 @@ export {
   CoTStep,
   MessageTimeline,
   MessageArtifact,
+  SubagentToolCall,
+  SubagentStructuredReport,
 };
 
 export { chatWithAgentProps, reChatWithAgentProps };

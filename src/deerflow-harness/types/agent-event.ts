@@ -44,9 +44,9 @@ export enum AgentEventType {
 
 /** LLM 流式文本 payload */
 export interface LlmStreamPayload {
-  /** 增量文本内容 */
-  text: string;
-  /** 可选的推理/思考文本 */
+  /** 增量正文内容（最终答案）；纯推理时省略 */
+  text?: string;
+  /** 推理/思考文本（含 tool_calls 时的 planning 文本） */
   reasoning?: string;
 }
 
@@ -218,6 +218,8 @@ export interface TaskRunningPayload {
   messageIndex: number;
   /** 截至目前累计的消息数 */
   totalMessages: number;
+  /** 含 tool_calls 时的 planning 文本，归入 timeline reasoning */
+  reasoning?: string;
 }
 
 /** Subagent task 完成 payload */
@@ -225,6 +227,8 @@ export interface TaskCompletedPayload {
   taskId: string;
   /** 文本结果（subagent 最终输出）；可能为 null */
   result: string | null;
+  /** 结构化报告 JSON（来自 final-report fenced block 解析）；可能为 null */
+  structured?: unknown;
 }
 
 /** Subagent task 失败 payload */

@@ -33,8 +33,33 @@ export interface fileMetadataType {
  * 三种 step 形态：
  * - reasoning：思考/计划/简要分析等模型内省文本（合并相邻 chunk）
  * - tool_call：单次工具调用（用 toolCallId 关联 result）
- * - subagent_task：基于 task_progress / state_update.task_* 的子代理任务
+ * - subagent_task：基于 task_progress / state_update.task_* 的子代理任务，
+ *   带 children 子工具调用 + 解析后的结构化报告
  */
+
+/** subagent 内部工具调用（嵌套在 subagent_task.children 里） */
+export interface SubagentToolCall {
+  id: string;
+  toolCallId: string;
+  name: string;
+  args?: any;
+  result?: any;
+  success?: boolean;
+  errorMessage?: string;
+  status: "running" | "done" | "failed";
+}
+
+/**
+ * subagent 解析自 final-report fenced block 的结构化报告，
+ * 与 backend SubagentReportSchema 保持字段一致（type-only mirror，无运行期校验）。
+ */
+export interface SubagentStructuredReport {
+  summary: string;
+  keyFindings: Array<{ point: string; sourceIndexes: number[] }>;
+  sources: Array<{ title: string; url: string; snippet?: string }>;
+  issues?: string[];
+}
+
 export type CoTStep =
   | {
       kind: "reasoning";
@@ -63,6 +88,12 @@ export type CoTStep =
       status: string; // started / running / completed / failed / cancelled / timed_out
       result?: string;
       error?: string;
+      /** subagent 内部工具调用按时序追加 */
+      children?: SubagentToolCall[];
+      /** 解析自 final-report 的结构化报告（completed 后有值） */
+      structured?: SubagentStructuredReport | null;
+      /** sub-agent 执行过程中的思考/规划文本（可折叠显示） */
+      reasoning?: string;
     };
 
 /**

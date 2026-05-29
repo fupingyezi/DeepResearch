@@ -70,9 +70,33 @@ function toWriterPayload(
         message: ev.message,
         message_index: ev.index,
         total_messages: ev.total,
+        reasoning: ev.reasoning,
+      };
+    case 'tool_call':
+      return {
+        type: 'task_tool_call',
+        task_id: publicTaskId,
+        tool_call_id: ev.toolCallId,
+        tool_name: ev.toolName,
+        arguments: ev.arguments,
+      };
+    case 'tool_result':
+      return {
+        type: 'task_tool_result',
+        task_id: publicTaskId,
+        tool_call_id: ev.toolCallId,
+        tool_name: ev.toolName,
+        result: ev.result,
+        success: ev.success,
+        error_message: ev.errorMessage,
       };
     case 'completed':
-      return { type: 'task_completed', task_id: publicTaskId, result: ev.result };
+      return {
+        type: 'task_completed',
+        task_id: publicTaskId,
+        result: ev.result,
+        structured: ev.structured ?? null,
+      };
     case 'failed':
       return { type: 'task_failed', task_id: publicTaskId, error: ev.error };
     case 'timed_out':
@@ -196,7 +220,7 @@ export const taskTool = tool(
             terminalKind = 'cancelled';
             terminalError = ev.error ?? 'cancelled';
             break;
-          // started / ai_message：不影响终态
+          // started / ai_message / tool_call / tool_result：不影响终态
         }
       }
     } catch (err: any) {
@@ -213,9 +237,14 @@ export const taskTool = tool(
     }
 
     // ---- 5) 终态文案返回给 lead LLM ---------------------------------------
+    // 只返回 markdown 正文；structured JSON 已通过 task_completed 事件
+    // 的 structured 字段单独透传给前端，不应再混入 lead 的 tool result，
+    // 否则 lead 会把 JSON 原样输出到正文，导致用户看到 ` ```final-report ` 代码块。
     switch (terminalKind) {
-      case 'completed':
-        return `Task Succeeded. Result: ${lastResult ?? '(empty)'}`;
+      case 'completed': {
+        const md = lastResult ?? '(empty)';
+        return `Task Succeeded.\n\n## Markdown Result\n${md}`;
+      }
       case 'failed':
         return `Task failed. Error: ${terminalError ?? 'unknown error'}`;
       case 'timed_out':

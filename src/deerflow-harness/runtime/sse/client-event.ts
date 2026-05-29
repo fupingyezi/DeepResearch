@@ -46,9 +46,9 @@ export interface StartPayload {
 }
 
 export interface StreamChunkPayload {
-  /** 增量文本 */
-  text: string;
-  /** 可选推理/思考文本 */
+  /** 增量正文（最终答案）；纯推理时省略 */
+  text?: string;
+  /** 推理/思考文本（含 tool_calls 时的 planning 文本） */
   reasoning?: string;
 }
 
@@ -82,9 +82,12 @@ export interface StateUpdatePayload {
 
 /**
  * TaskProgressPayload —— 折叠 task_started / task_running / task_completed /
- * task_failed / task_cancelled / task_timed_out 六类 internal 事件。
+ * task_failed / task_cancelled / task_timed_out 六类 internal 事件，并新增
+ * task_tool_call / task_tool_result 用于把 subagent 内部的工具调用透传给前端。
  *
- * - status: 'started' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+ * - status:
+ *    'started' | 'running' | 'tool_call' | 'tool_result' |
+ *    'completed' | 'failed' | 'cancelled' | 'timed_out'
  *   其余字段按 status 语义可选填。
  */
 export interface TaskProgressPayload {
@@ -97,10 +100,23 @@ export interface TaskProgressPayload {
   message?: any;
   messageIndex?: number;
   totalMessages?: number;
+  /** sub-agent 内部 AI message 的思考/规划文本（仅 running 时有值） */
+  reasoning?: string;
   /** 终态结果（completed 时） */
   result?: string | null;
+  /** 终态结构化报告（completed 时，可能为 null） */
+  structured?: unknown;
   /** 终态错误（failed / cancelled / timed_out 时） */
   error?: string | null;
+  /** subagent 内部工具调用相关字段（仅 tool_call / tool_result 时有值） */
+  toolCallId?: string;
+  toolName?: string;
+  /** tool_call 的 arguments（JSON 字符串） */
+  arguments?: string;
+  /** tool_result 的 result/success/errorMessage */
+  toolResult?: any;
+  toolSuccess?: boolean;
+  toolErrorMessage?: string;
   /** 兼容扩展字段 */
   [k: string]: any;
 }

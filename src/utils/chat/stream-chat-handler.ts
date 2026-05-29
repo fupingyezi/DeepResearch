@@ -4,6 +4,8 @@ import {
   CoTStep,
   MessageArtifact,
   MessageTimeline,
+  SubagentStructuredReport,
+  SubagentToolCall,
 } from '@/types';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 import apiClient from '../request/api';
@@ -373,56 +375,173 @@ export class StreamChatHandler {
     this.timeline.status = 'processing';
   }
 
-  /** upsert 一个 subagent_task step（按 taskId 关联） */
+  /**
+   * upsert 一个 subagent_task step（按 taskId 关联）
+   *
+   * 支持的 status：
+   *  - 'started' / 'running' / 'completed' / 'failed' / 'cancelled' / 'timed_out'
+   *  - 'tool_call' / 'tool_result'：subagent 内部工具调用，挂到该 task 的
+   *    children 数组下；不会改变父 task 自身的状态。
+   *  - 'pending'：占位（仅来自 STATE_UPDATE.tasks_initial）
+   */
   private upsertSubagentTask(payload: any): void {
     const taskId: string = payload?.taskId ?? '';
+    const incomingStatus: string = payload?.status ?? 'running';
+
     const idx = this.timeline.steps.findIndex(
       (s) => s.kind === 'subagent_task' && s.taskId === taskId,
     );
+    const prev =
+      idx === -1
+        ? null
+        : (this.timeline.steps[idx] as Extract<CoTStep, { kind: 'subagent_task' }>);
+
+    // 子工具调用：维护 children 数组，不动父任务状态
+    if (incomingStatus === 'tool_call' || incomingStatus === 'tool_result') {
+      const next = this.applySubToolEvent(prev, payload, incomingStatus);
+      this.writeSubagentTaskStep(idx, next);
+      this.timeline.status = 'processing';
+      return;
+    }
+
+    // 终态/进行态：正常 upsert
+    const incomingReasoning =
+      typeof payload?.reasoning === 'string' && payload.reasoning.length > 0
+        ? payload.reasoning
+        : undefined;
+    // running 时追加 reasoning（多次 ai_message 会逐步拼合）
+    const prevReasoning = prev?.reasoning ?? '';
+    const nextReasoning = incomingReasoning
+      ? prevReasoning + incomingReasoning
+      : prevReasoning || undefined;
+
     const next: CoTStep = {
       kind: 'subagent_task',
-      id: taskId || uuidv4(),
+      id: prev?.id ?? taskId ?? uuidv4(),
       taskId,
       description:
-        typeof payload?.description === 'string' ? payload.description : undefined,
+        typeof payload?.description === 'string' ? payload.description : prev?.description,
       subagentType:
-        typeof payload?.subagentType === 'string' ? payload.subagentType : undefined,
-      status: payload?.status ?? 'running',
+        typeof payload?.subagentType === 'string' ? payload.subagentType : prev?.subagentType,
+      status: incomingStatus,
       result:
         typeof payload?.result === 'string' && payload.result.length > 0
           ? payload.result
-          : undefined,
+          : prev?.result,
       error:
         typeof payload?.error === 'string' && payload.error.length > 0
           ? payload.error
-          : undefined,
+          : prev?.error,
+      children: prev?.children ?? [],
+      structured:
+        payload?.structured && typeof payload.structured === 'object'
+          ? (payload.structured as SubagentStructuredReport)
+          : prev?.structured,
+      reasoning: nextReasoning,
     };
 
-    if (idx === -1) {
-      this.timeline.steps = [...this.timeline.steps, next];
-    } else {
-      const prev = this.timeline.steps[idx] as Extract<
-        CoTStep,
-        { kind: 'subagent_task' }
-      >;
-      // 用新值覆盖，但 undefined 字段保留旧值
-      const merged: CoTStep = {
-        kind: 'subagent_task',
-        id: prev.id,
-        taskId: next.taskId || prev.taskId,
-        description: next.description ?? prev.description,
-        subagentType: next.subagentType ?? prev.subagentType,
-        status: next.status ?? prev.status,
-        result: next.result ?? prev.result,
-        error: next.error ?? prev.error,
+    this.writeSubagentTaskStep(idx, next);
+    this.timeline.status = 'processing';
+  }
+
+  /**
+   * 把子工具调用事件应用到当前 subagent_task 上。
+   * - 如果 prev 不存在，就先建一个占位 task，再把这条子调用挂上去（容错时序乱序）
+   * - tool_call：children push 一条 status='running' 的子项
+   * - tool_result：找到匹配的 toolCallId 子项，写回 result + status
+   */
+  private applySubToolEvent(
+    prev: Extract<CoTStep, { kind: 'subagent_task' }> | null,
+    payload: any,
+    incomingStatus: 'tool_call' | 'tool_result',
+  ): CoTStep {
+    const taskId: string = payload?.taskId ?? '';
+    const baseId = prev?.id ?? taskId ?? uuidv4();
+    const children: SubagentToolCall[] = [...(prev?.children ?? [])];
+
+    const toolCallId: string = payload?.toolCallId ?? '';
+
+    if (incomingStatus === 'tool_call') {
+      // 解析 args（来自 JSON 字符串）
+      let parsedArgs: any = undefined;
+      const rawArgs = payload?.arguments;
+      if (typeof rawArgs === 'string') {
+        try {
+          parsedArgs = JSON.parse(rawArgs);
+        } catch {
+          parsedArgs = rawArgs;
+        }
+      } else if (rawArgs && typeof rawArgs === 'object') {
+        parsedArgs = rawArgs;
+      }
+      const exists = children.findIndex((c) => c.toolCallId === toolCallId);
+      const item: SubagentToolCall = {
+        id: toolCallId || uuidv4(),
+        toolCallId,
+        name: payload?.toolName ?? '',
+        args: parsedArgs,
+        status: 'running',
       };
+      if (exists === -1) {
+        children.push(item);
+      } else {
+        children[exists] = { ...children[exists], ...item, status: children[exists].status };
+      }
+    } else {
+      // tool_result：找到对应子项写回
+      const exists = children.findIndex((c) => c.toolCallId === toolCallId);
+      const success = payload?.toolSuccess !== false;
+      const result = payload?.toolResult;
+      const errMsg =
+        typeof payload?.toolErrorMessage === 'string' ? payload.toolErrorMessage : undefined;
+      if (exists === -1) {
+        children.push({
+          id: toolCallId || uuidv4(),
+          toolCallId,
+          name: payload?.toolName ?? '',
+          result,
+          success,
+          errorMessage: errMsg,
+          status: success ? 'done' : 'failed',
+        });
+      } else {
+        children[exists] = {
+          ...children[exists],
+          result,
+          success,
+          errorMessage: errMsg,
+          status: success ? 'done' : 'failed',
+        };
+      }
+    }
+
+    return {
+      kind: 'subagent_task',
+      id: baseId,
+      taskId,
+      description: prev?.description,
+      subagentType: prev?.subagentType,
+      // 子工具事件不动父状态；若 prev 不存在，给个 'running' 占位
+      status: prev?.status ?? 'running',
+      result: prev?.result,
+      error: prev?.error,
+      children,
+      structured: prev?.structured,
+      reasoning: prev?.reasoning,
+    };
+  }
+
+  /** 把 subagent_task step 写回 timeline.steps（idx===-1 时 push） */
+  private writeSubagentTaskStep(idx: number, step: CoTStep): void {
+    if (idx === -1) {
+      this.timeline.steps = [...this.timeline.steps, step];
+    } else {
       this.timeline.steps = [
         ...this.timeline.steps.slice(0, idx),
-        merged,
+        step,
         ...this.timeline.steps.slice(idx + 1),
       ];
     }
-    this.timeline.status = 'processing';
   }
 
   private applyStateUpdate(stateType: string, data: any): void {
@@ -479,7 +598,15 @@ export class StreamChatHandler {
 
   private cloneTimeline(): MessageTimeline {
     return {
-      steps: this.timeline.steps.map((s) => ({ ...s }) as CoTStep),
+      steps: this.timeline.steps.map((s) => {
+        if (s.kind === 'subagent_task') {
+          return {
+            ...s,
+            children: s.children ? s.children.map((c) => ({ ...c })) : undefined,
+          } as CoTStep;
+        }
+        return { ...s } as CoTStep;
+      }),
       status: this.timeline.status,
       interrupt: this.timeline.interrupt,
     };
@@ -487,15 +614,39 @@ export class StreamChatHandler {
 
   // -------------------- 启发式 artifact 抽取 --------------------
 
-  /** 启发式判定：
-   *  - accumulatedContent 长度 > 800 字符
-   *  - 包含 ≥ 2 个 `## ` 二级标题
-   *  - 当前 artifact 为空（未被 STATE_UPDATE.report 显式注入）
-   *  命中时把全文塞入 artifact，标题取首个 `# ` / `## ` 行，否则 fallback 为 user 输入前 20 字。
+  /**
+   * 精确 + 启发式 artifact 抽取：
+   *
+   * 1. **优先识别显式标记**（命中即精确提取并从正文剥离）：
+   *    a) `<final_report>...</final_report>` HTML 标签包裹（提示词约定）
+   *    b) ```` ```final_report ... ``` ```` 代码块包裹（LLM 偶尔会偏成这种）
+   * 2. **Fallback 启发式**：无标记时沿用原逻辑（>800字符 + ≥2个##标题）。
    */
   private maybeExtractArtifactFromContent(): void {
     if (this.artifact) return;
     const text = this.accumulatedContent ?? '';
+
+    // ① 精确模式 A：<final_report>...</final_report>
+    const tagRegex = /<final_report>([\s\S]*?)<\/final_report>/;
+    const tagMatch = text.match(tagRegex);
+    if (tagMatch) {
+      const reportContent = tagMatch[1].trim();
+      this.accumulatedContent = text.replace(tagRegex, '').trim();
+      this.commitArtifact(reportContent, '<final_report>');
+      return;
+    }
+
+    // ① 精确模式 B：```final_report ... ``` 代码块
+    const fenceRegex = /```final_report\s*\n([\s\S]*?)```/;
+    const fenceMatch = text.match(fenceRegex);
+    if (fenceMatch) {
+      const reportContent = fenceMatch[1].trim();
+      this.accumulatedContent = text.replace(fenceRegex, '').trim();
+      this.commitArtifact(reportContent, 'final_report fence');
+      return;
+    }
+
+    // ② Fallback：原启发式逻辑
     if (text.length <= 800) return;
 
     const h2Matches = text.match(/^##\s+/gm);
@@ -515,6 +666,25 @@ export class StreamChatHandler {
     if (process.env.NODE_ENV !== 'production') {
       console.log(
         `[StreamChatHandler] heuristic artifact extracted: title="${title}" len=${text.length} h2=${h2Matches.length}`,
+      );
+    }
+  }
+
+  /** 共用：根据已剥离出的 reportContent 抽标题并写入 artifact。 */
+  private commitArtifact(reportContent: string, source: string): void {
+    let title = '';
+    const headingMatch = reportContent.match(/^#{1,2}\s+(.+?)\s*$/m);
+    if (headingMatch && headingMatch[1]) {
+      title = headingMatch[1].trim();
+    }
+    if (!title) {
+      title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
+    }
+
+    this.artifact = { title, content: reportContent };
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        `[StreamChatHandler] ${source} artifact extracted: title="${title}" len=${reportContent.length}`,
       );
     }
   }

@@ -173,13 +173,42 @@ const ToolCallStep: React.FC<{
   );
 };
 
+/** 子任务内的思考/规划文本，可折叠 */
+const ReasoningBlock: React.FC<{ text: string }> = ({ text }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-l-2 border-amber-200 pl-2 py-0.5">
+      <div
+        className="flex items-center gap-1.5 cursor-pointer select-none text-gray-500"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <CaretRightOutlined
+          className={`text-[10px] text-gray-400 transition-transform ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <BulbOutlined className="text-amber-400 text-xs" />
+        <span className="text-xs font-medium">思考过程</span>
+      </div>
+      {open && (
+        <div className="mt-1 ml-4 text-xs text-gray-500 leading-relaxed">
+          <CustomMarkdown content={text} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SubagentTaskStep: React.FC<{
   step: Extract<CoTStep, { kind: "subagent_task" }>;
   index: number;
 }> = ({ step, index }) => {
-  const [open, setOpen] = useState(false);
-  const isFailed = ["failed", "cancelled", "timed_out"].includes(step.status);
-  const isDone = step.status === "completed";
+  // 子任务默认展开，让用户能看到内部研究过程；终态后用户可手动折叠
+  const [open, setOpen] = useState(true);
+  const status = (step.status ?? "").toLowerCase();
+  const isFailed = ["failed", "cancelled", "timed_out"].includes(status);
+  // 兼容多种 done 别名：completed / done / success / finished
+  const isDone = ["completed", "done", "success", "finished"].includes(status);
 
   const renderStatus = () => {
     if (isFailed) return <CloseCircleOutlined className="text-red-500" />;
@@ -187,8 +216,12 @@ const SubagentTaskStep: React.FC<{
     return <LoadingOutlined className="text-blue-500" />;
   };
 
+  const children = step.children ?? [];
+  const hasChildren = children.length > 0;
+  const structured = step.structured;
+
   return (
-    <div className="border-l-2 border-gray-200 pl-3 py-1.5">
+    <div className="border-l-2 border-purple-200 pl-3 py-1.5">
       <div
         className="flex items-center gap-2 cursor-pointer select-none"
         onClick={() => setOpen((v) => !v)}
@@ -202,17 +235,169 @@ const SubagentTaskStep: React.FC<{
         <span className="text-sm text-gray-700 truncate flex-1">
           {step.description || `子任务 ${index + 1}`}
         </span>
+        {hasChildren && (
+          <span className="text-xs text-gray-400 shrink-0">
+            {children.length} 步
+          </span>
+        )}
         {renderStatus()}
       </div>
 
-      {open && (step.result || step.error) && (
-        <div className="mt-2 ml-5 text-sm">
-          {step.result && (
-            <div className="text-gray-700">
+      {open && (
+        <div className="mt-2 ml-5 space-y-2">
+          {/* 思考/规划文本（可折叠） */}
+          {step.reasoning && (
+            <ReasoningBlock text={step.reasoning} />
+          )}
+
+          {/* 子工具调用按时序展开 */}
+          {hasChildren && (
+            <div className="flex flex-col gap-1">
+              {children.map((c) => (
+                <SubagentToolCallRow key={c.id} item={c} />
+              ))}
+            </div>
+          )}
+
+          {/* 结构化报告（completed 后） */}
+          {structured && (
+            <div className="rounded-lg bg-purple-50 border border-purple-100 p-2 text-xs">
+              <div className="font-semibold text-purple-700 mb-1">摘要</div>
+              <div className="text-gray-700 mb-2">{structured.summary}</div>
+              {structured.keyFindings?.length > 0 && (
+                <>
+                  <div className="font-semibold text-purple-700 mb-1">
+                    关键发现（{structured.keyFindings.length}）
+                  </div>
+                  <ul className="list-disc list-inside text-gray-700 space-y-0.5 mb-2">
+                    {structured.keyFindings.slice(0, 6).map((kf, i) => (
+                      <li key={i}>{kf.point}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {structured.sources?.length > 0 && (
+                <>
+                  <div className="font-semibold text-purple-700 mb-1">
+                    来源（{structured.sources.length}）
+                  </div>
+                  <ul className="list-none text-gray-600 space-y-0.5">
+                    {structured.sources.slice(0, 6).map((s, i) => (
+                      <li key={i} className="truncate">
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-600"
+                        >
+                          [{i}] {s.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* fallback：没有 structured 时展示原文 result */}
+          {!structured && step.result && (
+            <div className="text-sm text-gray-700">
               <CustomMarkdown content={step.result} />
             </div>
           )}
-          {step.error && <div className="text-red-500">错误：{step.error}</div>}
+
+          {step.error && (
+            <div className="text-sm text-red-500">错误：{step.error}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** 嵌套在 subagent 卡片里的单条子工具调用 */
+const SubagentToolCallRow: React.FC<{
+  item: NonNullable<Extract<CoTStep, { kind: "subagent_task" }>["children"]>[number];
+}> = ({ item }) => {
+  const [open, setOpen] = useState(false);
+  const { label, icon } = getToolMeta(item.name, item.args);
+  const isFailed = item.status === "failed";
+  const isDone = item.status === "done";
+
+  const renderStatus = () => {
+    if (isFailed) return <CloseCircleOutlined className="text-red-500 text-xs" />;
+    if (isDone) return <CheckCircleOutlined className="text-green-500 text-xs" />;
+    return <LoadingOutlined className="text-blue-500 text-xs" />;
+  };
+
+  // 复用 ToolCallStep 的搜索结果抽取
+  const searchResults = (() => {
+    if (item.name !== "web_search" && item.name !== "tavily_search" && item.name !== "search_web_tool")
+      return null;
+    const r = item.result;
+    if (Array.isArray(r)) return r;
+    if (Array.isArray(r?.results)) return r.results;
+    // 后端 web_search 工具有可能返回 JSON 字符串
+    if (typeof r === "string") {
+      try {
+        const parsed = JSON.parse(r);
+        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed?.results)) return parsed.results;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  })();
+
+  return (
+    <div className="border-l-2 border-gray-100 pl-2 py-0.5">
+      <div
+        className="flex items-center gap-1.5 cursor-pointer select-none"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <CaretRightOutlined
+          className={`text-[10px] text-gray-400 transition-transform ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <span className="shrink-0">{icon}</span>
+        <span className="text-xs text-gray-600 truncate flex-1">{label}</span>
+        {renderStatus()}
+      </div>
+      {open && (
+        <div className="mt-1 ml-4 text-xs space-y-1">
+          {searchResults && searchResults.length > 0 && (
+            <ul className="bg-[#f4f4f4] rounded p-1.5 space-y-0.5 list-none">
+              {searchResults.slice(0, 6).map((r: any, i: number) => (
+                <li key={i} className="truncate">
+                  <a
+                    href={r.url || r.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gray-600 hover:text-blue-600"
+                  >
+                    {r.title || r.url || r.sourceUrl || "未命名"}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!searchResults && item.args && (
+            <pre className="bg-[#f4f4f4] text-gray-600 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all max-h-24">
+              {(() => {
+                try {
+                  return JSON.stringify(item.args, null, 2);
+                } catch {
+                  return String(item.args);
+                }
+              })()}
+            </pre>
+          )}
+          {item.errorMessage && (
+            <div className="text-red-500">错误：{item.errorMessage}</div>
+          )}
         </div>
       )}
     </div>

@@ -15,3 +15,9 @@ export {
 } from './registry';
 export type { SubagentConfig } from './config';
 export { generalPurposeConfig } from './builtins/general-purpose';
+export {
+  SubagentReportSchema,
+  SUBAGENT_REPORT_FORMAT_INSTRUCTION,
+  extractSubagentReport,
+} from './schema';
+export type { SubagentReport } from './schema';
