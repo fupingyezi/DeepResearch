@@ -1,6 +1,6 @@
-import { create } from "zustand";
-import type { ChatMessageType, ChatSessionType } from "@/types";
-import { UUIDTypes } from "uuid";
+import { create } from 'zustand';
+import type { ChatMessageType, ChatSessionType } from '@/types';
+import { UUIDTypes } from 'uuid';
 
 export interface ConversationState {
   isChating: boolean;
@@ -13,15 +13,10 @@ export interface ConversationState {
   setShouldAutoScroll: (shouldAutoScroll: boolean) => void;
   intialChatSessions: (chatSessions: ChatSessionType[]) => void;
   addChatSession: (chatSession: ChatSessionType) => void;
-  updateChatSession: (
-    chatSession: ChatSessionType | null,
-    op: "edit" | "delete"
-  ) => void;
+  updateChatSession: (chatSession: ChatSessionType | null, op: 'edit' | 'delete') => void;
   setCurrentSessionId: (sessionId: UUIDTypes) => void;
   setCurrentMessages: (chatMessages: ChatMessageType[]) => void;
-  updateCurrentMessages: (
-    ChatMessages: ChatMessageType | ChatMessageType[]
-  ) => void;
+  updateCurrentMessages: (ChatMessages: ChatMessageType | ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
   abortCurrentChat: () => void;
 }
@@ -30,7 +25,7 @@ const useConversationStore = create<ConversationState>((set) => ({
   isChating: false,
   shouldAutoScroll: false,
   chatSessions: [],
-  currentSessionId: "",
+  currentSessionId: '',
   currentMessages: [],
   currentAbortController: null,
   setIsChating: (isChating) =>
@@ -41,9 +36,7 @@ const useConversationStore = create<ConversationState>((set) => ({
     set((state) =>
       // 值未变时不返回新对象，避免触发不必要的订阅刷新（与 scrollTo 配合时
       // 会形成「scrollTo→onScroll→setShouldAutoScroll(true)→re-render」的回路）
-      state.shouldAutoScroll === shouldAutoScroll
-        ? {}
-        : { shouldAutoScroll }
+      state.shouldAutoScroll === shouldAutoScroll ? {} : { shouldAutoScroll },
     ),
   intialChatSessions: (chatSessions) =>
     set(() => ({
@@ -56,16 +49,14 @@ const useConversationStore = create<ConversationState>((set) => ({
   updateChatSession: (chatSession, op) =>
     set((state) => {
       if (!chatSession) return {};
-      if (op === "edit") {
-        const otherSessions = state.chatSessions.filter(
-          (session) => session.id !== chatSession.id
-        );
+      if (op === 'edit') {
+        const otherSessions = state.chatSessions.filter((session) => session.id !== chatSession.id);
         return {
           chatSessions: [chatSession, ...otherSessions],
         };
-      } else if (op === "delete") {
+      } else if (op === 'delete') {
         const filteredSessions = state.chatSessions.filter(
-          (session) => session.id !== chatSession.id
+          (session) => session.id !== chatSession.id,
         );
 
         // 如果当前会话被删除，重置
@@ -73,7 +64,7 @@ const useConversationStore = create<ConversationState>((set) => ({
         let newCurrentMessages: ChatMessageType[] = state.currentMessages;
 
         if (state.currentSessionId === chatSession.id) {
-          newcurrentSessionId = "";
+          newcurrentSessionId = '';
           newCurrentMessages = [];
         }
 
@@ -89,8 +80,7 @@ const useConversationStore = create<ConversationState>((set) => ({
     set(() => ({
       currentSessionId: sessionId,
     })),
-  setCurrentMessages: (chatMessages) =>
-    set(() => ({ currentMessages: chatMessages })),
+  setCurrentMessages: (chatMessages) => set(() => ({ currentMessages: chatMessages })),
   updateCurrentMessages: (chatMessages) =>
     set((state) => {
       if (Array.isArray(chatMessages)) {
@@ -103,8 +93,7 @@ const useConversationStore = create<ConversationState>((set) => ({
         };
       }
     }),
-  setAbortController: (abortController) =>
-    set(() => ({ currentAbortController: abortController })),
+  setAbortController: (abortController) => set(() => ({ currentAbortController: abortController })),
   abortCurrentChat: () =>
     set((state) => {
       if (state.currentAbortController) {

@@ -1,4 +1,4 @@
-import { ConversationState } from "@/store";
+import { ConversationState } from '@/store';
 
 /**
  * 统一聊天入口参数。
@@ -8,7 +8,7 @@ export interface chatWithAgentProps extends ConversationState {
   inputValue: string;
   hasFiles?: boolean;
   uploadedFiles?: any[];
-  callingMode: "direct" | "reEditCall" | "recall" | "resume";
+  callingMode: 'direct' | 'reEditCall' | 'recall' | 'resume';
   isResume?: boolean;
   /** 模型选择 */
   modelKey?: string;
@@ -19,6 +19,6 @@ export interface chatWithAgentProps extends ConversationState {
  */
 export interface reChatWithAgentProps extends ConversationState {
   inputValue: string;
-  callingMode: "reEditCall" | "recall";
+  callingMode: 'reEditCall' | 'recall';
   modelKey?: string;
 }

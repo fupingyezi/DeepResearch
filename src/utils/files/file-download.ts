@@ -1,16 +1,9 @@
-import { jsPDF } from "jspdf";
+import { jsPDF } from 'jspdf';
 
-export const downloadFile = (
-  content: string | Blob,
-  filename: string,
-  mimeType: string
-) => {
-  const blob =
-    typeof content === "string"
-      ? new Blob([content], { type: mimeType })
-      : content;
+export const downloadFile = (content: string | Blob, filename: string, mimeType: string) => {
+  const blob = typeof content === 'string' ? new Blob([content], { type: mimeType }) : content;
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
+  const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
@@ -20,14 +13,14 @@ export const downloadFile = (
 };
 
 export const handleDownloadMD = (text: string) => {
-  downloadFile(text, "report.md", "text/markdown;charset=utf-8");
+  downloadFile(text, 'report.md', 'text/markdown;charset=utf-8');
 };
 
 export const handleDownloadPDF = (text: string) => {
   const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -51,7 +44,7 @@ export const handleDownloadPDF = (text: string) => {
     y += lineHeight;
   }
 
-  doc.save("report.pdf");
+  doc.save('report.pdf');
 
   //   const pdfBlob = doc.output("blob");
   //   downloadFile(pdfBlob, "report.pdf", "application/pdf");
@@ -72,9 +65,9 @@ export const handleDownloadDOC = (text: string) => {
     </html>
   `;
 
-  const blob = new Blob(["\ufeff", htmlContent], {
-    type: "application/msword",
+  const blob = new Blob(['\ufeff', htmlContent], {
+    type: 'application/msword',
   });
 
-  downloadFile(blob, "report.doc", "application/msword");
+  downloadFile(blob, 'report.doc', 'application/msword');
 };

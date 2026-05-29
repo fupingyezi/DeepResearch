@@ -9,7 +9,7 @@ import type {
   MessageToolType,
   SupportDownloadFileType,
   MessageToolBarProps,
-} from "./webview";
+} from './webview';
 
 // 数据定义相关
 import type {
@@ -23,13 +23,10 @@ import type {
   MessageArtifact,
   SubagentToolCall,
   SubagentStructuredReport,
-} from "./chat-info-define";
+} from './chat-info-define';
 
 //函数参数相关
-import type {
-  chatWithAgentProps,
-  reChatWithAgentProps,
-} from "./chat-utils-params";
+import type { chatWithAgentProps, reChatWithAgentProps } from './chat-utils-params';
 
 export {
   FileItemsProps,

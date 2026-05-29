@@ -4,7 +4,7 @@ import { SUBAGENT_REPORT_FORMAT_INSTRUCTION } from '../schema';
 
 /**
  * general-purpose subagent
- * 
+ *
  * 角色：通用任务执行子 agent。lead-agent 通过 `task("general-purpose", ...)`
  * 把"可分解的复杂子任务"委派给它执行。
  *

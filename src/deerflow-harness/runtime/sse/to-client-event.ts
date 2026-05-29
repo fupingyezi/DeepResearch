@@ -31,9 +31,6 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
   const { agentId } = event;
 
   switch (event.eventType) {
-    /* -------------------------------------------------------------------- */
-    /*  生命周期                                                            */
-    /* -------------------------------------------------------------------- */
     case AgentEventType.LIFECYCLE: {
       if (event.payload.stage === 'start') {
         const sessionId = (event.metadata?.sessionId as string | undefined) ?? undefined;
@@ -43,25 +40,15 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
           sessionId ? { sessionId } : {},
         );
       }
-      return createClientAgentEvent(
-        ClientAgentEventType.END,
-        agentId,
-        {} as Record<string, never>,
-      );
+      return createClientAgentEvent(ClientAgentEventType.END, agentId, {} as Record<string, never>);
     }
 
-    /* -------------------------------------------------------------------- */
-    /*  LLM stream                                                          */
-    /* -------------------------------------------------------------------- */
     case AgentEventType.LLM_STREAM:
       return createClientAgentEvent(ClientAgentEventType.STREAM_CHUNK, agentId, {
         text: event.payload.text,
         reasoning: event.payload.reasoning,
       });
 
-    /* -------------------------------------------------------------------- */
-    /*  Tool call                                                           */
-    /* -------------------------------------------------------------------- */
     case AgentEventType.TOOL_CALL_START:
       return createClientAgentEvent(ClientAgentEventType.TOOL_CALL, agentId, {
         toolCallId: event.payload.toolCallId,
@@ -78,9 +65,6 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         errorMessage: event.payload.errorMessage,
       });
 
-    /* -------------------------------------------------------------------- */
-    /*  State update / Human interrupt                                      */
-    /* -------------------------------------------------------------------- */
     case AgentEventType.STATE_UPDATE:
       return createClientAgentEvent(ClientAgentEventType.STATE_UPDATE, agentId, {
         stateType: event.payload.stateType,
@@ -93,9 +77,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         details: event.payload.details,
       });
 
-    /* -------------------------------------------------------------------- */
-    /*  Task progress —— 折叠所有 task_* 事件                                */
-    /* -------------------------------------------------------------------- */
+    // 折叠所有 task_* 内部事件为 TASK_PROGRESS
     case AgentEventType.TASK_PROGRESS: {
       const p = event.payload as TaskProgressPayload;
       return createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, agentId, p);
@@ -124,7 +106,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         taskId: event.payload.taskId,
         status: 'completed',
         result: event.payload.result,
-        structured: (event.payload as any).structured ?? null,
+        structured: (event.payload as { structured?: unknown }).structured ?? null,
       });
 
     case AgentEventType.TASK_FAILED:
@@ -148,9 +130,6 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         error: event.payload.error,
       });
 
-    /* -------------------------------------------------------------------- */
-    /*  Error                                                               */
-    /* -------------------------------------------------------------------- */
     case AgentEventType.ERROR:
       return createClientAgentEvent(ClientAgentEventType.ERROR, agentId, {
         errorCode: event.payload.errorCode,
@@ -158,9 +137,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         recoverable: event.payload.recoverable,
       });
 
-    /* -------------------------------------------------------------------- */
-    /*  Drop —— 内部观测事件，不发往前端                                      */
-    /* -------------------------------------------------------------------- */
+    // 内部观测事件 → drop
     case AgentEventType.LLM_COMPLETE:
     case AgentEventType.HUMAN_RESUME:
     case AgentEventType.NODE_ENTER:

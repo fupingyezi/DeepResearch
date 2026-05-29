@@ -1,1 +1,1 @@
-export * from "./client-event";
+export * from './client-event';

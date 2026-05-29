@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * ViewImageMiddleware（位序 10 / features.vision 启用）
+ * ViewImageMiddleware（features.vision 启用）
  *
  * 职责（占位）：
  * - 处理 ThreadState.viewedImages：把图片消息转换为多模态 content 注入模型；

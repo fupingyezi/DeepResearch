@@ -62,10 +62,11 @@ export class PgRunStore implements RunStore {
     if (!ALLOWED_STATUS.has(status)) {
       throw new Error(`invalid run status: ${status}`);
     }
-    await query(
-      `update runs set status = $1, error = $2, updated_at = now() where run_id = $3`,
-      [status, error ?? null, run_id],
-    );
+    await query(`update runs set status = $1, error = $2, updated_at = now() where run_id = $3`, [
+      status,
+      error ?? null,
+      run_id,
+    ]);
   }
 
   async get(run_id: string): Promise<Run | null> {

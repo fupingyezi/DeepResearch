@@ -5,10 +5,7 @@ import { BaseCheckpointSaver } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
-import {
-  SYSTEM_PROMPT,
-  buildLeadAgentSystemPrompt,
-} from './agents/lead-agent';
+import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
@@ -37,23 +34,18 @@ function buildConfigKey(modelConfig: ModelConfig, opts: RuntimeRunOptions): Agen
 
 /**
  * 共享 AsyncLocalStorage：与 runtime/context.ts 中的 als 是同一对象。
- * 这里通过 import 拿到 getContext，再用 als.run 包一层把 modelConfig 注入到
- * 当前 RuntimeContext 中，供 task-tool 在 inherit 模式下读取。
- *
- * 注：runtime/context.ts 的 als 是模块级私有变量，无法跨模块共享。
- * 我们通过 getContext() 拿到外层 ctx 后，使用本地 als 嵌套一层 store
- * 是不可行的。改为：DeerFlowClient.stream() 直接修改外层 ctx 的字段（als
- * 的 store 是引用类型），让 currentModelConfig 在同一 ctx 上可见。
+ * 这里通过 import 拿到 getContext，再原地写 RuntimeContext 的字段，
+ * 把当前 modelConfig 注入给 task-tool 在 'inherit' 模式下读取
+ * （als store 是引用类型，子调用链共享同一对象）。
  */
 
 /**
  * DeerFlowClient
  *
- * 进程级单例（见 app/api/threads/_service.ts）。对齐 deer-flow 2.0：
- * - lead-agent 永远启用 subagent 能力（taskTool + subagentLimitMiddleware
- *   始终注入），不再有 plan-mode；
- * - 每轮 stream 把当前 modelConfig 写入 RuntimeContext.currentModelConfig，
- *   供 'inherit' 模式的 subagent（如 general-purpose）复用。
+ * 进程级单例（见 app/api/threads/_service.ts）。lead-agent 永远启用 subagent
+ * 能力（taskTool + subagentLimitMiddleware 始终注入）。每轮 stream 把当前
+ * modelConfig 写入 RuntimeContext.currentModelConfig，供 'inherit' 模式的
+ * subagent（如 general-purpose）复用。
  */
 export class DeerFlowClient {
   /** Agent 实例缓存：按 RuntimeRunOptions 派生的 key 分组缓存。 */
@@ -98,7 +90,6 @@ export class DeerFlowClient {
 
   /**
    * 计算本轮 stream 的运行期开关：以 baseOptions 为底。
-   * 不再读取 metadata 中的 is_plan_mode / subagent_enabled / agent_name 三开关。
    */
   private resolveRuntimeOptions(_metadata?: Record<string, any>): RuntimeRunOptions {
     const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
@@ -188,10 +179,8 @@ export class DeerFlowClient {
   /**
    * 向 agent 发送消息并以 ClientAgentEvent 异步生成器的形式返回事件流。
    *
-   * 与旧实现的差异：
-   * - 不再读 metadata 上的 is_plan_mode / subagent_enabled / agent_name；
-   * - 把当前 modelConfig 写入 RuntimeContext.currentModelConfig，供
-   *   'inherit' 模式的 subagent（如 general-purpose）在 SubagentExecutor 中复用。
+   * 每轮把当前 modelConfig 写入 RuntimeContext.currentModelConfig，供
+   * 'inherit' 模式的 subagent（如 general-purpose）在 SubagentExecutor 中复用。
    */
   async *stream(
     message: string,
@@ -396,16 +385,12 @@ export class DeerFlowClient {
 
       // 把 task-tool 通过 LangGraph custom writer 推送的 task_* payload
       // 翻译为 internal AgentEvent，再由 toClientAgentEvent 映射成对外协议。
-      // STATE_UPDATE / HUMAN_INTERRUPT 事件枚举保留以兼容旧 SSE 协议，
-      // 但新链路（无 plan-mode）不会再触发它们。
-      const handleCustomPayload = function* (
-        raw: any,
-      ): Generator<ClientAgentEvent> {
+      const handleCustomPayload = function* (raw: any): Generator<ClientAgentEvent> {
         if (!raw || typeof raw !== 'object') return;
         const t = raw.type;
         const meta = { sessionId: effectiveThreadId, ...metadata };
 
-        // —— task_*（taskTool 推送的 subagent 进度） ——
+        // task_*（taskTool 推送的 subagent 进度）
         const taskId: string = raw.task_id ?? '';
         switch (t) {
           case 'task_started': {
@@ -452,7 +437,7 @@ export class DeerFlowClient {
                   result: raw.result ?? null,
                   // structured: 来自 subagent final-report fenced block 的解析结果
                   structured: raw.structured ?? null,
-                } as any,
+                },
                 meta,
               ),
             );
@@ -516,7 +501,7 @@ export class DeerFlowClient {
                         toolSuccess: raw.success,
                         toolErrorMessage: raw.error_message,
                       }),
-                } as any,
+                },
                 meta,
               ),
             );
@@ -560,7 +545,8 @@ export class DeerFlowClient {
                       const tcs = (m?.tool_calls ?? []).map((tc: any) => `${tc.name}#${tc.id}`);
                       return `ai(tool_calls=[${tcs.join(',')}])`;
                     }
-                    if (tt === 'tool') return `tool(id=${m?.tool_call_id},status=${m?.status ?? 'ok'})`;
+                    if (tt === 'tool')
+                      return `tool(id=${m?.tool_call_id},status=${m?.status ?? 'ok'})`;
                     return tt;
                   })
                   .join(', ')
@@ -574,7 +560,7 @@ export class DeerFlowClient {
             if (msgType === 'ai') {
               // updates 模式的完整 AIMessage 标志 agent step 结束，
               // 刷缓冲并按 tool_calls 有无决定分类
-              const hasToolCalls = !!(msg?.tool_calls?.length);
+              const hasToolCalls = !!msg?.tool_calls?.length;
               if (pendingContent) {
                 yield* flushPendingContent(hasToolCalls || stepHasToolCalls);
               }

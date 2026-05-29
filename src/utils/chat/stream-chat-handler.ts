@@ -94,7 +94,7 @@ export class StreamChatHandler {
     await this.executeStreamRequest();
   }
 
-  // -------------------- session / messages bootstrap --------------------
+  // session / messages 初始化
 
   private async handleSession(): Promise<void> {
     this.sessionId = this.config.sessionId || '';
@@ -216,7 +216,7 @@ export class StreamChatHandler {
     this.artifact = last?.artifact ?? null;
   }
 
-  // -------------------- SSE --------------------
+  // SSE 处理
 
   private async executeStreamRequest(): Promise<void> {
     try {
@@ -319,7 +319,7 @@ export class StreamChatHandler {
         }
 
         case ClientAgentEventType.HUMAN_INTERRUPT: {
-          this.timeline.interrupt = event.payload as any;
+          this.timeline.interrupt = event.payload;
           this.timeline.status = 'interrupt';
           this.flushMessage();
           break;
@@ -356,7 +356,7 @@ export class StreamChatHandler {
     }
   }
 
-  // -------------------- timeline updates --------------------
+  // timeline 更新
 
   /** 把 reasoning 文本合并/追加到最后一个 reasoning step */
   private appendReasoning(text: string): void {
@@ -367,10 +367,7 @@ export class StreamChatHandler {
         { ...last, text: last.text + text },
       ];
     } else {
-      this.timeline.steps = [
-        ...this.timeline.steps,
-        { kind: 'reasoning', id: uuidv4(), text },
-      ];
+      this.timeline.steps = [...this.timeline.steps, { kind: 'reasoning', id: uuidv4(), text }];
     }
     this.timeline.status = 'processing';
   }
@@ -392,9 +389,7 @@ export class StreamChatHandler {
       (s) => s.kind === 'subagent_task' && s.taskId === taskId,
     );
     const prev =
-      idx === -1
-        ? null
-        : (this.timeline.steps[idx] as Extract<CoTStep, { kind: 'subagent_task' }>);
+      idx === -1 ? null : (this.timeline.steps[idx] as Extract<CoTStep, { kind: 'subagent_task' }>);
 
     // 子工具调用：维护 children 数组，不动父任务状态
     if (incomingStatus === 'tool_call' || incomingStatus === 'tool_result') {
@@ -612,7 +607,7 @@ export class StreamChatHandler {
     };
   }
 
-  // -------------------- 启发式 artifact 抽取 --------------------
+  // 启发式 artifact 抽取
 
   /**
    * 精确 + 启发式 artifact 抽取：
@@ -700,9 +695,14 @@ export class StreamChatHandler {
     if (this.rafHandle !== null) return;
 
     const schedule =
-      typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+      typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
         ? window.requestAnimationFrame.bind(window)
-        : (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16) as unknown as number;
+        : (cb: FrameRequestCallback): number => {
+            // SSR 环境：用 setTimeout 模拟 16ms 一帧；Node setTimeout 返回 Timeout，
+            // 转成 number 以满足 requestAnimationFrame 的返回类型契约。
+            const id = setTimeout(() => cb(performance.now()), 16);
+            return Number(id);
+          };
 
     this.rafHandle = schedule(() => {
       this.rafHandle = null;
@@ -716,9 +716,12 @@ export class StreamChatHandler {
   private flushMessageSync(): void {
     if (this.rafHandle !== null) {
       const cancel =
-        typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function"
+        typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function'
           ? window.cancelAnimationFrame.bind(window)
-          : (id: number) => clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+          : (id: number): void => {
+              // SSR 环境：clearTimeout 在 Node 期望 Timeout 类型，但运行时接受数字 id
+              clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+            };
       cancel(this.rafHandle);
       this.rafHandle = null;
     }
@@ -745,7 +748,7 @@ export class StreamChatHandler {
     this.config.setCurrentMessages(updateMessages);
   }
 
-  // -------------------- error / cleanup --------------------
+  // error / cleanup
 
   private async handleError(error: any): Promise<void> {
     if (error.name === 'AbortError' || error.name === 'AGENT_STREAM_ABORTED') {

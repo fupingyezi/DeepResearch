@@ -2,23 +2,21 @@ import type { AgentMiddleware } from 'langchain';
 
 /**
  * withCallLog
- * ─────────────────────────────────────────────────────────────
+ *
  * 把任意 AgentMiddleware 的 hook 包一层调用日志：
  *   [mw:<MiddlewareName>] <hook> ▶ enter
  *   [mw:<MiddlewareName>] <hook> ◀ exit (Xms)
  *   [mw:<MiddlewareName>] <hook> ✗ error (Xms): <message>
  *
  * 设计要点：
- * 1. 不修改原中间件文件，只在装配阶段统一装饰，避免 14 个中间件散落 console.log。
- * 2. 仅装饰真实存在的 hook —— 占位中间件没有任何 hook，自然不会产出噪声。
- * 3. wrapModelCall / wrapToolCall 的 handler 也会被包一层："before-handler" / "after-handler"，
- *    便于看清同一次模型调用里"进入了哪几层 wrap、handler 真正耗时在哪一层"。
+ * 1. 不修改原中间件文件，只在装配阶段统一装饰，避免散落 console.log。
+ * 2. 仅装饰真实存在的 hook —— 占位中间件没有任何 hook，不会产出噪声。
+ * 3. wrapModelCall / wrapToolCall 的 handler 也会被包一层（before-handler / after-handler），
+ *    便于看清"进入了哪几层 wrap、handler 真正耗时在哪一层"。
  * 4. 通过 env `MW_TRACE` 关闭（设为 "0"/"false"），默认开启。
  * 5. 不改变任何运行时契约：返回值、抛出异常、引用透明性都与原 hook 一致。
  *
- * 已知限制：
- * - 我们无法保证日志在分布式上下文里"按时间线序"，仅保证单个 Node 进程内有序。
- * - 大对象不会被序列化进日志，避免 token / 性能开销；只打 hook 名 + 耗时 + 错误摘要。
+ * 大对象不会被序列化进日志，避免 token / 性能开销；只打 hook 名 + 耗时 + 错误摘要。
  */
 
 const HOOKS = [
@@ -73,16 +71,16 @@ export function withCallLog<M extends AgentMiddleware>(
   const enabled = options.enabled ?? isTraceEnabledByEnv();
   if (!enabled) return middleware;
 
-  // AgentMiddleware 是一个对象（含 name + 各 hook 字段）。
-  // 我们浅拷贝并覆盖其上存在的 hook。
-  const mw = middleware as any as Record<string, any> & { name?: string };
+  // AgentMiddleware 是带有 hook 字段的对象；为了通用地遍历与覆写其上的 hook，
+  // 这里需要把它当成一个字符串索引的对象处理（双层断言绕过结构性类型差异）。
+  const mw = middleware as unknown as Record<string, unknown> & { name?: string };
   const mwName = mw.name || 'UnknownMiddleware';
   const logger = options.logger ?? console;
   const prefix = options.prefix ?? ((n: string) => `[mw:${n}]`);
   const tag = prefix(mwName);
 
-  // 用浅拷贝产出一个新对象，避免污染原中间件实例（可能被多处共享）。
-  const decorated: Record<string, any> = { ...mw };
+  // 浅拷贝产出新对象，避免污染原中间件实例（可能被多处共享）
+  const decorated: Record<string, unknown> = { ...mw };
 
   for (const hook of HOOKS) {
     const original = mw[hook];
@@ -130,10 +128,7 @@ export function withCallLog<M extends AgentMiddleware>(
       const elapsed = startTimer();
       logger.info(`${tag} ${hook} ▶ enter`);
       try {
-        const result = await (original as (s: any, r: any) => any | Promise<any>)(
-          state,
-          runtime,
-        );
+        const result = await (original as (s: any, r: any) => any | Promise<any>)(state, runtime);
         logger.info(`${tag} ${hook} ◀ exit (${elapsed()})`);
         return result;
       } catch (err) {
@@ -143,7 +138,8 @@ export function withCallLog<M extends AgentMiddleware>(
     };
   }
 
-  return decorated as any as M;
+  // 通过通用对象重新还原为原中间件的强类型 M（hook 形态完全一致）
+  return decorated as unknown as M;
 }
 
 /** 批量装饰，保持顺序与引用稳定（每个 mw 都被替换为新对象）。 */

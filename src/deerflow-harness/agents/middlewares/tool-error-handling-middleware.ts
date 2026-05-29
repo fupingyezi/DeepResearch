@@ -3,7 +3,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { isGraphBubbleUp } from '@langchain/langgraph';
 
 /**
- * ToolErrorHandlingMiddleware（位序 5 / 始终启用）
+ * ToolErrorHandlingMiddleware（始终启用）
  *
  * 职责：
  * - 通过 wrapToolCall 捕获工具执行异常，转换为带 status='error' 的 ToolMessage，

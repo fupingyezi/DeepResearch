@@ -20,8 +20,8 @@ export { taskTool } from './builtins';
 export interface GetAvailableToolsOptions {
   /** 工具名白名单（按工具的 `name` 属性匹配）；缺省返回所有非 task 工具。 */
   groups?: string[];
-  /** 是否允许装载 task 工具（subagent 内部应强制 false）。 */
-  subagentEnabled?: boolean;
+  /** 是否允许装载 task 工具（subagent 内部应强制 false，杜绝套娃）。 */
+  allowTaskTool?: boolean;
   /** 预留：模型名称，部分工具可能根据模型决定是否启用。 */
   modelName?: string;
 }
@@ -42,13 +42,13 @@ function buildToolRegistry(): Map<string, StructuredToolInterface> {
 /**
  * 按 opts 返回符合条件的工具列表。
  *
- * - subagentEnabled=false 时强制移除 `task` 工具，杜绝 subagent → subagent 套娃。
+ * - allowTaskTool=false 时强制移除 `task` 工具，杜绝 subagent → subagent 套娃。
  * - groups 命中时按白名单过滤；缺省时返回除 `task` 外的全部工具。
  */
 export async function getAvailableTools(
   opts: GetAvailableToolsOptions = {},
 ): Promise<StructuredToolInterface[]> {
-  const { groups, subagentEnabled } = opts;
+  const { groups, allowTaskTool } = opts;
   const registry = buildToolRegistry();
 
   const wanted: StructuredToolInterface[] = [];
@@ -65,7 +65,7 @@ export async function getAvailableTools(
     }
   }
 
-  if (subagentEnabled === false) {
+  if (allowTaskTool === false) {
     return wanted.filter((t) => (t as { name?: string }).name !== 'task');
   }
   return wanted;

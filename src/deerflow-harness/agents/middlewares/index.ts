@@ -4,15 +4,15 @@
  *  0. ThreadDataMiddleware              (基础设施)
  *  1. UploadsMiddleware                 (基础设施)
  *  2. SandboxMiddleware                 (基础设施 / features.sandbox)
- *  3. ToolCallIntegrityMiddleware       (始终启用) —— 统一处理消息层面的工具调用完整性
+ *  3. ToolCallIntegrityMiddleware       (始终启用)
  *  4. GuardrailMiddleware               (features.guardrail)
  *  5. ToolErrorHandlingMiddleware       (始终启用)
  *  6. SummarizationMiddleware           (features.summarization)
- *  7. TodoMiddleware                    (plan_mode 参数)
+ *  7. TodoMiddleware                    (todo)
  *  8. TitleMiddleware                   (features.autoTitle)
  *  9. MemoryMiddleware                  (features.memory)
  * 10. ViewImageMiddleware               (features.vision)
- * 11. SubagentLimitMiddleware           (features.subagent)
+ * 11. SubagentLimitMiddleware           (始终启用)
  * 12. LoopDetectionMiddleware           (始终启用)
  * 13. ClarificationMiddleware           (始终最后)
  *
@@ -20,12 +20,11 @@
  * - ToolCallIntegrity (3) **先于** ToolErrorHandling (5)：在到达 ToolNode
  *   派发之前清理掉所有"消息层面"的工具调用问题（悬挂 tool_call、未知工具
  *   引用），从根上杜绝 LangGraph 抛出 "Tool not found" 之类异常。
- *   ToolErrorHandling 的 wrapToolCall 处理的是 *工具自身执行时* 抛出的
+ *   ToolErrorHandling.wrapToolCall 处理的是 *工具自身执行时* 抛出的
  *   异常，定位不同、不可互替。
  *
  * 添加新的"消息层面工具调用完整性问题"请优先实现 IntegrityRule 注册到
- * ToolCallIntegrityMiddleware（见 tool-call-integrity/rules/），不要再
- * 新增同类中间件。
+ * ToolCallIntegrityMiddleware（见 tool-call-integrity/rules/）。
  */
 
 export { threadDataMiddleware } from './thread-data-middleware';
@@ -36,11 +35,7 @@ export {
   createToolCallIntegrityMiddleware,
   DEFAULT_INTEGRITY_RULES,
 } from './tool-call-integrity';
-export type {
-  IntegrityRule,
-  RuleContext,
-  ToolCallIntegrityOptions,
-} from './tool-call-integrity';
+export type { IntegrityRule, RuleContext, ToolCallIntegrityOptions } from './tool-call-integrity';
 export { guardrailMiddleware } from './guardrail-middleware';
 export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 export { summarizationMiddleware } from './summarization-middleware';

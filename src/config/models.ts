@@ -1,6 +1,12 @@
 import { ModelConfig, ModelProvider } from '@/deerflow-harness';
 
-export type ModelPresetKey = 'qwen-max' | 'qwen-turbo' | 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'openai-4o' | 'moonshot-v1';
+export type ModelPresetKey =
+  | 'qwen-max'
+  | 'qwen-turbo'
+  | 'deepseek-v4-flash'
+  | 'deepseek-v4-pro'
+  | 'openai-4o'
+  | 'moonshot-v1';
 
 export interface ModelPreset {
   key: ModelPresetKey;
@@ -61,9 +67,7 @@ export const MODEL_PRESETS: Record<ModelPresetKey, ModelPreset> = {
  * 从 MODEL_PRESETS 构建 ModelConfig
  * 支持 preset key 或完全自定义的 ModelConfig
  */
-export function resolveModelConfig(
-  modelKeyOrConfig?: ModelPresetKey | ModelConfig,
-): ModelConfig {
+export function resolveModelConfig(modelKeyOrConfig?: ModelPresetKey | ModelConfig): ModelConfig {
   // 默认使用 deepseek-v4-flash
   if (!modelKeyOrConfig) {
     return buildModelConfigFromPreset('deepseek-v4-flash');
@@ -73,7 +77,9 @@ export function resolveModelConfig(
   if (typeof modelKeyOrConfig === 'string') {
     const preset = MODEL_PRESETS[modelKeyOrConfig as ModelPresetKey];
     if (!preset) {
-      console.warn(`[resolveModelConfig] Unknown preset: ${modelKeyOrConfig}, fallback to deepseek-v4-flash`);
+      console.warn(
+        `[resolveModelConfig] Unknown preset: ${modelKeyOrConfig}, fallback to deepseek-v4-flash`,
+      );
       return buildModelConfigFromPreset('deepseek-v4-flash');
     }
     return buildModelConfigFromPreset(preset.key);
@@ -89,7 +95,9 @@ export function resolveModelConfig(
 export function buildModelConfigFromPreset(presetKey: ModelPresetKey): ModelConfig {
   const preset = MODEL_PRESETS[presetKey];
   if (!preset) {
-    console.warn(`[buildModelConfigFromPreset] Unknown preset: ${presetKey}, fallback to deepseek-v4-flash`);
+    console.warn(
+      `[buildModelConfigFromPreset] Unknown preset: ${presetKey}, fallback to deepseek-v4-flash`,
+    );
     return buildModelConfigFromPreset('deepseek-v4-flash');
   }
 

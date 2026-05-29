@@ -25,6 +25,19 @@ export interface SubagentExecutorOptions {
   inheritedModelConfig?: ModelConfig;
 }
 
+interface RawMessageChunk {
+  _getType?: () => string;
+  type?: string;
+  content?: unknown;
+  tool_calls?: Array<{ id?: string; name?: string; args?: unknown }>;
+  tool_call_chunks?: Array<{ index?: number; id?: string; name?: string; args?: string }>;
+  tool_call_id?: string;
+  name?: string;
+  status?: string;
+}
+
+const asRawMessage = (msg: unknown): RawMessageChunk => (msg ?? {}) as RawMessageChunk;
+
 /**
  * SubagentExecutor
  *
@@ -86,7 +99,7 @@ export class SubagentExecutor {
       //   其它值          → 按 modelName 走默认 createChatModel（baseUrl/apiKey 取 env）
       const isInherit = config.model === 'inherit' || !config.model;
       const modelConfig: ModelConfig = isInherit
-        ? this.inheritedModelConfig ?? { modelName: 'inherit' }
+        ? (this.inheritedModelConfig ?? { modelName: 'inherit' })
         : { modelName: config.model };
       if (isInherit && !this.inheritedModelConfig && process.env.NODE_ENV !== 'production') {
         console.warn(
@@ -150,15 +163,14 @@ export class SubagentExecutor {
 
         if (mode === 'messages') {
           // payload 形如 [msgChunk, metadata]
-          const msgChunk = Array.isArray(payload) ? payload[0] : undefined;
-          if (!msgChunk) continue;
-          const msgType = (msgChunk as any)?._getType?.() ?? (msgChunk as any)?.type;
+          const msgChunkRaw = Array.isArray(payload) ? payload[0] : undefined;
+          if (!msgChunkRaw) continue;
+          const msgChunk = asRawMessage(msgChunkRaw);
+          const msgType = msgChunk._getType?.() ?? msgChunk.type;
           if (msgType !== 'ai') continue;
 
-          // 5.a) 累积 tool_call 分片
-          const tcChunks = (msgChunk as any).tool_call_chunks as
-            | Array<{ index?: number; id?: string; name?: string; args?: string }>
-            | undefined;
+          // 累积 tool_call 分片
+          const tcChunks = msgChunk.tool_call_chunks;
           if (Array.isArray(tcChunks) && tcChunks.length > 0) {
             for (const piece of tcChunks) {
               const idx = piece.index ?? 0;
@@ -183,12 +195,12 @@ export class SubagentExecutor {
             continue;
           }
 
-          // 5.b) 完整 AI 消息（可能含 tool_calls 或文本）
-          const content = (msgChunk as any).content;
+          // 完整 AI 消息（可能含 tool_calls 或文本）
+          const content = msgChunk.content;
           const hasText =
             (typeof content === 'string' && content.trim().length > 0) ||
             (Array.isArray(content) && content.length > 0);
-          const toolCalls = (msgChunk as any).tool_calls;
+          const toolCalls = msgChunk.tool_calls;
           const hasFinalToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
 
           if (!hasText && !hasFinalToolCalls) {
@@ -196,9 +208,9 @@ export class SubagentExecutor {
             continue;
           }
 
-          // 5.c) 拿到完整 tool_calls 时，把每个累计完成的 acc 作为 tool_call 事件 emit
-          if (hasFinalToolCalls) {
-            for (const tc of toolCalls as Array<{ id?: string; name?: string; args?: any }>) {
+          // 拿到完整 tool_calls 时，把每个累计完成的 acc 作为 tool_call 事件 emit
+          if (hasFinalToolCalls && toolCalls) {
+            for (const tc of toolCalls) {
               if (!tc?.id) continue;
               let acc = toolCallsById.get(tc.id);
               if (!acc) {
@@ -210,8 +222,8 @@ export class SubagentExecutor {
                     typeof tc.args === 'string'
                       ? tc.args
                       : tc.args
-                      ? safeJsonStringify(tc.args)
-                      : '',
+                        ? safeJsonStringify(tc.args)
+                        : '',
                   startEmitted: false,
                 };
                 toolCallsById.set(tc.id, acc);
@@ -227,9 +239,9 @@ export class SubagentExecutor {
             }
           }
 
-          // 5.d) 文本分类：含 tool_calls → reasoning（planning），否则 → 正文（最终答案）
+          // 文本分类：含 tool_calls → reasoning（planning），否则 → 正文（最终答案）
           const contentStr = typeof content === 'string' && content.trim() ? content : '';
-          // deerflow 2.0 原则：含 tool_calls 的 AI message 的 content 是"思考/规划"
+          // 含 tool_calls 的 AI message 的 content 是"思考/规划"
           if (contentStr && !hasFinalToolCalls) {
             aggregatedFinalText += contentStr;
           }
@@ -245,31 +257,32 @@ export class SubagentExecutor {
           continue;
         }
 
-        // 5.e) updates 分支：补抓 ToolMessage，发出 tool_result 事件
+        // updates 分支：补抓 ToolMessage，发出 tool_result 事件
         if (mode !== 'updates' || !payload || typeof payload !== 'object') continue;
         for (const nodeName of Object.keys(payload)) {
           const msgs = payload[nodeName]?.messages;
           if (!Array.isArray(msgs)) continue;
-          for (const msg of msgs) {
-            const t = (msg as any)?._getType?.();
+          for (const rawMsg of msgs) {
+            const msg = asRawMessage(rawMsg);
+            const t = msg._getType?.();
             if (t !== 'tool') continue;
-            const toolCallId: string = (msg as any).tool_call_id ?? '';
+            const toolCallId: string = msg.tool_call_id ?? '';
             const acc = toolCallsById.get(toolCallId);
             // 兜底：如果还没 emit 过 tool_call_start，就先补一次
             if (acc) {
               const startEvt = emitToolCallStart(acc);
               if (startEvt) yield startEvt;
             }
-            const toolName = (msg as any).name ?? acc?.toolName ?? '';
-            const status = (msg as any).status; // 'error' / undefined
+            const toolName = msg.name ?? acc?.toolName ?? '';
+            const status = msg.status; // 'error' / undefined
             yield {
               kind: 'tool_result',
               taskId,
               toolCallId,
               toolName,
-              result: (msg as any).content,
+              result: msg.content,
               success: status !== 'error',
-              errorMessage: status === 'error' ? String((msg as any).content ?? '') : undefined,
+              errorMessage: status === 'error' ? String(msg.content ?? '') : undefined,
             };
           }
         }
@@ -331,18 +344,14 @@ function slimSerializeMessage(msg: any): Record<string, any> {
     typeof msg.content === 'string'
       ? msg.content
       : Array.isArray(msg.content)
-      ? msg.content
-          .map((c: any) => (typeof c === 'string' ? c : c?.text ?? ''))
-          .join('')
-      : '';
+        ? msg.content.map((c: any) => (typeof c === 'string' ? c : (c?.text ?? ''))).join('')
+        : '';
   const toolCalls = Array.isArray(msg.tool_calls)
     ? msg.tool_calls.map((tc: any) => ({
         id: tc?.id,
         name: tc?.name,
         argKeys:
-          tc?.args && typeof tc.args === 'object'
-            ? Object.keys(tc.args).slice(0, 8)
-            : undefined,
+          tc?.args && typeof tc.args === 'object' ? Object.keys(tc.args).slice(0, 8) : undefined,
       }))
     : undefined;
   return {

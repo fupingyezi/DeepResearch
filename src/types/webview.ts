@@ -1,6 +1,6 @@
-import React, { ReactNode } from "react";
-import { ChatMessageType } from "./chat-info-define";
-import { UploadedFile } from "./chat-info-define";
+import React, { ReactNode } from 'react';
+import { ChatMessageType } from './chat-info-define';
+import { UploadedFile } from './chat-info-define';
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;
@@ -40,7 +40,7 @@ export interface ChatLayoutProps {
   footer: ReactNode;
 }
 
-export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
+export interface FileItemsProps extends Omit<UploadedFile, 'error' | 'file'> {
   fileName: string;
   ImgComponent: React.ComponentType<{
     className?: string;
@@ -50,8 +50,8 @@ export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
   canClose?: boolean;
 }
 
-export type MessageToolType = "copy" | "recall" | "edit" | "download";
-export type SupportDownloadFileType = "pdf" | "word" | "md" | "cancel";
+export type MessageToolType = 'copy' | 'recall' | 'edit' | 'download';
+export type SupportDownloadFileType = 'pdf' | 'word' | 'md' | 'cancel';
 
 export interface MessageToolBarProps {
   tools: MessageToolType[];

@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib";
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib';
 
 function convertTimestamp(timestamp: any): string {
-  if (typeof timestamp === "number") {
+  if (typeof timestamp === 'number') {
     return new Date(timestamp).toISOString();
   }
-  if (typeof timestamp === "string") {
+  if (typeof timestamp === 'string') {
     return timestamp;
   }
   return new Date().toISOString();
@@ -15,15 +15,10 @@ export async function POST(request: NextRequest) {
   try {
     const { chat_session } = await request.json();
 
-    if (
-      !chat_session ||
-      !chat_session.id ||
-      !chat_session.seq_id ||
-      !chat_session.title
-    ) {
+    if (!chat_session || !chat_session.id || !chat_session.seq_id || !chat_session.title) {
       return NextResponse.json(
-        { error: "Missing required fields: id, seq_id, title" },
-        { status: 400 }
+        { error: 'Missing required fields: id, seq_id, title' },
+        { status: 400 },
       );
     }
 
@@ -48,20 +43,17 @@ export async function POST(request: NextRequest) {
           data: response.rows[0],
           chat_session: chat_session,
         },
-        { status: 201 }
+        { status: 201 },
       );
     } catch (dbError) {
-      console.error("Database error:", dbError);
+      console.error('Database error:', dbError);
       return NextResponse.json(
-        { error: "Failed to create chat session", details: dbError },
-        { status: 500 }
+        { error: 'Failed to create chat session', details: dbError },
+        { status: 500 },
       );
     }
   } catch (error) {
-    console.error("Request parsing error:", error);
-    return NextResponse.json(
-      { error: "Invalid request body" },
-      { status: 400 }
-    );
+    console.error('Request parsing error:', error);
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }

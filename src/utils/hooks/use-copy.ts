@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { message as antdMessage } from "antd";
-import copy from "copy-to-clipboard";
+import { useEffect, useState } from 'react';
+import { message as antdMessage } from 'antd';
+import copy from 'copy-to-clipboard';
 
-const useCopy = (successMessage = "Copy success!") => {
+const useCopy = (successMessage = 'Copy success!') => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
   const copyToClipboard = (text: string) => {

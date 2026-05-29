@@ -1,15 +1,12 @@
-import { Pool } from "pg";
-import { ChatSessionType, ChatMessageType } from "@/types";
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
+import { Pool } from 'pg';
+import { ChatSessionType, ChatMessageType } from '@/types';
+import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-export const query = async (
-  text: string,
-  params?: any[] | ChatMessageType | ChatSessionType
-) => {
+export const query = async (text: string, params?: any[] | ChatMessageType | ChatSessionType) => {
   const client = await pool.connect();
   let queryParams: any[] = [];
 
@@ -109,15 +106,11 @@ export async function initialDB() {
       );
     `);
 
+    await query(`create index if not exists idx_chat_message_session on chat_message(session_id);`);
     await query(
-      `create index if not exists idx_chat_message_session on chat_message(session_id);`
+      `create index if not exists idx_file_by_message on file_metadata(session_id, message_id);`,
     );
-    await query(
-      `create index if not exists idx_file_by_message on file_metadata(session_id, message_id);`
-    );
-    await query(
-      `create index if not exists idx_session_updated on chat_session(updated_at desc);`
-    );
+    await query(`create index if not exists idx_session_updated on chat_session(updated_at desc);`);
 
     // 5. threads_meta —— 用户级线程元信息（与 LangGraph checkpoint 解耦）
     await query(`
@@ -133,14 +126,12 @@ export async function initialDB() {
         updated_at    timestamptz not null default now()
       );
     `);
+    await query(`create index if not exists idx_threads_meta_user on threads_meta(user_id);`);
     await query(
-      `create index if not exists idx_threads_meta_user on threads_meta(user_id);`
+      `create index if not exists idx_threads_meta_assistant on threads_meta(assistant_id);`,
     );
     await query(
-      `create index if not exists idx_threads_meta_assistant on threads_meta(assistant_id);`
-    );
-    await query(
-      `create index if not exists idx_threads_meta_updated on threads_meta(updated_at desc);`
+      `create index if not exists idx_threads_meta_updated on threads_meta(updated_at desc);`,
     );
 
     // 6. runs —— 每次执行的运行记录
@@ -158,17 +149,11 @@ export async function initialDB() {
         updated_at    timestamptz not null default now()
       );
     `);
-    await query(
-      `create index if not exists idx_runs_thread on runs(thread_id);`
-    );
-    await query(
-      `create index if not exists idx_runs_status on runs(status);`
-    );
-    await query(
-      `create index if not exists idx_runs_created on runs(created_at desc);`
-    );
+    await query(`create index if not exists idx_runs_thread on runs(thread_id);`);
+    await query(`create index if not exists idx_runs_status on runs(status);`);
+    await query(`create index if not exists idx_runs_created on runs(created_at desc);`);
   } catch (error) {
-    console.error("db initialization failed:", error);
+    console.error('db initialization failed:', error);
     throw error;
   }
 }

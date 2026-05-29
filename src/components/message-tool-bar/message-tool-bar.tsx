@@ -1,31 +1,27 @@
-import Image from "next/image";
-import React, { useState } from "react";
-import { Tooltip, Popover } from "antd";
+import Image from 'next/image';
+import React, { useState } from 'react';
+import { Tooltip, Popover } from 'antd';
 
-import {
-  MessageToolType,
-  SupportDownloadFileType,
-  MessageToolBarProps,
-} from "@/types";
+import { MessageToolType, SupportDownloadFileType, MessageToolBarProps } from '@/types';
 
 const OperatorToTextMap = (op: MessageToolType | SupportDownloadFileType) => {
   switch (op) {
-    case "copy":
-      return "复制";
-    case "edit":
-      return "编辑";
-    case "recall":
-      return "重新生成";
-    case "download":
-      return "下载";
-    case "pdf":
-      return "PDF";
-    case "word":
-      return "Word";
-    case "md":
-      return "Markdown";
-    case "cancel":
-      return "取消";
+    case 'copy':
+      return '复制';
+    case 'edit':
+      return '编辑';
+    case 'recall':
+      return '重新生成';
+    case 'download':
+      return '下载';
+    case 'pdf':
+      return 'PDF';
+    case 'word':
+      return 'Word';
+    case 'md':
+      return 'Markdown';
+    case 'cancel':
+      return '取消';
   }
 };
 
@@ -40,8 +36,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
 
   const handleToolOperator = (tool: MessageToolType) => {
     if (handleToolAction) {
-      if (tool === "download" && isPopoverOpen === false)
-        setIsPopoverOpen(true);
+      if (tool === 'download' && isPopoverOpen === false) setIsPopoverOpen(true);
       handleToolAction(tool);
       return;
     }
@@ -58,12 +53,8 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
   return (
     <>
       {tools.map((tool, index) => (
-        <Tooltip
-          key={index}
-          title={`${OperatorToTextMap(tool)}`}
-          placement="bottom"
-        >
-          {tool === "download" ? (
+        <Tooltip key={index} title={`${OperatorToTextMap(tool)}`} placement="bottom">
+          {tool === 'download' ? (
             <Popover
               content={
                 <div onClick={(e) => e.stopPropagation()}>
@@ -71,7 +62,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
                     return (
                       <div
                         key={fileType}
-                        className="flex gap-2 items-center px-2 py-1 hover:bg-gray-100 hover:cursor-pointer rounded-md"
+                        className="flex items-center gap-2 rounded-md px-2 py-1 hover:cursor-pointer hover:bg-gray-100"
                         onClick={() => handleDownloadFilesOperator(fileType)}
                       >
                         {fileType}
@@ -88,7 +79,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
                 alt={`${tool}`}
                 width={20}
                 height={20}
-                className={`w-7 h-7 rounded-xl p-1 m-0.5 mb-2 hover:bg-[#e7e7e7] hover:cursor-pointer ${className}`}
+                className={`m-0.5 mb-2 h-7 w-7 rounded-xl p-1 hover:cursor-pointer hover:bg-[#e7e7e7] ${className}`}
                 onClick={() => handleToolOperator(tool)}
               ></Image>
             </Popover>
@@ -98,7 +89,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
               alt={`${tool}`}
               width={20}
               height={20}
-              className={`w-7 h-7 rounded-xl p-1 m-0.5 mb-2 hover:bg-[#e7e7e7] hover:cursor-pointer ${className}`}
+              className={`m-0.5 mb-2 h-7 w-7 rounded-xl p-1 hover:cursor-pointer hover:bg-[#e7e7e7] ${className}`}
               onClick={() => handleToolOperator(tool)}
             ></Image>
           )}

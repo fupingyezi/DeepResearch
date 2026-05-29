@@ -13,9 +13,7 @@ export function registerSubagent(config: SubagentConfig): void {
     throw new Error('[subagents] registerSubagent: config.name is required');
   }
   if (registry.has(config.name)) {
-    console.warn(
-      `[subagents] registerSubagent: overriding existing subagent "${config.name}"`,
-    );
+    console.warn(`[subagents] registerSubagent: overriding existing subagent "${config.name}"`);
   }
   registry.set(config.name, config);
 }

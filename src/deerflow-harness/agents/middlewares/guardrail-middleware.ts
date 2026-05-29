@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * GuardrailMiddleware（位序 4 / features.guardrail 启用）
+ * GuardrailMiddleware（features.guardrail 启用）
  *
  * 职责（占位）：
  * - 入参/出参合规检查：敏感词、注入、隐私 PII；命中时可改写或终止。

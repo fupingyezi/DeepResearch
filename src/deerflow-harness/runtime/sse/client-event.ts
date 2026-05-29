@@ -37,10 +37,6 @@ export enum ClientAgentEventType {
   HEARTBEAT = 'heartbeat',
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Payload 接口                                                               */
-/* -------------------------------------------------------------------------- */
-
 export interface StartPayload {
   sessionId?: string;
 }
@@ -117,7 +113,7 @@ export interface TaskProgressPayload {
   toolResult?: any;
   toolSuccess?: boolean;
   toolErrorMessage?: string;
-  /** 兼容扩展字段 */
+  /** 扩展字段（前端按需透传） */
   [k: string]: any;
 }
 
@@ -135,10 +131,6 @@ export interface ErrorPayload {
 /** END / HEARTBEAT 不携带业务字段 */
 export type EndPayload = Record<string, never>;
 export type HeartbeatPayload = Record<string, never>;
-
-/* -------------------------------------------------------------------------- */
-/*  事件接口（discriminated union）                                            */
-/* -------------------------------------------------------------------------- */
 
 interface BaseClientAgentEvent {
   /** 事件时间戳（毫秒） */

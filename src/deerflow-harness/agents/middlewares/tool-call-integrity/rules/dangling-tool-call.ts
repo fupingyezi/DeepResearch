@@ -1,8 +1,4 @@
-import {
-  AIMessage,
-  BaseMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
+import { AIMessage, BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { ToolCall } from '@langchain/core/messages/tool';
 import type { IntegrityRule } from '../types';
 

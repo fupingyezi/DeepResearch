@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 /**
  * AgentEventContext / AgentEventProvider
@@ -14,14 +14,10 @@
  * - 卸载时自动 abort 并 clear bus，避免泄漏
  */
 
-import { createContext, useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
-import {
-  EventBus,
-  createAgentEventStream,
-  type AgentEventStreamOptions,
-} from "../client";
+import { EventBus, createAgentEventStream, type AgentEventStreamOptions } from '../client';
 
 export interface AgentEventContextValue {
   /** 事件总线，用于订阅 */
@@ -34,9 +30,7 @@ export interface AgentEventContextValue {
   isRunning: boolean;
 }
 
-export const AgentEventContext = createContext<AgentEventContextValue | null>(
-  null,
-);
+export const AgentEventContext = createContext<AgentEventContextValue | null>(null);
 
 export interface AgentEventProviderProps {
   children: ReactNode;
@@ -67,7 +61,7 @@ export function AgentEventProvider({ children }: AgentEventProviderProps) {
       if (opts.signal.aborted) {
         controller.abort();
       } else {
-        opts.signal.addEventListener("abort", () => controller.abort(), {
+        opts.signal.addEventListener('abort', () => controller.abort(), {
           once: true,
         });
       }
@@ -108,9 +102,5 @@ export function AgentEventProvider({ children }: AgentEventProviderProps) {
     isRunning,
   };
 
-  return (
-    <AgentEventContext.Provider value={value}>
-      {children}
-    </AgentEventContext.Provider>
-  );
+  return <AgentEventContext.Provider value={value}>{children}</AgentEventContext.Provider>;
 }

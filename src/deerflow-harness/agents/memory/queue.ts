@@ -90,9 +90,7 @@ export class MemoryUpdateQueue {
       void this.processQueue();
     }, delayMs);
     // 不阻止进程退出（等价 daemon=True）
-    if (typeof (this.timer as any).unref === 'function') {
-      (this.timer as any).unref();
-    }
+    this.timer.unref?.();
   }
 
   private async processQueue(): Promise<void> {

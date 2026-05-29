@@ -211,7 +211,7 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
   wrapModelCall: async (request, handler) => {
     const result = await handler(request);
 
-    const msg: any = (result as any)?.message ?? result;
+    const msg = ((result as { message?: unknown })?.message ?? result) as AIMessage;
 
     if (msg && AIMessage.isInstance(msg)) {
       const structured = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
@@ -265,10 +265,10 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
           return true;
         });
         if (cleaned.length !== before) {
-          console.warn(
-            '[QwenRecovery] dropped tool_calls without a valid name',
-            { before, after: cleaned.length },
-          );
+          console.warn('[QwenRecovery] dropped tool_calls without a valid name', {
+            before,
+            after: cleaned.length,
+          });
         }
         msg.tool_calls = cleaned;
 

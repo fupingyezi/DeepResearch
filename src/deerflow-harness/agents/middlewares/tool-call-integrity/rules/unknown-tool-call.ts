@@ -1,8 +1,4 @@
-import {
-  AIMessage,
-  BaseMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
+import { AIMessage, BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { ToolCall } from '@langchain/core/messages/tool';
 import type { IntegrityRule, RuleContext } from '../types';
 
@@ -13,16 +9,15 @@ import type { IntegrityRule, RuleContext } from '../types';
  *
  * ## 触发场景
  *
- * 1) 跨轮工具集变更：同一 thread 下，前一轮 `subagent_enabled=true` 注入了
- *    `task` 工具，下一轮切回普通 chat（`subagent_enabled=false`）后 `task`
- *    不再绑定。但 PostgreSQL checkpointer 持久化的历史里仍有
- *    `tool_calls: [{ name: 'task', ... }]`，模型据此续写时 ToolNode 在
- *    工具映射里找不到，整条 stream 被收敛为 AGENT_STREAM_ERROR。
+ * 1) 跨轮工具集变更：同一 thread 下，PostgreSQL checkpointer 持久化的历史
+ *    里仍有 `tool_calls: [{ name: 'task', ... }]`，但当前轮没有绑定该工具。
+ *    模型据此续写时 ToolNode 在工具映射里找不到，整条 stream 被收敛为
+ *    AGENT_STREAM_ERROR。
  *
  * 2) 历史诱导：即便清掉了悬挂 tool_call，模型读到上下文里"上次 call 过
  *    task"仍可能再次输出 `task` 调用。
  *
- * 3) Provider 漂移：少数中转/旧 provider 在 raw payload 里带未知工具名。
+ * 3) Provider 漂移：少数中转 provider 在 raw payload 里带未知工具名。
  *
  * ## 修复策略（双阶段）
  *
@@ -44,8 +39,7 @@ interface RawToolCall {
   function?: { name?: string };
 }
 
-const PLACEHOLDER_CONTENT =
-  '[Tool call removed: this tool is not registered in the current run.]';
+const PLACEHOLDER_CONTENT = '[Tool call removed: this tool is not registered in the current run.]';
 
 function getToolCallName(tc: any): string {
   const n = tc?.name;
@@ -140,11 +134,7 @@ export const unknownToolCallRule: IntegrityRule = {
 
     for (const m of messages) {
       if (!AIMessage.isInstance(m)) {
-        if (
-          m instanceof ToolMessage &&
-          m.tool_call_id &&
-          removedIds.has(m.tool_call_id)
-        ) {
+        if (m instanceof ToolMessage && m.tool_call_id && removedIds.has(m.tool_call_id)) {
           continue; // 孤立 ToolMessage：丢弃
         }
         result.push(m);

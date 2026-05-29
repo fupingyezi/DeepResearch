@@ -1,18 +1,15 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import { useModelStore } from "@/store";
-import { MODEL_PRESETS, getAvailablePresets } from "@/config/models";
+import React, { useState } from 'react';
+import { useModelStore } from '@/store';
+import { MODEL_PRESETS, getAvailablePresets } from '@/config/models';
 
 interface ModelSelectorProps {
   className?: string;
   showLabel?: boolean;
 }
 
-const ModelSelector: React.FC<ModelSelectorProps> = ({
-  className = "",
-  showLabel = true,
-}) => {
+const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel = true }) => {
   const { selectedModelKey, setSelectedModelKey } = useModelStore();
   const [isOpen, setIsOpen] = useState(false);
   const presets = getAvailablePresets();
@@ -31,65 +28,55 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7] px-3"
+        className="flex h-8 w-30 items-center justify-center rounded-2xl border-2 border-[#f3f3f3] px-3 hover:cursor-pointer hover:bg-[#e7e7e7]"
         style={{
-          backgroundColor: isActive ? "#eceaff" : "",
-          color: isActive ? "#4433ff" : "",
+          backgroundColor: isActive ? '#eceaff' : '',
+          color: isActive ? '#4433ff' : '',
         }}
       >
         <span className="flex items-center gap-1 truncate">
           {showLabel ? (
             <>
-              <span className="text-sm font-medium truncate">
-                {currentPreset?.label || "Select Model"}
+              <span className="truncate text-sm font-medium">
+                {currentPreset?.label || 'Select Model'}
               </span>
               {currentPreset?.isBeta && (
-                <span className="text-xs bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded">
+                <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-800">
                   Beta
                 </span>
               )}
             </>
           ) : (
-            <span className="text-xs truncate">{selectedModelKey}</span>
+            <span className="truncate text-xs">{selectedModelKey}</span>
           )}
         </span>
       </button>
 
       {/* 下拉菜单：向上展开 */}
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 bg-white border-2 border-[#e5e5e5] rounded-lg shadow-lg z-50 min-w-[220px] max-h-64 overflow-y-auto">
+        <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 min-w-[220px] overflow-y-auto rounded-lg border-2 border-[#e5e5e5] bg-white shadow-lg">
           {presets.map((preset) => (
             <button
               key={preset.key}
               type="button"
               onClick={() => handleSelectModel(preset.key)}
-              className={`
-                w-full text-left px-4 py-3
-                border-b border-[#f0f0f0] last:border-b-0
-                hover:bg-[#f9f9f9]
-                transition-colors
-                ${selectedModelKey === preset.key ? "bg-[#eceaff]" : ""}
-              `}
+              className={`w-full border-b border-[#f0f0f0] px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-[#f9f9f9] ${selectedModelKey === preset.key ? 'bg-[#eceaff]' : ''} `}
             >
               <div className="flex items-center justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">
-                      {preset.label}
-                    </span>
+                    <span className="font-medium text-gray-900">{preset.label}</span>
                     {preset.isBeta && (
-                      <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                      <span className="rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
                         Beta
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {preset.description}
-                  </p>
+                  <p className="mt-1 text-xs text-gray-500">{preset.description}</p>
                 </div>
                 {selectedModelKey === preset.key && (
                   <svg
-                    className="w-5 h-5 text-blue-600 ml-2"
+                    className="ml-2 h-5 w-5 text-blue-600"
                     fill="currentColor"
                     viewBox="0 0 20 20"
                   >

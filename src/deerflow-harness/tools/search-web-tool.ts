@@ -1,17 +1,17 @@
-import { tool } from "langchain";
-import { TavilySearchAPIRetriever } from "@langchain/community/retrievers/tavily_search_api";
+import { tool } from 'langchain';
+import { TavilySearchAPIRetriever } from '@langchain/community/retrievers/tavily_search_api';
 
-import z from "zod";
+import z from 'zod';
 
 export const searchWebTool = tool(
   async (input) => {
-    const question = (input?.question ?? "").trim();
+    const question = (input?.question ?? '').trim();
     if (!question) {
       // 显式拒绝空 query，避免下游缓存/默认值返回不可控结果，并让 AI 立刻感知。
       return [
-        "ERROR: search_web_tool 收到了空的 question 参数。",
-        "请在 arguments 中提供非空 `question` 字符串后重试。",
-      ].join("\n");
+        'ERROR: search_web_tool 收到了空的 question 参数。',
+        '请在 arguments 中提供非空 `question` 字符串后重试。',
+      ].join('\n');
     }
 
     const tavy = new TavilySearchAPIRetriever({
@@ -30,14 +30,14 @@ export const searchWebTool = tool(
         相关性评分: ${doc.metadata.score}
         ---`;
       })
-      .join("\n");
+      .join('\n');
     return relatedWebInfo;
   },
   {
-    name: "search_web_tool",
-    description: "当用户提到搜索相关信息的时候调用",
+    name: 'search_web_tool',
+    description: '当用户提到搜索相关信息的时候调用',
     schema: z.object({
-      question: z.string().min(1, "question 不能为空"),
+      question: z.string().min(1, 'question 不能为空'),
     }),
-  }
+  },
 );

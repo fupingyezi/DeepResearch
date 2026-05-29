@@ -14,9 +14,9 @@ import type { SubagentEvent } from '../../types';
  * 本工具：
  * 1) 校验 subagent_type 与配置
  * 2) 装载 subagent 自己的工具集：
- *    - cfg.tools=undefined → 继承 lead 工具集（subagentEnabled=false 防递归）
- *    - cfg.tools=string[]  → 仅装载白名单
- *    - 再按 cfg.disabledTools 黑名单过滤
+ *    - config.tools=undefined → 继承 lead 工具集（allowTaskTool=false 防递归）
+ *    - config.tools=string[]  → 仅装载白名单
+ *    - 再按 config.disabledTools 黑名单过滤
  * 3) 创建 SubagentExecutor 并消费其 AsyncIterable<SubagentEvent>；
  *    通过 RuntimeContext.currentModelConfig 把 lead 当前 ModelConfig 透传给
  *    'inherit' 模式的 subagent。
@@ -27,10 +27,7 @@ import type { SubagentEvent } from '../../types';
 const TaskInputSchema = z.object({
   description: z.string().min(1).describe('任务的简短描述（3-5 个词），用于日志/前端展示。'),
   prompt: z.string().min(1).describe('给 subagent 的任务描述，需具体且自包含。'),
-  subagent_type: z
-    .string()
-    .min(1)
-    .describe('subagent 类型，目前可用："general-purpose"。'),
+  subagent_type: z.string().min(1).describe('subagent 类型，目前可用："general-purpose"。'),
   max_turns: z.number().int().positive().optional().describe('可选：覆盖 subagent 最大轮次。'),
   task_id: z
     .string()
@@ -110,28 +107,25 @@ export const taskTool = tool(
   async (input, runtime: any) => {
     const { description, prompt, subagent_type, max_turns, task_id } = input;
 
-    // ---- 1) 校验 subagent type --------------------------------------------
+    // 校验 subagent 类型
     const found = getSubagentConfig(subagent_type);
     if (!found) {
       const available = getAvailableSubagentNames().join(', ') || '(none)';
       return `Error: Unknown subagent type "${subagent_type}". Available: ${available}`;
     }
-    let cfg: SubagentConfig = found;
+    let config: SubagentConfig = found;
     if (max_turns != null) {
-      cfg = { ...cfg, maxTurns: max_turns };
+      config = { ...config, maxTurns: max_turns };
     }
 
-    // ---- 2) 从 runtime 中提取 signal / writer / toolCallId ---------------
-    // LangChain JS tool runtime 形态因版本而异，按兼容顺序探测：
-    //   - runtime.signal | runtime.config?.signal
-    //   - runtime.writer | runtime.config?.writer
-    //   - runtime.toolCall?.id | runtime.toolCallId
-    const cfgObj = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
+    // 从 runtime 中提取 signal / writer / toolCallId
+    const runtimeConfig = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
     const parentSignal: AbortSignal | undefined =
-      (runtime?.signal as AbortSignal | undefined) ?? (cfgObj.signal as AbortSignal | undefined);
+      (runtime?.signal as AbortSignal | undefined) ??
+      (runtimeConfig.signal as AbortSignal | undefined);
     const writer: ((p: any) => void) | undefined =
       (runtime?.writer as ((p: any) => void) | undefined) ??
-      (cfgObj.writer as ((p: any) => void) | undefined);
+      (runtimeConfig.writer as ((p: any) => void) | undefined);
     const toolCallId: string =
       (runtime?.toolCall?.id as string | undefined) ??
       (runtime?.toolCallId as string | undefined) ??
@@ -139,39 +133,34 @@ export const taskTool = tool(
 
     const publicTaskId = task_id ?? toolCallId;
 
-    // ---- 3) 装载 subagent 内部工具集 --------------------------------------
-    // - cfg.tools=undefined：继承 lead 默认工具集
-    // - cfg.tools=string[]：白名单
-    // 始终强制 subagentEnabled=false，杜绝 subagent 再调用 task。
+    // 装载 subagent 内部工具集
+    // - config.tools=undefined：继承 lead 默认工具集
+    // - config.tools=string[]：白名单
+    // 始终强制 allowTaskTool=false，杜绝 subagent 再调用 task。
     const { getAvailableTools } = await import('../index');
     const inherited = await getAvailableTools({
-      groups: cfg.tools, // undefined → 全集
-      subagentEnabled: false,
+      groups: config.tools, // undefined → 全集
+      allowTaskTool: false,
     });
 
     // 黑名单过滤（防递归 + 业务隔离）
-    const disabled = new Set(cfg.disabledTools ?? []);
+    const disabled = new Set(config.disabledTools ?? []);
     // 始终强制屏蔽 task，防止白名单 / 自定义 disabledTools 漏配。
     disabled.add('task');
-    const tools = inherited.filter(
-      (t) => !disabled.has((t as { name?: string }).name ?? ''),
-    );
+    const tools = inherited.filter((t) => !disabled.has((t as { name?: string }).name ?? ''));
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(
-        `[taskTool] subagent="${cfg.name}" tools=[${tools
+        `[taskTool] subagent="${config.name}" tools=[${tools
           .map((t) => (t as { name?: string }).name ?? '?')
           .join(', ')}] (inherited=${inherited.length}, disabled=[${[...disabled].join(', ')}])`,
       );
     }
 
-    // ---- 4) 创建 executor 并消费事件流 ------------------------------------
+    // 创建 executor 并消费事件流
     const ctxModelConfig = getContext()?.currentModelConfig;
-    const configurableModelConfig =
-      (cfgObj.configurable as Record<string, any> | undefined)
-        ?.currentModelConfig as
-        | typeof ctxModelConfig
-        | undefined;
+    const configurableModelConfig = (runtimeConfig.configurable as Record<string, any> | undefined)
+      ?.currentModelConfig as typeof ctxModelConfig | undefined;
     const inheritedModelConfig = ctxModelConfig ?? configurableModelConfig;
     if (process.env.NODE_ENV !== 'production' && !inheritedModelConfig) {
       console.warn(
@@ -180,7 +169,7 @@ export const taskTool = tool(
       );
     }
     const executor = new SubagentExecutor({
-      config: cfg,
+      config,
       tools,
       taskId: toolCallId,
       inheritedModelConfig,
@@ -236,10 +225,9 @@ export const taskTool = tool(
       return `Task failed. Error: ${msg}`;
     }
 
-    // ---- 5) 终态文案返回给 lead LLM ---------------------------------------
-    // 只返回 markdown 正文；structured JSON 已通过 task_completed 事件
-    // 的 structured 字段单独透传给前端，不应再混入 lead 的 tool result，
-    // 否则 lead 会把 JSON 原样输出到正文，导致用户看到 ` ```final-report ` 代码块。
+    // 终态文案返回给 lead LLM：只返回 markdown 正文；structured JSON 已通过
+    // task_completed 事件的 structured 字段单独透传给前端，不应再混入 lead 的
+    // tool result，否则 lead 会把 JSON 原样输出到正文。
     switch (terminalKind) {
       case 'completed': {
         const md = lastResult ?? '(empty)';

@@ -73,10 +73,6 @@ export {
   type ConversationContext,
 } from './queue';
 
-/* -------------------------------------------------------------------------- */
-/* 注入辅助：构建可直接拼到 system prompt 的 <memory>...</memory> 块。            */
-/* -------------------------------------------------------------------------- */
-
 import { getMemoryConfig as _gmc } from './config';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
@@ -87,10 +83,8 @@ export interface BuildMemoryContextOptions {
 }
 
 /**
- * 加载 memory 并格式化为 `<memory>...</memory>\n` 字符串。
- * - 配置 `enabled=false` 或 `injectionEnabled=false` 时返回 `''`；
- * - memory 为空时返回 `''`；
- * - 任何 IO/JSON 异常静默吞掉并返回 `''`。
+ * 加载 memory 并格式化为 `<memory>...</memory>\n` 字符串，便于直接拼到 system
+ * prompt。配置关闭、内容为空或读取异常时一律返回空字符串。
  */
 export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): Promise<string> {
   try {

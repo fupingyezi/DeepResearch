@@ -1,5 +1,5 @@
-import { create } from "zustand";
-import { immer } from "zustand/middleware/immer";
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
 
 /**
  * Artifact / 产物面板状态

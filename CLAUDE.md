@@ -17,13 +17,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **技术栈：**
 
-| 层级 | 技术 |
-|---|---|
+| 层级 | 技术                                                     |
+| ---- | -------------------------------------------------------- |
 | 前端 | Next.js 14、React 18、Ant Design 5、Zustand、TailwindCSS |
-| 后端 | Node.js、LangChain.js、LangGraph |
-| AI | OpenAI API（兼容 Qwen、Spark、DeepSeek） |
-| 存储 | PostgreSQL、Redis、MinIO |
-| 搜索 | Tavily API |
+| 后端 | Node.js、LangChain.js、LangGraph                         |
+| AI   | OpenAI API（兼容 Qwen、Spark、DeepSeek）                 |
+| 存储 | PostgreSQL、Redis、MinIO                                 |
+| 搜索 | Tavily API                                               |
 
 ---
 
@@ -125,7 +125,7 @@ TAVILY_API_KEY=...
      │                 │                  │
      ▼                 ▼                  ▼
 DeerFlowClient    Checkpointer       Stores
-(clinet.ts)       (LangGraph)     (PG / Redis)
+(client.ts)       (LangGraph)     (PG / Redis)
 Agent 缓存         Postgres / 内存  ThreadMeta
 流式调用           保存对话状态      Runs
                                    Checkpoint
@@ -161,20 +161,23 @@ StreamBridge（进程内 EventEmitter 总线）
 3. **注入 START 帧并返回 SSE 流**：在 StreamBridge 订阅之上先 `yield` 一个携带 `run_id` 和 `thread_id` 的 START 事件，再转发后续事件。
 
 Response Headers：
+
 - `Content-Type: text/event-stream`
 - `X-Run-Id: <run_id>`（客户端可在 headers 阶段立即拿到，无需等待 body）
 
 请求体：
+
 ```typescript
 interface ChatBody {
-  input: string;            // 必填
-  agentType?: string;       // Agent 标识，默认 'lead'
-  displayName?: string;     // 线程显示名
-  metadata?: Record<string, any>;  // 运行期开关，见 DeerFlowClient
+  input: string; // 必填
+  agentType?: string; // Agent 标识，默认 'lead'
+  displayName?: string; // 线程显示名
+  metadata?: Record<string, any>; // 运行期开关，见 DeerFlowClient
 }
 ```
 
 `metadata` 中的运行期开关（影响本次 Agent 行为，不修改 baseOptions）：
+
 - `modelKey: string` → 选择 MODEL_PRESETS 中的预设模型（不传走默认 preset）
 - 其它业务字段（如 `sessionId`、`hasFiles`、`uploadedFiles`）按需透传
 
@@ -184,13 +187,13 @@ interface ChatBody {
 
 #### 其他路由
 
-| 路由 | 方法 | 说明 |
-|---|---|---|
-| `/api/threads` | POST | 创建线程；GET 分页列表（?limit=&offset=&status=） |
-| `/api/threads/[threadId]` | GET | 获取线程详情（可附带 checkpoint）；DELETE 删除 |
-| `/api/threads/[threadId]/runs` | GET | 列出线程下的 run |
-| `/api/files/upload` | POST | multipart 上传，存 MinIO，解析内容 |
-| `/api/files/delete` | DELETE | 从 MinIO 删除文件 |
+| 路由                           | 方法   | 说明                                              |
+| ------------------------------ | ------ | ------------------------------------------------- |
+| `/api/threads`                 | POST   | 创建线程；GET 分页列表（?limit=&offset=&status=） |
+| `/api/threads/[threadId]`      | GET    | 获取线程详情（可附带 checkpoint）；DELETE 删除    |
+| `/api/threads/[threadId]/runs` | GET    | 列出线程下的 run                                  |
+| `/api/files/upload`            | POST   | multipart 上传，存 MinIO，解析内容                |
+| `/api/files/delete`            | DELETE | 从 MinIO 删除文件                                 |
 
 ---
 
@@ -211,6 +214,7 @@ ThreadService 是整个系统的门面，装配 DeerFlowClient + Checkpointer + 
 - `resume()` 目前为占位，调用直接抛异常
 
 **线程状态机：**
+
 ```
 idle → running → idle（成功）
               ↘ error（失败）
@@ -220,15 +224,16 @@ idle → running → idle（成功）
 
 ### 3. DeerFlowClient
 
-**文件：** `src/deerflow-harness/clinet.ts`
+**文件：** `src/deerflow-harness/client.ts`
 
 进程级单例（注入到 ThreadService）。核心能力：
 
 #### Agent 实例缓存
 
 缓存键由以下字段组合（JSON.stringify）：
+
 ```typescript
-[modelName, memoryEnabled, agentName, sortedSkills]
+[modelName, memoryEnabled, agentName, sortedSkills];
 ```
 
 **重要例外：** `memoryEnabled=true` 时**不缓存**（每轮 prompt 含最新 memory，必须每次重建）。
@@ -245,11 +250,11 @@ idle → running → idle（成功）
 
 使用 LangGraph `streamMode: ['messages', 'updates', 'custom']` 三模式同时订阅：
 
-| streamMode | 内容 | 处理方式 |
-|---|---|---|
-| `messages` | AI token 分片（AIMessageChunk） | handleAiChunk：文本 → LLM_STREAM；tool_call_chunks → 按 index 缓冲 |
-| `updates` | 节点 state delta，含 ToolMessage | handleToolMessage：补发 TOOL_CALL_START + emit TOOL_CALL_RESULT |
-| `custom` | 工具内部通过 LangGraph writer 推送的自定义 payload | handleCustomPayload：state_update / human_interrupt / task_* 六种 |
+| streamMode | 内容                                               | 处理方式                                                           |
+| ---------- | -------------------------------------------------- | ------------------------------------------------------------------ |
+| `messages` | AI token 分片（AIMessageChunk）                    | handleAiChunk：文本 → LLM_STREAM；tool_call_chunks → 按 index 缓冲 |
+| `updates`  | 节点 state delta，含 ToolMessage                   | handleToolMessage：补发 TOOL_CALL_START + emit TOOL_CALL_RESULT    |
+| `custom`   | 工具内部通过 LangGraph writer 推送的自定义 payload | handleCustomPayload：state*update / human_interrupt / task*\* 六种 |
 
 **Tool Call Chunk 缓冲机制：**  
 OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` 会按 `index` 分多片到达，args 字符串需拼接。`toolCallsByIndex` Map 按 index 累加 argsBuffer，当 ToolMessage 到达时才触发 TOOL_CALL_START 事件发送完整调用信息。
@@ -270,25 +275,26 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 
 对外暴露的白名单协议（10 种），前端通过 `src/runtime/protocol/client-event.ts` 直接 re-export 复用：
 
-| eventType | payload | 说明 |
-|---|---|---|
-| `start` | `{ sessionId?, run_id, thread_id }` | 流式会话开始 |
-| `stream_chunk` | `{ text, reasoning? }` | LLM 增量文本 |
-| `tool_call` | `{ toolCallId, toolName, arguments? }` | 工具调用开始 |
-| `tool_result` | `{ toolCallId, toolName, result, success }` | 工具调用结果 |
-| `state_update` | `{ stateType, data }` | DeepResearch 状态变更 |
-| `task_progress` | `{ taskId, status, message?, result?, error? }` | 折叠 6 种 task_* 内部事件 |
-| `human_interrupt` | `{ question, details }` | 等待人工决策 |
-| `error` | `{ errorCode, errorMessage, recoverable }` | 执行错误 |
-| `end` | `{}` | 流式会话结束 |
-| `heartbeat` | `{}` | 保活心跳 |
+| eventType         | payload                                         | 说明                        |
+| ----------------- | ----------------------------------------------- | --------------------------- |
+| `start`           | `{ sessionId?, run_id, thread_id }`             | 流式会话开始                |
+| `stream_chunk`    | `{ text, reasoning? }`                          | LLM 增量文本                |
+| `tool_call`       | `{ toolCallId, toolName, arguments? }`          | 工具调用开始                |
+| `tool_result`     | `{ toolCallId, toolName, result, success }`     | 工具调用结果                |
+| `state_update`    | `{ stateType, data }`                           | DeepResearch 状态变更       |
+| `task_progress`   | `{ taskId, status, message?, result?, error? }` | 折叠 6 种 task\_\* 内部事件 |
+| `human_interrupt` | `{ question, details }`                         | 等待人工决策                |
+| `error`           | `{ errorCode, errorMessage, recoverable }`      | 执行错误                    |
+| `end`             | `{}`                                            | 流式会话结束                |
+| `heartbeat`       | `{}`                                            | 保活心跳                    |
 
 **过滤边界：** `src/deerflow-harness/runtime/sse/to-client-event.ts`  
 内部事件 → 客户端事件的映射在此完成；不在白名单内的内部事件在此被 drop，不会泄露给前端。
 
 `StateUpdatePayload.stateType` 枚举：
+
 ```typescript
-'simple_analysis' | 'tasks_initial' | 'task_update' | 'report' | 'research_target' | 'custom'
+'simple_analysis' | 'tasks_initial' | 'task_update' | 'report' | 'research_target' | 'custom';
 ```
 
 ---
@@ -346,31 +352,31 @@ StreamBridge（单例 streamBridge）
 
 #### 中间件组装规则（`assembleFromFeatures`）
 
-| 顺序 | 中间件 | 触发条件 |
-|---|---|---|
-| 1 | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置 |
-| 2 | `DanglingToolCallMiddleware` | 始终启用 |
-| 3 | `ToolErrorHandlingMiddleware` | 始终启用 |
-| 4 | `MemoryMiddleware` | `features.memory=true` 或自定义中间件 |
-| 5 | `SubagentLimitMiddleware` | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底） |
-| 6 | `LoopDetectionMiddleware` | 始终启用 |
-| 7 | `ClarificationMiddleware` | 始终启用，且始终最后 |
+| 顺序 | 中间件                           | 触发条件                                                                     |
+| ---- | -------------------------------- | ---------------------------------------------------------------------------- |
+| 1    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置 |
+| 2    | `DanglingToolCallMiddleware`     | 始终启用                                                                     |
+| 3    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                     |
+| 4    | `MemoryMiddleware`               | `features.memory=true` 或自定义中间件                                        |
+| 5    | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）             |
+| 6    | `LoopDetectionMiddleware`        | 始终启用                                                                     |
+| 7    | `ClarificationMiddleware`        | 始终启用，且始终最后                                                         |
 
 同时，`taskTool` 始终注入到 `extraTools`。
 
 #### RuntimeFeatures 类型
 
 ```typescript
-type FeatureToggle<M> = false | true | M  // false=禁用 / true=默认实现 / M=自定义中间件
+type FeatureToggle<M> = false | true | M; // false=禁用 / true=默认实现 / M=自定义中间件
 
 interface RuntimeFeatures {
   sandbox?: FeatureToggle;
   memory?: FeatureToggle;
-  summarization?: FeatureToggle;  // 不允许 true
+  summarization?: FeatureToggle; // 不允许 true
   subagent?: FeatureToggle;
   vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
-  guardrail?: FeatureToggle;      // 不允许 true
+  guardrail?: FeatureToggle; // 不允许 true
   qwenToolCallRecovery?: FeatureToggle;
 }
 ```
@@ -382,6 +388,7 @@ interface RuntimeFeatures {
 ### 7. Subagent 系统
 
 **文件：**
+
 - `src/deerflow-harness/subagents/config.ts` — `SubagentConfig` 接口
 - `src/deerflow-harness/subagents/executor.ts` — `SubagentExecutor`
 - `src/deerflow-harness/subagents/registry.ts` — 运行时注册表
@@ -397,7 +404,7 @@ interface RuntimeFeatures {
 
 父子共用 Checkpoint：若处于 thread 上下文中，`ctxThreadId` 会透传给子图，使父子 Agent 共用同一 checkpoint thread。
 
-#### 内置工具与 task_* 自定义事件
+#### 内置工具与 task\_\* 自定义事件
 
 `taskTool` 通过 LangGraph `writer`（custom stream）推送以下类型的 payload：
 
@@ -418,22 +425,40 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 ```typescript
 {
   user: {
-    workContext: { summary: string; updatedAt: string };
-    personalContext: { summary: string; updatedAt: string };
-    topOfMind: { summary: string; updatedAt: string };
-  };
+    workContext: {
+      summary: string;
+      updatedAt: string;
+    }
+    personalContext: {
+      summary: string;
+      updatedAt: string;
+    }
+    topOfMind: {
+      summary: string;
+      updatedAt: string;
+    }
+  }
   history: {
-    recentMonths: { summary: string; updatedAt: string };
-    earlierContext: { summary: string; updatedAt: string };
-    longTermBackground: { summary: string; updatedAt: string };
-  };
+    recentMonths: {
+      summary: string;
+      updatedAt: string;
+    }
+    earlierContext: {
+      summary: string;
+      updatedAt: string;
+    }
+    longTermBackground: {
+      summary: string;
+      updatedAt: string;
+    }
+  }
   facts: Array<{
-    id: string;           // 'fact_' + 8 位 UUID
+    id: string; // 'fact_' + 8 位 UUID
     content: string;
-    category: FactCategory;  // 'context' | 'preference' | 'behavior' | 'correction' 等
-    confidence: number;   // [0, 1]
-    createdAt: string;    // ISO UTC
-    source: string;       // threadId 或 'manual' 或 'unknown'
+    category: FactCategory; // 'context' | 'preference' | 'behavior' | 'correction' 等
+    confidence: number; // [0, 1]
+    createdAt: string; // ISO UTC
+    source: string; // threadId 或 'manual' 或 'unknown'
     sourceError?: string;
   }>;
 }
@@ -522,6 +547,7 @@ CREATE TABLE runs (
 #### conversationStore
 
 管理聊天会话：
+
 - `chatSessions[]`：所有对话 session（含 threadId）
 - `currentMessages[]`：当前 session 消息列表
 - `isChating: boolean`：是否正在接收流式响应
@@ -542,17 +568,18 @@ CREATE TABLE runs (
 
 `STATE_UPDATE` 事件的 `stateType` 与 store 操作对应关系：
 
-| stateType | 触发动作 |
-|---|---|
-| `tasks_initial` | 初始化任务列表 |
-| `task_update` | upsert 单个任务 |
-| `report` | 设置报告内容 |
-| `simple_analysis` | 更新分析结果 |
-| `research_target` | 设置研究目标 |
+| stateType         | 触发动作        |
+| ----------------- | --------------- |
+| `tasks_initial`   | 初始化任务列表  |
+| `task_update`     | upsert 单个任务 |
+| `report`          | 设置报告内容    |
+| `simple_analysis` | 更新分析结果    |
+| `research_target` | 设置研究目标    |
 
 #### chatSelectStore
 
 管理 Agent 模式选择：
+
 - `selectedAgent: 'chat' | 'search' | 'deepResearch'`
 
 #### fileUploadStore
@@ -640,6 +667,7 @@ MW_TRACE=1 pnpm dev
 ### 查看 Agent 绑定的工具
 
 启动时控制台自动打印（`[agent]` 前缀）：
+
 ```
 [agent] tools bound to LLM (3): search_web, task, ask_clarification
 ```
@@ -647,6 +675,7 @@ MW_TRACE=1 pnpm dev
 ### 查看 node 更新（调试流）
 
 非 production 环境下，`DeerFlowClient.stream()` 会自动打印每个 LangGraph node update：
+
 ```
 [node update] agent → ai(tool_calls=[search_web#call_xxx])
 ```
@@ -697,24 +726,24 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 
 ## 关键文件索引
 
-| 文件 | 职责 |
-|---|---|
-| `src/app/api/threads/_service.ts` | ThreadService 进程单例工厂 |
-| `src/app/api/v3/chat/[threadId]/route.ts` | 主聊天 API，三阶段管线 |
-| `src/deerflow-harness/clinet.ts` | DeerFlowClient，Agent 缓存 + 流式调用 |
-| `src/deerflow-harness/runtime/service.ts` | ThreadService 接口定义与实现 |
-| `src/deerflow-harness/agents/factory.ts` | createBaseAgent + assembleFromFeatures |
-| `src/deerflow-harness/agents/features.ts` | RuntimeFeatures + Next/Prev 装饰器 |
-| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts` | StreamBridge + ThreadChannel（缓冲回放） |
-| `src/deerflow-harness/runtime/sse/client-event.ts` | ClientAgentEvent 白名单协议（前后端共用） |
-| `src/deerflow-harness/runtime/sse/to-client-event.ts` | 内部事件 → 客户端事件的过滤边界 |
-| `src/deerflow-harness/types/agent-event.ts` | AgentEvent 内部事件枚举 |
-| `src/deerflow-harness/agents/memory/updater.ts` | MemoryUpdater（LLM 驱动记忆更新） |
-| `src/deerflow-harness/subagents/executor.ts` | SubagentExecutor（子代理执行，超时+取消） |
-| `src/deerflow-harness/runtime/context.ts` | AsyncLocalStorage 上下文传播 |
-| `src/store/conversation-store.ts` | 前端聊天会话状态 |
-| `src/store/deep-research-process-store.ts` | DeepResearch 流程状态（Immer） |
-| `src/utils/chat/stream-chat-handler.ts` | 前端 SSE 流处理 |
+| 文件                                                          | 职责                                      |
+| ------------------------------------------------------------- | ----------------------------------------- |
+| `src/app/api/threads/_service.ts`                             | ThreadService 进程单例工厂                |
+| `src/app/api/v3/chat/[threadId]/route.ts`                     | 主聊天 API，三阶段管线                    |
+| `src/deerflow-harness/client.ts`                              | DeerFlowClient，Agent 缓存 + 流式调用     |
+| `src/deerflow-harness/runtime/service.ts`                     | ThreadService 接口定义与实现              |
+| `src/deerflow-harness/agents/factory.ts`                      | createBaseAgent + assembleFromFeatures    |
+| `src/deerflow-harness/agents/features.ts`                     | RuntimeFeatures + Next/Prev 装饰器        |
+| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts` | StreamBridge + ThreadChannel（缓冲回放）  |
+| `src/deerflow-harness/runtime/sse/client-event.ts`            | ClientAgentEvent 白名单协议（前后端共用） |
+| `src/deerflow-harness/runtime/sse/to-client-event.ts`         | 内部事件 → 客户端事件的过滤边界           |
+| `src/deerflow-harness/types/agent-event.ts`                   | AgentEvent 内部事件枚举                   |
+| `src/deerflow-harness/agents/memory/updater.ts`               | MemoryUpdater（LLM 驱动记忆更新）         |
+| `src/deerflow-harness/subagents/executor.ts`                  | SubagentExecutor（子代理执行，超时+取消） |
+| `src/deerflow-harness/runtime/context.ts`                     | AsyncLocalStorage 上下文传播              |
+| `src/store/conversation-store.ts`                             | 前端聊天会话状态                          |
+| `src/store/deep-research-process-store.ts`                    | DeepResearch 流程状态（Immer）            |
+| `src/utils/chat/stream-chat-handler.ts`                       | 前端 SSE 流处理                           |
 
 ---
 

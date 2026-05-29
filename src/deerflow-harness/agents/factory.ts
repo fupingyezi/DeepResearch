@@ -101,18 +101,13 @@ export function createBaseAgent(opts: CreateAgentOptions) {
 /**
  * 装配中间件链与 lead-agent 内置 extra tools。
  *
- * 对齐 deer-flow 2.0：lead-agent 永远启用 subagent 能力，
- * `taskTool` 与 `subagentLimitMiddleware` 始终挂载，不再受 features.subagent
- * 控制。其它能力（memory / qwen recovery）仍按 features 开关条件挂载。
+ * lead-agent 永远启用 subagent 能力：`taskTool` 与 `subagentLimitMiddleware`
+ * 始终挂载。其它能力（memory / qwen recovery）按 features 开关条件挂载。
  *
- * SubagentExecutor 在内部调用 createBaseAgent 时不会传 features.subagent，
- * 但 lead-agent 工具集会包含 task；为防止 subagent 内部递归调用 task，
- * 实际工具集由 task-tool 在装载 subagent 工具时按 disabledTools 过滤掉。
- *
- * 注意：SubagentExecutor 调用 createBaseAgent 时同样会走这条路径，因此
+ * SubagentExecutor 内部调用 createBaseAgent 时同样会走这条路径，因此
  * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
  * 会过滤掉 task，最终绑定到 LLM 的工具列表里没有 task，模型不会调用它。
- * subagentLimitMiddleware 在 subagent 上下文中也是无害的（不会拦到 task）。
+ * subagentLimitMiddleware 在 subagent 上下文中无害（不会拦到 task）。
  */
 export function assembleFromFeatures(
   features: RuntimeFeatures,
@@ -123,7 +118,7 @@ export function assembleFromFeatures(
   const chain: AgentMiddleware[] = [];
   const extraTools: StructuredToolInterface[] = [];
 
-  // [*] QwenToolCallRecoveryMiddleware
+  // QwenToolCallRecoveryMiddleware：feature 启用，或 provider=qwen 时自动启用
   const recoveryFeat = features.qwenToolCallRecovery;
   if (recoveryFeat === true) {
     chain.push(qwenToolCallRecoveryMiddleware);
@@ -133,14 +128,13 @@ export function assembleFromFeatures(
     chain.push(qwenToolCallRecoveryMiddleware);
   }
 
-  // [3] ToolCallIntegrityMiddleware (始终启用)
-  //   统一处理消息层面的工具调用完整性问题（IntegrityRule 形式可插拔）。
+  // 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
 
-  // [4] ToolErrorHandlingMiddleware (始终启用)
+  // 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);
 
-  // [8] MemoryMiddleware (features.memory)
+  // 可选：长期记忆
   const memoryFeat = features.memory;
   if (memoryFeat === true) {
     chain.push(memoryMiddleware);
@@ -148,22 +142,15 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // [10] SubagentLimitMiddleware (始终启用)
-  //   lead-agent 永远具备 task 能力，必须挂上并发/总量上限兜底，
-  //   防止模型 prompt 失控产生过多 task。
-  //
-  //   注意：必须为每个 agent 实例创建**独立的** middleware 实例 ——
-  //   模块级单例会让 CounterRegistry 跨请求 / 跨 agent 共享，
-  //   一旦异常路径（客户端断流、上游 promise rejection 跑到外层）
-  //   导致 `inflight` 没有走到 finally 被回收，下一次请求一进来就会
-  //   误报 `subagent task concurrency limit reached`。每个 agent 独立
-  //   counter 后，agent 重建（cacheKey 命中重建分支）即可天然清零。
+  // 始终启用：subagent 频次/并发上限。每个 agent 实例独立 counter——
+  // 模块级单例会让 CounterRegistry 跨请求共享，异常路径下 inflight 不
+  // 回收会导致下次请求误报"concurrency limit reached"。
   chain.push(createSubagentLimitMiddleware());
 
-  // [11] LoopDetectionMiddleware (始终启用)
+  // 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
-  // [12] ClarificationMiddleware (始终最后)
+  // 始终最后：澄清性追问
   chain.push(clarificationMiddleware);
 
   // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）

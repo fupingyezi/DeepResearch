@@ -188,7 +188,7 @@ const BASE_SYSTEM_PROMPT = `You are a helpful AI research assistant acting as a 
 
 ${SUBAGENT_SECTION}`;
 
-/** 静态 system prompt（不含 memory），保留向后兼容。 */
+/** 静态 system prompt（不含 memory）；memory 关闭或注入失败时 fallback 到此值。 */
 export const SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;
 
 export interface BuildLeadAgentPromptOptions {

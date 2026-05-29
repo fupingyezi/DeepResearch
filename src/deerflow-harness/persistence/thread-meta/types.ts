@@ -43,8 +43,16 @@ export interface ThreadMetaStore {
   create(input: ThreadMetaCreateInput): Promise<ThreadMeta>;
   get(thread_id: string, opts?: { user_id?: string | null }): Promise<ThreadMeta | null>;
   search(opts: ThreadMetaSearchOptions): Promise<ThreadMeta[]>;
-  updateDisplayName(thread_id: string, name: string, opts?: { user_id?: string | null }): Promise<void>;
-  updateStatus(thread_id: string, status: ThreadStatus, opts?: { user_id?: string | null }): Promise<void>;
+  updateDisplayName(
+    thread_id: string,
+    name: string,
+    opts?: { user_id?: string | null },
+  ): Promise<void>;
+  updateStatus(
+    thread_id: string,
+    status: ThreadStatus,
+    opts?: { user_id?: string | null },
+  ): Promise<void>;
   updateMetadata(
     thread_id: string,
     patch: Record<string, any>,

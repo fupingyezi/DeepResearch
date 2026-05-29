@@ -47,16 +47,13 @@ export function createChatModel(config: ModelConfig) {
         `boundary). Falling back to env default model.`,
     );
   }
-  const modelName =
-    rawModelName && !isInheritPlaceholder ? rawModelName : 'deepseek-chat';
+  const modelName = rawModelName && !isInheritPlaceholder ? rawModelName : 'deepseek-chat';
   const temperature = config?.temperature ?? 0.7;
 
   const topP = config?.topP ?? (provider === 'qwen' ? 0.8 : 0.9);
   const maxTokens = config?.maxTokens ?? 4096;
-  const frequencyPenalty =
-    config?.frequencyPenalty ?? (provider === 'qwen' ? 0 : 0.3);
-  const presencePenalty =
-    config?.presencePenalty ?? (provider === 'qwen' ? 0 : 0.1);
+  const frequencyPenalty = config?.frequencyPenalty ?? (provider === 'qwen' ? 0 : 0.3);
+  const presencePenalty = config?.presencePenalty ?? (provider === 'qwen' ? 0 : 0.1);
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(

@@ -117,9 +117,7 @@ Return ONLY valid JSON, no explanation or markdown.`;
 
 import type { MemoryData, Fact } from './types';
 
-/* -------------------------------------------------------------------------- */
-/* Token counting                                                              */
-/* -------------------------------------------------------------------------- */
+// Token counting
 
 export type TokenCounter = (text: string) => number;
 
@@ -146,9 +144,7 @@ function coerceConfidence(value: any, dft = 0.0): number {
   return Math.max(0, Math.min(1, n));
 }
 
-/* -------------------------------------------------------------------------- */
-/* format_memory_for_injection                                                 */
-/* -------------------------------------------------------------------------- */
+// formatMemoryForInjection
 
 export function formatMemoryForInjection(
   memoryData: MemoryData | null | undefined,
@@ -209,8 +205,7 @@ export function formatMemoryForInjection(
       if (!content) continue;
       const category = (typeof fact.category === 'string' && fact.category.trim()) || 'context';
       const confidence = coerceConfidence(fact.confidence, 0);
-      const sourceError =
-        typeof (fact as any).sourceError === 'string' ? (fact as any).sourceError.trim() : '';
+      const sourceError = typeof fact.sourceError === 'string' ? fact.sourceError.trim() : '';
       const line =
         category === 'correction' && sourceError
           ? `- [${category} | ${confidence.toFixed(2)}] ${content} (avoid: ${sourceError})`
@@ -243,9 +238,7 @@ export function formatMemoryForInjection(
   return result;
 }
 
-/* -------------------------------------------------------------------------- */
-/* format_conversation_for_update                                              */
-/* -------------------------------------------------------------------------- */
+// formatConversationForUpdate
 
 const UPLOAD_BLOCK_RE = /<uploaded_files>[\s\S]*?<\/uploaded_files>\n*/gi;
 

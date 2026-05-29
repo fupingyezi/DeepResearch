@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib";
-import { ChatMessageType, fileMetadataType } from "@/types";
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib';
+import { ChatMessageType, fileMetadataType } from '@/types';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,9 +9,9 @@ export async function POST(request: NextRequest) {
     if (!sessionId) {
       return NextResponse.json(
         {
-          message: "Session ID is required",
+          message: 'Session ID is required',
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -41,10 +41,7 @@ export async function POST(request: NextRequest) {
         where session_id = $1 and message_id = $2
       `;
 
-      const fileMetadataResult = await query(fileMetadataQuery, [
-        message.session_id,
-        message.id,
-      ]);
+      const fileMetadataResult = await query(fileMetadataQuery, [message.session_id, message.id]);
 
       const files = fileMetadataResult.rows.map((row) => ({
         id: row.id,
@@ -71,19 +68,19 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        message: "Get messages success!",
+        message: 'Get messages success!',
         data: processedData,
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
-    console.error("Get messages error:", error);
+    console.error('Get messages error:', error);
     return NextResponse.json(
       {
-        message: "Get messages failed!",
+        message: 'Get messages failed!',
         error: error,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

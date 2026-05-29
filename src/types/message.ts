@@ -1,12 +1,12 @@
-import z from "zod";
+import z from 'zod';
 
 // ClineAsk - LLM请求用户交互或批准的消息类型
-export const clineAsks = ["followup", "command", "tool"]; // 所有可能的ask类型数组，包括followup、command、tool等
+export const clineAsks = ['followup', 'command', 'tool']; // 所有可能的ask类型数组，包括followup、command、tool等
 export const clineAskSchema = z.enum(clineAsks);
 export type ClineAsk = z.infer<typeof clineAskSchema>; // 表示需要用户响应的消息类型
 
 // ClineSay - 助手发送的不同类型消息
-export const clineSays = ["text", "error"]; // 所有可能的say类型数组，包括text、error等
+export const clineSays = ['text', 'error']; // 所有可能的say类型数组，包括text、error等
 export const clineSaySchema = z.enum(clineSays);
 export type ClineSay = z.infer<typeof clineSaySchema>; // 表示助手发送的消息类型
 
@@ -20,7 +20,7 @@ export type ToolProgressStatus = z.infer<typeof toolProgressStatusSchema>; // �
 // 消息结构类型
 export const clineMessageSchema = z.object({
   ts: z.number(),
-  type: z.union([z.literal("ask"), z.literal("say")]),
+  type: z.union([z.literal('ask'), z.literal('say')]),
   ask: clineAskSchema.optional(),
   say: clineSaySchema.optional(),
   text: z.string().optional(),

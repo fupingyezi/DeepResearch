@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
-import { uploadFile, ensureBucket } from "@/lib";
-import { extractTextFromFile } from "@/lib/file-parser";
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import { uploadFile, ensureBucket } from '@/lib';
+import { extractTextFromFile } from '@/lib/file-parser';
 
 export async function POST(request: NextRequest) {
   let uploadedKey: string | null = null;
@@ -10,23 +10,17 @@ export async function POST(request: NextRequest) {
     await ensureBucket();
 
     const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const fileId = formData.get("fileId") as string;
+    const file = formData.get('file') as File | null;
+    const fileId = formData.get('fileId') as string;
 
     if (!file || !fileId) {
-      return NextResponse.json(
-        { error: "Missing file or fileId" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing file or fileId' }, { status: 400 });
     }
 
     // 基本文件验证
     const maxSize = 50 * 1024 * 1024; // 50MB
     if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: "File size exceeds 50MB limit" },
-        { status: 413 }
-      );
+      return NextResponse.json({ error: 'File size exceeds 50MB limit' }, { status: 413 });
     }
 
     const arrayBuffer = await file.arrayBuffer();
@@ -43,7 +37,7 @@ export async function POST(request: NextRequest) {
           minio_bucket, minio_key, status
         ) VALUES ($1, $2, $3)
       `,
-      [process.env.MINIO_BUCKET!, minioKey, "parsing"]
+      [process.env.MINIO_BUCKET!, minioKey, 'parsing'],
     );
 
     // 解析文件内容
@@ -51,8 +45,8 @@ export async function POST(request: NextRequest) {
       const content = await extractTextFromFile(
         process.env.MINIO_BUCKET!,
         minioKey,
-        file.type || "application/octet-stream",
-        file.name
+        file.type || 'application/octet-stream',
+        file.name,
       );
 
       // 更新file_content表，保存解析结果
@@ -62,7 +56,7 @@ export async function POST(request: NextRequest) {
           SET content = $1, status = $2, updated_at = now()
           WHERE minio_key = $3
         `,
-        [content, "success", minioKey]
+        [content, 'success', minioKey],
       );
 
       return NextResponse.json(
@@ -70,15 +64,14 @@ export async function POST(request: NextRequest) {
           fileId,
           minioKey,
           filename: file.name,
-          mimeType: file.type || "application/octet-stream",
+          mimeType: file.type || 'application/octet-stream',
           sizeBytes: buffer.length,
-          content:
-            content.substring(0, 200) + (content.length > 200 ? "..." : ""),
+          content: content.substring(0, 200) + (content.length > 200 ? '...' : ''),
         },
-        { status: 200 }
+        { status: 200 },
       );
     } catch (parseError: any) {
-      console.error("Parse error:", parseError);
+      console.error('Parse error:', parseError);
 
       // 更新file_content表，记录解析失败
       await query(
@@ -87,7 +80,7 @@ export async function POST(request: NextRequest) {
           SET status = $1, error_message = $2, updated_at = now()
           WHERE minio_key = $3
         `,
-        ["failed", parseError.message, minioKey]
+        ['failed', parseError.message, minioKey],
       );
 
       return NextResponse.json(
@@ -95,23 +88,23 @@ export async function POST(request: NextRequest) {
           fileId,
           minioKey,
           filename: file.name,
-          mimeType: file.type || "application/octet-stream",
+          mimeType: file.type || 'application/octet-stream',
           sizeBytes: buffer.length,
           error: parseError.message,
         },
-        { status: 200 }
+        { status: 200 },
       );
     }
   } catch (error: any) {
-    console.error("Upload error:", error);
+    console.error('Upload error:', error);
 
     // 如果上传失败，清理已上传的文件
     if (uploadedKey) {
       try {
-        const { deleteFile } = await import("@/lib/storage");
+        const { deleteFile } = await import('@/lib/storage');
         await deleteFile(uploadedKey);
       } catch (cleanupError) {
-        console.error("Failed to cleanup uploaded file:", cleanupError);
+        console.error('Failed to cleanup uploaded file:', cleanupError);
       }
     }
 

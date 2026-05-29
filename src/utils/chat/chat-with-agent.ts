@@ -1,5 +1,5 @@
-import { StreamChatHandler } from "./stream-chat-handler";
-import { chatWithAgentProps } from "@/types";
+import { StreamChatHandler } from './stream-chat-handler';
+import { chatWithAgentProps } from '@/types';
 
 export const chatWithAgent = async (params: chatWithAgentProps) => {
   const {

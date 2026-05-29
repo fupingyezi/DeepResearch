@@ -9,7 +9,7 @@ import {
 import type { ToolCall } from '@langchain/core/messages/tool';
 
 /**
- * LoopDetectionMiddleware（位序 12 / 始终启用）
+ * LoopDetectionMiddleware
  *
  * 双层检测：
  *  1. **哈希层**：将一组 tool_calls 规范化为稳定 key，命中相同哈希
@@ -24,7 +24,6 @@ import type { ToolCall } from '@langchain/core/messages/tool';
  *    从 'tool_calls' 改为 'stop'，把警告附加到 content 末尾。
  */
 
-// ───── Defaults ─────────────────────────────────────────────────────────────
 const DEFAULT_WARN_THRESHOLD = 3;
 const DEFAULT_HARD_LIMIT = 5;
 const DEFAULT_WINDOW_SIZE = 20;
@@ -44,7 +43,6 @@ const toolFreqWarning = (toolName: string, count: number) =>
 const toolFreqHardStop = (toolName: string, count: number) =>
   `[FORCED STOP] Tool ${toolName} called ${count} times — exceeded the per-tool safety limit. Producing final answer with results collected so far.`;
 
-// ───── Types ────────────────────────────────────────────────────────────────
 export interface LoopDetectionOptions {
   warnThreshold?: number;
   hardLimit?: number;
@@ -61,7 +59,6 @@ interface ThreadState {
   toolFreqWarned: Set<string>;
 }
 
-// ───── Helpers ──────────────────────────────────────────────────────────────
 /** 稳定 JSON 序列化：按 key 排序，保证 hash 与 fallback key 的确定性。 */
 function stableStringify(value: any): string {
   const seen = new WeakSet<object>();
@@ -113,11 +110,7 @@ function normalizeQueryLike(s: any): string {
 }
 
 /** 从工具名 + 显著字段派生稳定 key（与 Python 版语义对齐）。 */
-function stableToolKey(
-  name: string,
-  args: Record<string, any>,
-  fallback: string | null,
-): string {
+function stableToolKey(name: string, args: Record<string, any>, fallback: string | null): string {
   // read_file: 按 200 行为粒度做行号 bucket，降低噪声
   if (name === 'read_file' && fallback === null) {
     const path = (args.path as string | undefined) ?? '';
@@ -210,7 +203,7 @@ function buildHardStopMessage(last: AIMessage, finalContent: MessageContent): AI
   });
 }
 
-// ───── Per-instance tracker (LRU via Map insertion order) ───────────────────
+// 进程内单例 tracker（按 Map 插入顺序做 LRU）
 class LoopTracker {
   private readonly threads = new Map<string, ThreadState>();
 
@@ -246,7 +239,6 @@ class LoopTracker {
   }
 }
 
-// ───── Factory ──────────────────────────────────────────────────────────────
 export function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
   const warnThreshold = options.warnThreshold ?? DEFAULT_WARN_THRESHOLD;
   const hardLimit = options.hardLimit ?? DEFAULT_HARD_LIMIT;

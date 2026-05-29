@@ -13,7 +13,7 @@
  *   ```
  *
  *   也允许首尾包含围栏（```json final-report 等变体）。Executor 提取 JSON 块解析；
- *   解析失败时 fallback 为整段文本（保持向后兼容）。
+ *   解析失败时退化为整段文本。
  */
 
 import { z } from 'zod';
@@ -95,9 +95,10 @@ export const SUBAGENT_REPORT_FORMAT_INSTRUCTION = `
  * @returns { json, markdown } 解析成功时返回 schema 验证后的对象 + 去掉
  *   fenced block 的纯 markdown 正文；解析失败时 json 为 null，markdown 为原文。
  */
-export function extractSubagentReport(
-  raw: string | null | undefined,
-): { json: SubagentReport | null; markdown: string } {
+export function extractSubagentReport(raw: string | null | undefined): {
+  json: SubagentReport | null;
+  markdown: string;
+} {
   const text = raw ?? '';
   if (!text) return { json: null, markdown: '' };
 

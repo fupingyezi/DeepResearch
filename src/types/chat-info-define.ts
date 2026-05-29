@@ -1,7 +1,7 @@
-import { ContentBlock } from "langchain";
-import { UUIDTypes } from "uuid";
+import { ContentBlock } from 'langchain';
+import { UUIDTypes } from 'uuid';
 
-export type UploadedFileStatus = "pending" | "parsing" | "success" | "failed";
+export type UploadedFileStatus = 'pending' | 'parsing' | 'success' | 'failed';
 
 export interface UploadedFile {
   id: string;
@@ -46,7 +46,7 @@ export interface SubagentToolCall {
   result?: any;
   success?: boolean;
   errorMessage?: string;
-  status: "running" | "done" | "failed";
+  status: 'running' | 'done' | 'failed';
 }
 
 /**
@@ -62,12 +62,12 @@ export interface SubagentStructuredReport {
 
 export type CoTStep =
   | {
-      kind: "reasoning";
+      kind: 'reasoning';
       id: string;
       text: string;
     }
   | {
-      kind: "tool_call";
+      kind: 'tool_call';
       id: string;
       /** 后端 toolCallId（用于把 TOOL_RESULT 关联回来） */
       toolCallId?: string;
@@ -76,10 +76,10 @@ export type CoTStep =
       result?: any;
       success?: boolean;
       errorMessage?: string;
-      status: "running" | "done" | "failed";
+      status: 'running' | 'done' | 'failed';
     }
   | {
-      kind: "subagent_task";
+      kind: 'subagent_task';
       id: string;
       /** 后端 taskId（用于 upsert） */
       taskId: string;
@@ -103,7 +103,7 @@ export interface MessageTimeline {
   /** 顺序事件流；空表示这条消息没有任何工具调用/思考过程，直接看正文即可 */
   steps: CoTStep[];
   /** 当前阶段总状态 */
-  status: "idle" | "processing" | "interrupt" | "end" | "failed";
+  status: 'idle' | 'processing' | 'interrupt' | 'end' | 'failed';
   /** human-in-the-loop 中断（仅 status==='interrupt' 时有效） */
   interrupt?: { question: string; details: any } | null;
 }

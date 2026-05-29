@@ -1,6 +1,6 @@
-import { chatWithAgent } from "./chat-with-agent";
-import { StreamChatConfig, StreamChatHandler } from "./stream-chat-handler";
-import type { reChatWithAgentProps } from "@/types";
+import { chatWithAgent } from './chat-with-agent';
+import { StreamChatConfig, StreamChatHandler } from './stream-chat-handler';
+import type { reChatWithAgentProps } from '@/types';
 
 export type { StreamChatConfig };
 export { chatWithAgent, StreamChatHandler };

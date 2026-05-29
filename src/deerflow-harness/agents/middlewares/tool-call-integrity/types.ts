@@ -17,10 +17,7 @@ import type { AIMessage, BaseMessage } from '@langchain/core/messages';
  */
 export interface IntegrityRule {
   readonly name: string;
-  sanitizeHistory?(
-    messages: BaseMessage[],
-    ctx: RuleContext,
-  ): BaseMessage[] | null;
+  sanitizeHistory?(messages: BaseMessage[], ctx: RuleContext): BaseMessage[] | null;
   sanitizeOutput?(message: AIMessage, ctx: RuleContext): void;
 }
 

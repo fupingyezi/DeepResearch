@@ -165,6 +165,18 @@ export interface TaskProgressPayload {
   searchResult?: any[];
   /** 任务结果 */
   result?: string;
+  /** subagent 内部工具调用 ID（status='tool_call' / 'tool_result' 时） */
+  toolCallId?: string;
+  /** subagent 内部工具名（status='tool_call' / 'tool_result' 时） */
+  toolName?: string;
+  /** subagent 内部 tool_call 的入参（JSON 字符串） */
+  arguments?: string;
+  /** subagent 内部 tool_result 的结果 */
+  toolResult?: any;
+  /** subagent 内部 tool_result 的成功标志 */
+  toolSuccess?: boolean;
+  /** subagent 内部 tool_result 的错误文案 */
+  toolErrorMessage?: string;
 }
 
 /** Sub-agent 调度 payload */

@@ -4,7 +4,7 @@ import type { IntegrityRule, RuleContext } from './types';
 import { DEFAULT_INTEGRITY_RULES } from './rules';
 
 /**
- * ToolCallIntegrityMiddleware（位序 3 / 始终启用）
+ * ToolCallIntegrityMiddleware（始终启用）
  *
  * 统一处理消息层面的工具调用完整性问题。具体规则以 IntegrityRule 形式注册：
  *
@@ -67,11 +67,7 @@ function applyHistoryRules(
 }
 
 /** 顺序应用所有规则的 sanitizeOutput，直接 mutate 模型刚返回的 AIMessage。 */
-function applyOutputRules(
-  result: any,
-  rules: readonly IntegrityRule[],
-  ctx: RuleContext,
-): void {
+function applyOutputRules(result: any, rules: readonly IntegrityRule[], ctx: RuleContext): void {
   const msg: any = result?.message ?? result;
   if (!msg || !AIMessage.isInstance(msg)) return;
   for (const rule of rules) {
@@ -79,16 +75,14 @@ function applyOutputRules(
   }
 }
 
-export function createToolCallIntegrityMiddleware(
-  options: ToolCallIntegrityOptions = {},
-) {
+export function createToolCallIntegrityMiddleware(options: ToolCallIntegrityOptions = {}) {
   const rules = options.rules ?? DEFAULT_INTEGRITY_RULES;
 
   return createMiddleware({
     name: 'ToolCallIntegrityMiddleware',
     wrapModelCall: async (request, handler) => {
       const ctx: RuleContext = {
-        knownToolNames: buildKnownToolNames((request as any).tools),
+        knownToolNames: buildKnownToolNames((request as { tools?: unknown }).tools),
       };
 
       let effectiveRequest = request;

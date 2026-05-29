@@ -11,10 +11,7 @@
 
 import { EventEmitter } from 'node:events';
 
-import {
-  ClientAgentEventType,
-  type ClientAgentEvent,
-} from '../sse/client-event';
+import { ClientAgentEventType, type ClientAgentEvent } from '../sse/client-event';
 
 const EV = 'ev';
 
@@ -23,7 +20,10 @@ export class ThreadChannel {
   private readonly buffer: ClientAgentEvent[] = [];
   private closed = false;
 
-  constructor(public readonly threadId: string, public readonly runId: string) {
+  constructor(
+    public readonly threadId: string,
+    public readonly runId: string,
+  ) {
     // 防止"超过 10 个监听器"警告（晚订阅多客户端场景）
     this.bus.setMaxListeners(0);
   }
@@ -92,7 +92,7 @@ export class ThreadChannel {
             // 3) 已 close 且无残留 → 终止
             if (isClosed()) {
               cleanup();
-              return { value: undefined as any as ClientAgentEvent, done: true };
+              return { value: undefined, done: true };
             }
             // 4) 等待下一个事件
             return new Promise<IteratorResult<ClientAgentEvent>>((resolve) => {
@@ -101,7 +101,7 @@ export class ThreadChannel {
           },
           async return(): Promise<IteratorResult<ClientAgentEvent>> {
             cleanup();
-            return { value: undefined as any as ClientAgentEvent, done: true };
+            return { value: undefined, done: true };
           },
         };
       },

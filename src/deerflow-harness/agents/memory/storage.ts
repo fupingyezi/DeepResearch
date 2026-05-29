@@ -62,7 +62,7 @@ export class FileMemoryStorage implements MemoryStorage {
       return userMemoryFile(userId);
     }
 
-    // legacy / 无 user 隔离
+    // 全局 memory（无 userId 隔离场景）
     if (agentName) {
       validateAgentName(agentName);
       return agentMemoryFile(agentName);

@@ -29,19 +29,16 @@ interface ChatBody {
   metadata?: Record<string, any>;
 }
 
-export async function POST(
-  request: NextRequest,
-  ctx: { params: { threadId: string } },
-) {
+export async function POST(request: NextRequest, ctx: { params: { threadId: string } }) {
   const { threadId } = ctx.params;
   const user_id = pickUserId(request);
 
   const body = (await request.json().catch(() => ({}))) as ChatBody;
   if (!body.input || typeof body.input !== 'string') {
-    return new Response(
-      JSON.stringify({ error: 'missing input' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ error: 'missing input' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   // 根据 metadata 中是否有 modelKey 来决定使用哪个客户端

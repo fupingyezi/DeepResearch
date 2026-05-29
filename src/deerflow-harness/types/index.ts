@@ -1,7 +1,5 @@
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { BaseCheckpointSaver } from '@langchain/langgraph';
-import { AgentMiddleware, createAgent } from 'langchain';
+import { AgentMiddleware } from 'langchain';
 import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 
 /**
@@ -32,15 +30,6 @@ export type BaseTool = StructuredToolInterface;
 export interface ClientOptions {
   /** agent 实例名称，用于区分日志 */
   agentName?: string;
-  /**
-   * @deprecated lead-agent 永远启用 subagent 能力，本字段不再生效；保留仅为
-   * 兼容旧调用点的字段穿透，请勿在新代码中使用。
-   */
-  planMode?: boolean;
-  /**
-   * @deprecated lead-agent 永远启用 subagent 能力，本字段不再生效。
-   */
-  subagentEnabled?: boolean;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
   /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
