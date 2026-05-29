@@ -21,7 +21,7 @@ import {
   buildModelConfigFromPreset,
   resolveModelConfig,
   MODEL_PRESETS,
-  type ModelPresetKey,
+  type ModelPresetName,
 } from '@/config/models';
 
 let service: ThreadService | null = null;
@@ -36,8 +36,8 @@ function ensureMemoryModelFactory(): void {
   if (memoryFactoryRegistered) return;
   setMemoryModelFactory((modelName) => {
     let base: ModelConfig;
-    if (modelName && MODEL_PRESETS[modelName as ModelPresetKey]) {
-      base = buildModelConfigFromPreset(modelName as ModelPresetKey);
+    if (modelName && MODEL_PRESETS[modelName as ModelPresetName]) {
+      base = buildModelConfigFromPreset(modelName as ModelPresetName);
     } else if (modelName) {
       const fallback = resolveModelConfig();
       base = { ...fallback, modelName };
@@ -67,7 +67,7 @@ function getDefaultModelConfig(): ModelConfig {
  * 从请求 body 的 configuration 中解析 modelConfig：
  * - body.configuration.model.value: string  → 在 MODEL_PRESETS 中查找
  *
- * 兼容直接传入 ModelPresetKey 字符串的旧调用风格（仅供内部 helper 复用）。
+ * 兼容直接传入 ModelPresetName 字符串的旧调用风格（仅供内部 helper 复用）。
  */
 function resolveModelConfigFromConfiguration(
   configuration?: { model?: { value?: string } } | null,
@@ -75,7 +75,7 @@ function resolveModelConfigFromConfiguration(
   const value = configuration?.model?.value;
   if (typeof value === 'string' && value.length > 0) {
     try {
-      return buildModelConfigFromPreset(value as ModelPresetKey);
+      return buildModelConfigFromPreset(value as ModelPresetName);
     } catch (e) {
       console.warn('[resolveModelConfigFromConfiguration] Failed to resolve preset key:', e);
       return getDefaultModelConfig();

@@ -1,6 +1,6 @@
 import { ModelConfig, ModelProvider } from '@/deerflow-harness';
 
-export type ModelPresetKey =
+export type ModelPresetName =
   | 'qwen-max'
   | 'qwen-turbo'
   | 'deepseek-v4-flash'
@@ -9,7 +9,7 @@ export type ModelPresetKey =
   | 'moonshot-v1';
 
 export interface ModelPreset {
-  key: ModelPresetKey;
+  key: ModelPresetName;
   label: string;
   provider: ModelProvider;
   modelName: string;
@@ -17,7 +17,7 @@ export interface ModelPreset {
   isBeta?: boolean;
 }
 
-export const MODEL_PRESETS: Record<ModelPresetKey, ModelPreset> = {
+export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
   'qwen-max': {
     key: 'qwen-max',
     label: 'Qwen Max (阿里)',
@@ -67,7 +67,7 @@ export const MODEL_PRESETS: Record<ModelPresetKey, ModelPreset> = {
  * 从 MODEL_PRESETS 构建 ModelConfig
  * 支持 preset key 或完全自定义的 ModelConfig
  */
-export function resolveModelConfig(modelKeyOrConfig?: ModelPresetKey | ModelConfig): ModelConfig {
+export function resolveModelConfig(modelKeyOrConfig?: ModelPresetName | ModelConfig): ModelConfig {
   // 默认使用 deepseek-v4-flash
   if (!modelKeyOrConfig) {
     return buildModelConfigFromPreset('deepseek-v4-flash');
@@ -75,7 +75,7 @@ export function resolveModelConfig(modelKeyOrConfig?: ModelPresetKey | ModelConf
 
   // 如果是字符串，从预设中查找
   if (typeof modelKeyOrConfig === 'string') {
-    const preset = MODEL_PRESETS[modelKeyOrConfig as ModelPresetKey];
+    const preset = MODEL_PRESETS[modelKeyOrConfig as ModelPresetName];
     if (!preset) {
       console.warn(
         `[resolveModelConfig] Unknown preset: ${modelKeyOrConfig}, fallback to deepseek-v4-flash`,
@@ -92,7 +92,7 @@ export function resolveModelConfig(modelKeyOrConfig?: ModelPresetKey | ModelConf
 /**
  * 从预设构建完整的 ModelConfig（包含 API key 和 base URL）
  */
-export function buildModelConfigFromPreset(presetKey: ModelPresetKey): ModelConfig {
+export function buildModelConfigFromPreset(presetKey: ModelPresetName): ModelConfig {
   const preset = MODEL_PRESETS[presetKey];
   if (!preset) {
     console.warn(

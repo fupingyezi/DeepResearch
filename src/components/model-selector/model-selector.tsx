@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useModelStore } from '@/store';
-import { MODEL_PRESETS, getAvailablePresets } from '@/config/models';
+import { MODEL_PRESETS, ModelPresetName, getAvailablePresets } from '@/config/models';
 
 interface ModelSelectorProps {
   className?: string;
@@ -10,13 +10,13 @@ interface ModelSelectorProps {
 }
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel = true }) => {
-  const { selectedModelKey, setSelectedModelKey } = useModelStore();
+  const { model, setModel } = useModelStore();
   const [isOpen, setIsOpen] = useState(false);
   const presets = getAvailablePresets();
-  const currentPreset = MODEL_PRESETS[selectedModelKey];
+  const currentPreset = MODEL_PRESETS[model];
 
-  const handleSelectModel = (key: any) => {
-    setSelectedModelKey(key);
+  const handleSelectModel = (next: ModelPresetName) => {
+    setModel(next);
     setIsOpen(false);
   };
 
@@ -47,7 +47,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel
               )}
             </>
           ) : (
-            <span className="truncate text-xs">{selectedModelKey}</span>
+            <span className="truncate text-xs">{model}</span>
           )}
         </span>
       </button>
@@ -60,7 +60,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel
               key={preset.key}
               type="button"
               onClick={() => handleSelectModel(preset.key)}
-              className={`w-full border-b border-[#f0f0f0] px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-[#f9f9f9] ${selectedModelKey === preset.key ? 'bg-[#eceaff]' : ''} `}
+              className={`w-full border-b border-[#f0f0f0] px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-[#f9f9f9] ${model === preset.key ? 'bg-[#eceaff]' : ''} `}
             >
               <div className="flex items-center justify-between">
                 <div className="flex-1">
@@ -74,7 +74,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{preset.description}</p>
                 </div>
-                {selectedModelKey === preset.key && (
+                {model === preset.key && (
                   <svg
                     className="ml-2 h-5 w-5 text-blue-600"
                     fill="currentColor"

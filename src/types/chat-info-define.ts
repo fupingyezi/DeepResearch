@@ -1,4 +1,5 @@
-import { UUIDTypes } from 'uuid';
+import type { UUIDTypes } from 'uuid';
+import type { UploadedFileInfo } from '@/store/file-upload-store';
 
 export type UploadedFileStatus = 'pending' | 'parsing' | 'success' | 'failed';
 
@@ -9,6 +10,15 @@ export interface UploadedFile {
   sizeBytes?: number;
   error?: string;
 }
+
+/**
+ * chat 调用入口携带的「已上传文件引用」最小集合。
+ *
+ * 仅暴露 fileId + mimeType：fileId 用于后端反查完整元信息，
+ * mimeType 用于前端区分 file/image content block。
+ * 其余字段（minioKey/filename/sizeBytes 等）属实现细节，不进入参数边界。
+ */
+export type ChatUploadedFileRef = Pick<UploadedFileInfo, 'fileId' | 'mimeType'>;
 
 /**
  * file_metadata 行的前端形态。

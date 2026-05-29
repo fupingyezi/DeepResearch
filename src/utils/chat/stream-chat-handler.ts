@@ -1,29 +1,24 @@
 import {
   ChatMessageType,
   ChatSessionType,
+  ChatUploadedFileRef,
   MessagePart,
   SubagentToolCall,
   SubagentStructuredReport,
 } from '@/types';
+import type { ModelPresetName } from '@/config/models';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 
 export interface StreamChatConfig {
-  /**
-   * 操作类型：
-   * - 缺省 = 普通发送（原 'direct'）
-   * - 'resume'     = 中断恢复
-   * - 'recall'     = 重新生成
-   * - 'reEditCall' = 重新编辑
-   */
   operation?: 'resume' | 'recall' | 'reEditCall';
   inputValue: string;
   /** operation === 'resume' 时使用：'确认'/'拒绝'等 human-in-the-loop 决策文本 */
   resumeDecision?: string;
   sessionId?: UUIDTypes;
   /** 已上传文件的元信息（前端上传后拿到，转成 message.contents 中的 file/image block，仅传 fileId） */
-  uploadedFiles?: Array<{ fileId: string; mimeType?: string; [k: string]: unknown }>;
+  uploadedFiles?: ChatUploadedFileRef[];
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
@@ -35,8 +30,8 @@ export interface StreamChatConfig {
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
 
-  /** 模型/参数等运行配置（映射成 configuration.model.value 等） */
-  modelKey?: string;
+  /** 模型预设标识（映射成 configuration.model.value 等运行配置） */
+  model?: ModelPresetName;
 
   // 自定义 hook
   onStreamComplete?: (data: Record<string, unknown>) => void;
@@ -50,18 +45,7 @@ type ArtifactPart = Extract<MessagePart, { type: 'artifact' }>;
 /**
  * StreamChatHandler
  *
- * 把 SSE 事件实时聚合为消息的 parts[]，并通过 rAF 合帧把最新 parts 写回
- * conversation-store。所有持久化由后端 /api/v3/chat 在 END 时统一完成，前端不
- * 再发起 update_messages / add_messages 等任何 DB 写请求。
- *
- * 合并规则与后端 AssistantPartsCollector 等价：
- *  - 连续 STREAM_CHUNK.text → 合并到一个 text part；
- *  - 连续 STREAM_CHUNK.reasoning → 合并到一个 reasoning part；
- *  - 被其它类型 part 打断后再次出现 text/reasoning 必须新建 part；
- *  - TOOL_RESULT 通过 toolCallId 反查写回对应 tool_call.content；
- *  - TASK_PROGRESS upsert 到 subagent_task part（其内部 children 维护子工具调用）；
- *  - STATE_UPDATE.report 追加 artifact part；
- *  - HUMAN_INTERRUPT 写顶层 message.interrupt（不入 parts）。
+ * 把 SSE 事件实时聚合为消息的 parts[]
  */
 export class StreamChatHandler {
   private config: StreamChatConfig;
@@ -99,10 +83,8 @@ export class StreamChatHandler {
     await this.executeStreamRequest();
   }
 
-  // ──────────────────────────────────────────────────────
-  // session / messages 初始化
-  // ──────────────────────────────────────────────────────
 
+  // session / messages 初始化
   private handleSession(): void {
     const existing = this.config.sessionId || '';
     if (existing) {
@@ -253,10 +235,7 @@ export class StreamChatHandler {
     }
   }
 
-  // ──────────────────────────────────────────────────────
   // SSE 处理
-  // ──────────────────────────────────────────────────────
-
   private async executeStreamRequest(): Promise<void> {
     try {
       const isResumeOp = this.config.operation === 'resume';
@@ -288,8 +267,8 @@ export class StreamChatHandler {
         requestBody.sessionId = this.sessionId;
       }
 
-      if (typeof this.config.modelKey === 'string' && this.config.modelKey.length > 0) {
-        requestBody.configuration = { model: { value: this.config.modelKey } };
+      if (typeof this.config.model === 'string' && this.config.model.length > 0) {
+        requestBody.configuration = { model: { value: this.config.model } };
       }
 
       if (this.config.operation !== undefined) {
@@ -387,10 +366,6 @@ export class StreamChatHandler {
     }
   }
 
-  // ──────────────────────────────────────────────────────
-  // START 事件处理（sessionId / messageId 替换）
-  // ──────────────────────────────────────────────────────
-
   /**
    * 处理 START 事件：把临时 sessionId / 占位 messageId 替换为后端下发的真实 uuid。
    *
@@ -474,10 +449,7 @@ export class StreamChatHandler {
     }
   }
 
-  // ──────────────────────────────────────────────────────
   // parts 维护
-  // ──────────────────────────────────────────────────────
-
   private appendOrMergeTextPart(text: string): void {
     if (this.lastPartType === 'text') {
       const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'text' }>;
@@ -863,10 +835,7 @@ export class StreamChatHandler {
     this.pushArtifactPart(title, reportContent);
   }
 
-  // ──────────────────────────────────────────────────────
   // flush（rAF 合帧）
-  // ──────────────────────────────────────────────────────
-
   private rafHandle: number | null = null;
   private pendingFlush = false;
 

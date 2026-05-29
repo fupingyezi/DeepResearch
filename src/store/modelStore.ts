@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ModelPresetKey, MODEL_PRESETS } from '@/config/models';
+import { ModelPresetName, MODEL_PRESETS } from '@/config/models';
 
 interface ModelState {
-  selectedModelKey: ModelPresetKey;
-  setSelectedModelKey: (key: ModelPresetKey) => void;
+  model: ModelPresetName;
+  setModel: (model: ModelPresetName) => void;
 }
 
-const DEFAULT_MODEL_KEY: ModelPresetKey = 'deepseek-v4-flash';
+const DEFAULT_MODEL: ModelPresetName = 'deepseek-v4-flash';
 
 /**
  * useModelStore
@@ -17,30 +17,44 @@ const DEFAULT_MODEL_KEY: ModelPresetKey = 'deepseek-v4-flash';
 export const useModelStore = create<ModelState>()(
   persist(
     (set) => ({
-      selectedModelKey: DEFAULT_MODEL_KEY,
-      setSelectedModelKey: (key: ModelPresetKey) => {
-        // 验证模型 key 的有效性
-        if (MODEL_PRESETS[key]) {
-          set({ selectedModelKey: key });
+      model: DEFAULT_MODEL,
+      setModel: (model: ModelPresetName) => {
+        // 验证模型有效性
+        if (MODEL_PRESETS[model]) {
+          set({ model });
         } else {
-          console.warn(`[useModelStore] Unknown model key: ${key}`);
+          console.warn(`[useModelStore] Unknown model: ${model}`);
         }
       },
     }),
     {
       name: 'model-store',
-      // version 升至 2：把旧默认值（qwen-max）迁移到新默认值（deepseek-v4-flash）
-      version: 2,
+      // version 历史：
+      // - v1：默认 qwen-max
+      // - v2：默认改为 deepseek-v4-flash（迁移老用户）
+      // - v3：字段从 selectedModelKey 重命名为 model
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
-        const state = (persistedState ?? {}) as Partial<ModelState>;
-        // v1 默认是 qwen-max；老用户如果从未主动切换，迁移到 deepseek-v4-flash
-        if (version < 2 && state.selectedModelKey === 'qwen-max') {
-          return { ...state, selectedModelKey: DEFAULT_MODEL_KEY } as ModelState;
+        const raw = (persistedState ?? {}) as Record<string, unknown>;
+
+        // v2 → v3：把 selectedModelKey 搬到 model
+        if (version < 3 && 'selectedModelKey' in raw) {
+          raw.model = raw.selectedModelKey;
+          delete raw.selectedModelKey;
         }
-        // 持久化里出现了未知 key，也回退到默认
-        if (state.selectedModelKey && !MODEL_PRESETS[state.selectedModelKey]) {
-          return { ...state, selectedModelKey: DEFAULT_MODEL_KEY } as ModelState;
+
+        const state = raw as Partial<ModelState>;
+
+        // v1 默认是 qwen-max；老用户如果从未主动切换，迁移到新默认值
+        if (version < 2 && state.model === ('qwen-max' as ModelPresetName)) {
+          return { ...state, model: DEFAULT_MODEL } as ModelState;
         }
+
+        // 持久化里出现了未知模型，回退到默认
+        if (state.model && !MODEL_PRESETS[state.model]) {
+          return { ...state, model: DEFAULT_MODEL } as ModelState;
+        }
+
         return state as ModelState;
       },
     },
@@ -51,6 +65,6 @@ export const useModelStore = create<ModelState>()(
  * 获取当前选中的模型预设
  */
 export function getCurrentModelPreset() {
-  const key = useModelStore((s) => s.selectedModelKey);
-  return MODEL_PRESETS[key] || MODEL_PRESETS[DEFAULT_MODEL_KEY];
+  const model = useModelStore((s) => s.model);
+  return MODEL_PRESETS[model] || MODEL_PRESETS[DEFAULT_MODEL];
 }

@@ -22,7 +22,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
   const currentMessages = useConversationStore((s) => s.currentMessages);
   const setShouldAutoScroll = useConversationStore((s) => s.setShouldAutoScroll);
   const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
-  const { selectedModelKey } = useModelStore();
+  const { model } = useModelStore();
 
   const handleChangeScroll = useCallback(
     (next: boolean) => {
@@ -41,7 +41,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
       const conversationStore = useConversationStore.getState();
       await chatWithAgent({
         inputValue,
-        modelKey: selectedModelKey,
+        model,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
         ...conversationStore,
       });
@@ -49,7 +49,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
         clearUploadedFiles();
       }
     },
-    [uploadedFiles, clearUploadedFiles, selectedModelKey],
+    [uploadedFiles, clearUploadedFiles, model],
   );
 
   return (
