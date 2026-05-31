@@ -1,7 +1,5 @@
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { BaseCheckpointSaver } from '@langchain/langgraph';
-import { AgentMiddleware, createAgent } from 'langchain';
+import { AgentMiddleware } from 'langchain';
 import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 
 /**
@@ -32,10 +30,6 @@ export type BaseTool = StructuredToolInterface;
 export interface ClientOptions {
   /** agent 实例名称，用于区分日志 */
   agentName?: string;
-  /** 是否开启 plan 模式 */
-  planMode?: boolean;
-  /** 是否启用子 agent */
-  subagentEnabled?: boolean;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
   /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
@@ -46,7 +40,6 @@ export interface ClientOptions {
 
 export interface AssembelOptions {
   name?: string;
-  planMode?: boolean;
   extraMiddlewares?: AgentMiddleware[];
   /** 当前 model 的 provider，用于 feature 自动判断（如 qwenToolCallRecovery）。 */
   provider?: ModelProvider;

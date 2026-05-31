@@ -12,11 +12,11 @@ class ApiClient {
   private baseURL: string;
   private defaultOptions: ApiClientOptions;
 
-  constructor(baseURL: string = "", defaultOptions: ApiClientOptions = {}) {
+  constructor(baseURL: string = '', defaultOptions: ApiClientOptions = {}) {
     this.baseURL = baseURL;
     this.defaultOptions = {
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...defaultOptions.headers,
       },
       ...defaultOptions,
@@ -27,7 +27,7 @@ class ApiClient {
   async request(
     endpoint: string,
     options: RequestOptions = {},
-    isFormData: boolean = false
+    isFormData: boolean = false,
   ): Promise<any> {
     const url = `${this.baseURL}${endpoint}`;
 
@@ -59,13 +59,13 @@ class ApiClient {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
         return await response.json();
       }
       return await response.text();
     } catch (error) {
-      console.error("API request failed:", error);
+      console.error('API request failed:', error);
       throw error;
     }
   }
@@ -74,44 +74,36 @@ class ApiClient {
   async get(
     endpoint: string,
     params: Record<string, any> = {},
-    options: RequestOptions = {}
+    options: RequestOptions = {},
   ): Promise<any> {
     const queryString = new URLSearchParams(params).toString();
     const url = queryString ? `${endpoint}?${queryString}` : endpoint;
 
     return this.request(url, {
-      method: "GET",
+      method: 'GET',
       ...options,
     });
   }
 
   // POST 请求
-  async post(
-    endpoint: string,
-    data: any = {},
-    options: RequestOptions = {}
-  ): Promise<any> {
+  async post(endpoint: string, data: any = {}, options: RequestOptions = {}): Promise<any> {
     const isFormData = data instanceof FormData;
 
     return this.request(
       endpoint,
       {
-        method: "POST",
+        method: 'POST',
         body: isFormData ? data : JSON.stringify(data),
         ...options,
       },
-      isFormData
+      isFormData,
     );
   }
 
   // PUT 请求
-  async put(
-    endpoint: string,
-    data: any = {},
-    options: RequestOptions = {}
-  ): Promise<any> {
+  async put(endpoint: string, data: any = {}, options: RequestOptions = {}): Promise<any> {
     return this.request(endpoint, {
-      method: "PUT",
+      method: 'PUT',
       body: JSON.stringify(data),
       ...options,
     });
@@ -120,12 +112,12 @@ class ApiClient {
   // DELETE 请求
   async delete(endpoint: string, options: RequestOptions = {}): Promise<any> {
     return this.request(endpoint, {
-      method: "DELETE",
+      method: 'DELETE',
       ...options,
     });
   }
 }
 
-const apiClient = new ApiClient("http://localhost:3000/api");
+const apiClient = new ApiClient('http://localhost:3000/api');
 export { ApiClient };
 export default apiClient;

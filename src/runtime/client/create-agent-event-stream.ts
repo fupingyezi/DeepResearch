@@ -23,7 +23,7 @@ export interface AgentEventStreamOptions {
   /** HTTP 方法，默认 POST。GET 时 body 会被忽略。 */
   method?: 'GET' | 'POST';
   /** POST body（会被 JSON.stringify 后发送） */
-  body?: unknown;
+  body?: any;
   /** 中断信号 */
   signal?: AbortSignal;
   /** 自定义 headers，会与默认的 Content-Type 合并 */
@@ -48,7 +48,7 @@ function makeErrorEvent(
  *
  * @example
  * ```ts
- * const stream = createAgentEventStream({ endpoint: "/api/chat/v2", body: { input } });
+ * const stream = createAgentEventStream({ endpoint: "/api/v3/chat/${threadId}", body: { input } });
  * for await (const event of stream) {
  *   if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
  *     console.log(event.payload.text);

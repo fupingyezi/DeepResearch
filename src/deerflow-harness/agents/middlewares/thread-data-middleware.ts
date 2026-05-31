@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * ThreadDataMiddleware（位序 0 / 基础设施）
+ * ThreadDataMiddleware（基础设施）
  *
  * 职责（占位）：
  * - 在 agent 启动前，从持久化层加载 thread 元数据（workspacePath / uploadsPath / outputsPath 等），

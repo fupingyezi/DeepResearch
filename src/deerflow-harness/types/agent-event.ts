@@ -44,9 +44,9 @@ export enum AgentEventType {
 
 /** LLM 流式文本 payload */
 export interface LlmStreamPayload {
-  /** 增量文本内容 */
-  text: string;
-  /** 可选的推理/思考文本 */
+  /** 增量正文内容（最终答案）；纯推理时省略 */
+  text?: string;
+  /** 推理/思考文本（含 tool_calls 时的 planning 文本） */
   reasoning?: string;
 }
 
@@ -165,6 +165,18 @@ export interface TaskProgressPayload {
   searchResult?: any[];
   /** 任务结果 */
   result?: string;
+  /** subagent 内部工具调用 ID（status='tool_call' / 'tool_result' 时） */
+  toolCallId?: string;
+  /** subagent 内部工具名（status='tool_call' / 'tool_result' 时） */
+  toolName?: string;
+  /** subagent 内部 tool_call 的入参（JSON 字符串） */
+  arguments?: string;
+  /** subagent 内部 tool_result 的结果 */
+  toolResult?: any;
+  /** subagent 内部 tool_result 的成功标志 */
+  toolSuccess?: boolean;
+  /** subagent 内部 tool_result 的错误文案 */
+  toolErrorMessage?: string;
 }
 
 /** Sub-agent 调度 payload */
@@ -213,11 +225,13 @@ export interface TaskStartedPayload {
 export interface TaskRunningPayload {
   taskId: string;
   /** 当前增量 AI 消息（结构化 JSON，前端可按需展示） */
-  message: unknown;
+  message: any;
   /** 当前是第几条（从 1 开始） */
   messageIndex: number;
   /** 截至目前累计的消息数 */
   totalMessages: number;
+  /** 含 tool_calls 时的 planning 文本，归入 timeline reasoning */
+  reasoning?: string;
 }
 
 /** Subagent task 完成 payload */
@@ -225,6 +239,8 @@ export interface TaskCompletedPayload {
   taskId: string;
   /** 文本结果（subagent 最终输出）；可能为 null */
   result: string | null;
+  /** 结构化报告 JSON（来自 final-report fenced block 解析）；可能为 null */
+  structured?: unknown;
 }
 
 /** Subagent task 失败 payload */
@@ -252,8 +268,6 @@ export interface TaskTimedOutPayload {
 export interface AgentEventMetadata {
   /** 会话 ID */
   sessionId?: string;
-  /** 深度研究 ID */
-  deepResearchId?: string;
   /** 其他自定义元数据 */
   [key: string]: any;
 }

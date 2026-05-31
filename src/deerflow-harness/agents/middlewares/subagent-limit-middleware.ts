@@ -2,18 +2,17 @@ import { createMiddleware } from 'langchain';
 import { ToolMessage } from '@langchain/core/messages';
 
 /**
- * SubagentLimitMiddleware（位序 11 / features.subagent 启用）
+ * SubagentLimitMiddleware
  *
  * 限制 lead-agent 通过 `task` 工具调度 subagent 的频次，防止 LLM
- * 在 plan-mode 下因 prompt 失控而无限拆分子任务。
+ * 因 prompt 失控而无限拆分子任务。
  *
  * 双闸：
  *   - maxConcurrent：单线程内"同时进行中"的 task 数量（默认 3）
  *   - maxTotal：单线程内**累计**调度的 task 数量上限（默认 8）
  *
- * 触发后：
- *   - 不调用底层工具 handler；直接返回一条 status='error' 的 ToolMessage，
- *     提示模型不要再发起新 task；继续回包当前已收集的证据并按 plan 收尾。
+ * 触发后不调用底层工具 handler，直接返回一条 status='error' 的 ToolMessage，
+ * 提示模型不要再发起新 task；继续回包当前已收集的证据并按 plan 收尾。
  *
  * 计数维度：按 LangGraph runtime.configurable.thread_id；缺省为 'default'。
  */
@@ -135,5 +134,5 @@ export function createSubagentLimitMiddleware(opts: SubagentLimitOptions = {}) {
   });
 }
 
-/** 默认实例（启用时由 factory 按 features.subagent 决定是否挂载）。 */
+/** 默认实例（被位序文档引用；真实链路装配请用 createSubagentLimitMiddleware()）。 */
 export const subagentLimitMiddleware = createSubagentLimitMiddleware();

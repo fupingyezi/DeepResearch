@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Copy, Check } from "lucide-react";
-import copy from "copy-to-clipboard";
+import { useState } from 'react';
+import { Copy, Check } from 'lucide-react';
+import copy from 'copy-to-clipboard';
 
 const CopyButton = ({ id }: { id: string }) => {
   const [copied, setCopied] = useState(false);
@@ -8,12 +8,12 @@ const CopyButton = ({ id }: { id: string }) => {
   const handleCopy = () => {
     const element = document.getElementById(id);
     if (element) {
-      const text = element.textContent || "";
+      const text = element.textContent || '';
       if (copy(text)) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } else {
-        console.error("Failed to copy text");
+        console.error('Failed to copy text');
       }
     }
   };
@@ -21,7 +21,7 @@ const CopyButton = ({ id }: { id: string }) => {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center gap-1 rounded px-2 py-1 text-sm text-zinc-600 hover:bg-zinc-200 hover:cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800"
+      className="flex items-center gap-1 rounded px-2 py-1 text-sm text-zinc-600 hover:cursor-pointer hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800"
     >
       {copied ? (
         <>

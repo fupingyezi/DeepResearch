@@ -30,7 +30,7 @@ export function createSseStream(
       };
       request.signal?.addEventListener('abort', cleanup);
 
-      const safeEnqueue = (data: unknown): boolean => {
+      const safeEnqueue = (data: any): boolean => {
         if (aborted) return false;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));

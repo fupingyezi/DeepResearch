@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * SummarizationMiddleware（位序 6 / features.summarization 启用）
+ * SummarizationMiddleware（features.summarization 启用）
  *
  * 职责（占位）：
  * - 在 beforeModel 检测消息长度 / token 阈值，超出时调用 LLM 进行摘要并替换历史，

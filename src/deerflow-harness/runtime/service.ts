@@ -12,18 +12,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
 
-import { DeerFlowClient } from '../clinet';
+import { DeerFlowClient } from '../client';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
 } from './sse/client-event';
 
-import type {
-  ThreadMeta,
-  ThreadMetaStore,
-  ThreadStatus,
-} from '../persistence/thread-meta';
+import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
 import type { RunStore } from '../persistence/runs';
 
 import { buildThreadConfig } from './checkpointer';
@@ -32,17 +28,13 @@ import { streamBridge } from './stream-bridge';
 
 const LOG = '[thread-service]';
 
-/* -------------------------------------------------------------------------- */
-/*  公共接口                                                                  */
-/* -------------------------------------------------------------------------- */
-
 export interface CreateThreadInput {
   /** 可选：外部指定 thread_id（用于和外部会话 ID 对齐，幂等创建）。不传则自动生成。 */
   thread_id?: string;
   user_id?: string;
   assistant_id?: string;
   display_name?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface ListThreadsOptions {
@@ -50,7 +42,7 @@ export interface ListThreadsOptions {
   status?: ThreadStatus;
   limit?: number;
   offset?: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface GetThreadInput {
@@ -68,7 +60,7 @@ export interface SubmitRunInput {
   thread_id: string;
   user_id?: string;
   input: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, any>;
 }
 
 export interface SubscribeInput {
@@ -84,15 +76,13 @@ export interface GetCheckpointInput {
 export interface ThreadService {
   createThread(input: CreateThreadInput): Promise<{ thread_id: string }>;
   listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]>;
-  getThread(
-    input: GetThreadInput,
-  ): Promise<{ meta: ThreadMeta; checkpoint?: unknown } | null>;
+  getThread(input: GetThreadInput): Promise<{ meta: ThreadMeta; checkpoint?: any } | null>;
   deleteThread(input: DeleteThreadInput): Promise<void>;
   submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
   subscribe(input: SubscribeInput): AsyncIterable<ClientAgentEvent>;
-  getCheckpoint(input: GetCheckpointInput): Promise<unknown>;
+  getCheckpoint(input: GetCheckpointInput): Promise<any>;
   /** 占位：interrupt/resume 后续版本提供 */
-  resume(input: { thread_id: string; run_id: string; decision: unknown }): Promise<never>;
+  resume(input: { thread_id: string; run_id: string; decision: any }): Promise<never>;
 }
 
 export interface ThreadServiceDeps {
@@ -102,9 +92,20 @@ export interface ThreadServiceDeps {
   runs: RunStore;
 }
 
-/* -------------------------------------------------------------------------- */
-/*  实现                                                                      */
-/* -------------------------------------------------------------------------- */
+/** 自定义错误：携带 code 字段，用于路由层做精细化响应。 */
+class ThreadServiceError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = 'ThreadServiceError';
+  }
+}
+
+interface CheckpointerWithDeleteThread {
+  deleteThread?: (threadId: string) => Promise<void>;
+}
 
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   const { client, checkpointer, threads, runs } = deps;
@@ -145,19 +146,17 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) return null;
       if (!includeCheckpoint) return { meta: threadMeta };
-      // PostgresSaver / MemorySaver 都暴露 getTuple
-      const cp = await getTupleSafe(checkpointer, thread_id);
-      return { meta: threadMeta, checkpoint: cp };
+      const checkpoint = await getTupleSafe(checkpointer, thread_id);
+      return { meta: threadMeta, checkpoint };
     },
 
     async deleteThread({ thread_id, user_id }) {
       await threads.delete(thread_id, { user_id: user_id ?? null });
-      // 尝试清理 checkpoint（PostgresSaver 1.x 提供 deleteThread）
-      const fn = (checkpointer as unknown as { deleteThread?: (tid: string) => Promise<void> })
-        .deleteThread;
-      if (typeof fn === 'function') {
+      // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
+      const saver = checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
+      if (typeof saver.deleteThread === 'function') {
         try {
-          await fn.call(checkpointer, thread_id);
+          await saver.deleteThread.call(saver, thread_id);
         } catch (e) {
           console.warn(`${LOG} deleteThread checkpoint cleanup failed:`, (e as Error)?.message);
         }
@@ -168,9 +167,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     async submitRun({ thread_id, user_id, input, metadata }) {
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) {
-        const err = new Error(`thread not found: ${thread_id}`);
-        (err as Error & { code?: string }).code = 'NOT_FOUND';
-        throw err;
+        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
       }
 
       const run_id = uuidv4();
@@ -184,7 +181,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       await threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
       await runs.setStatus(run_id, 'running');
 
-      const ch = streamBridge.channel(thread_id, run_id);
+      const channel = streamBridge.channel(thread_id, run_id);
       const ctx: RuntimeContext = {
         thread_id,
         run_id,
@@ -198,7 +195,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           await runWithContext(ctx, async () => {
             const stream = client.stream(input, thread_id, metadata ?? {});
             for await (const ev of stream) {
-              ch.publish(ev);
+              channel.publish(ev);
             }
           });
 
@@ -206,24 +203,24 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
           console.info(`${LOG} run succeeded thread_id=${thread_id} run_id=${run_id}`);
         } catch (e) {
-          const msg = (e as Error)?.message ?? String(e);
-          ch.publish(
+          const message = (e as Error)?.message ?? String(e);
+          channel.publish(
             createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
               errorCode: 'THREAD_RUN_ERROR',
-              errorMessage: msg,
+              errorMessage: message,
               recoverable: false,
             }),
           );
           try {
-            await runs.setStatus(run_id, 'failed', msg);
+            await runs.setStatus(run_id, 'failed', message);
             await threads.updateStatus(thread_id, 'error', { user_id: user_id ?? null });
           } catch (e2) {
             console.error(`${LOG} status persist on error failed:`, (e2 as Error)?.message);
           }
-          console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${msg}`);
+          console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
         } finally {
           // 兜底 END：channel 自身会去重（已 closed 后 publish 是 no-op）
-          ch.publish(
+          channel.publish(
             createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
           );
         }
@@ -246,21 +243,16 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   };
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Helpers                                                                   */
-/* -------------------------------------------------------------------------- */
-
 async function getTupleSafe(
   checkpointer: BaseCheckpointSaver,
   thread_id: string,
   checkpoint_id?: string,
-): Promise<unknown> {
-  const cfg = buildThreadConfig(thread_id, checkpoint_id);
-  // BaseCheckpointSaver 接口暴露 getTuple；此处 as any 仅用于兼容部分实现签名
+): Promise<any> {
+  const config = buildThreadConfig(thread_id, checkpoint_id);
   const fn = checkpointer.getTuple;
   if (typeof fn !== 'function') return null;
   try {
-    return await fn.call(checkpointer, cfg);
+    return await fn.call(checkpointer, config);
   } catch (e) {
     console.warn(`${LOG} getTuple failed:`, (e as Error)?.message);
     return null;

@@ -4,7 +4,7 @@
  * 如需启用，取消下方注释并确保 Redis 服务可用。
  */
 
-import { createClient } from "redis";
+import { createClient } from 'redis';
 
 let redis: ReturnType<typeof createClient> | null = null;
 let connected = false;
@@ -22,20 +22,20 @@ async function getRedisClient() {
         connectTimeout: 10000,
         reconnectStrategy: (retries) => {
           if (retries > 3) {
-            console.error("Redis 重连次数过多，停止重连");
-            return new Error("Redis 重连次数过多");
+            console.error('Redis 重连次数过多，停止重连');
+            return new Error('Redis 重连次数过多');
           }
           return Math.min(retries * 200, 3000);
         },
       },
     });
 
-    redis.on("error", (err) => {
-      console.warn("Redis Client Error:", err.message);
+    redis.on('error', (err) => {
+      console.warn('Redis Client Error:', err.message);
     });
 
-    redis.on("connect", () => {
-      console.log("Redis connected successfully");
+    redis.on('connect', () => {
+      console.log('Redis connected successfully');
       connected = true;
     });
   }
@@ -45,7 +45,7 @@ async function getRedisClient() {
       await redis.connect();
       connected = true;
     } catch (err: any) {
-      console.warn("Redis 连接失败，缓存功能不可用:", err.message);
+      console.warn('Redis 连接失败，缓存功能不可用:', err.message);
       return null;
     }
   }
@@ -53,11 +53,7 @@ async function getRedisClient() {
   return redis;
 }
 
-export async function setCache(
-  key: string,
-  value: string,
-  expireSeconds?: number
-) {
+export async function setCache(key: string, value: string, expireSeconds?: number) {
   const client = await getRedisClient();
   if (!client) return;
   const stringValue = JSON.stringify(value);

@@ -1,82 +1,59 @@
-"use client";
+'use client';
 
-import { ChatLayoutProps, ChatWindowProps } from "@/types";
-import React, { useCallback } from "react";
-import ChatMessage from "./chat-message";
-import ChatInput from "./chat-input";
-import {
-  useConversationStore,
-  useDeepResearchProcessStore,
-  useChatSelectStore,
-  useFileUploadStore,
-} from "@/store";
-import {
-  chatWithChatAssistant,
-  chatWithDeepResearch,
-  chatWithSearhAssistant,
-} from "@/utils/chat";
+import { ChatLayoutProps, ChatWindowProps } from '@/types';
+import React, { useCallback } from 'react';
+import ChatMessage from './chat-message';
+import ChatInput from './chat-input';
+import { useConversationStore, useFileUploadStore, useModelStore } from '@/store';
+import { chatWithAgent } from '@/utils/chat';
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {
   return (
-    <div className="h-screen flex-1 flex flex-col pb-8">
-      <div className="flex-1 overflow-y-auto scrollbar-hide p-4">{content}</div>
-      <div className="shrink-0 bg-white">{footer}</div>
+    <div className="flex h-screen flex-1 flex-col pb-6">
+      <div className="scrollbar-hide flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto h-full w-full max-w-[960px]">{content}</div>
+      </div>
+      <div className="shrink-0 bg-transparent px-6">
+        <div className="mx-auto w-full max-w-[960px]">{footer}</div>
+      </div>
     </div>
   );
 };
 
-const ChatWindow: React.FC<ChatWindowProps> = ({
-  emptyStateComponent,
-  placeholder,
-  className,
-}) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholder, className }) => {
   const isChating = useConversationStore((s) => s.isChating);
   const shouldAutoScroll = useConversationStore((s) => s.shouldAutoScroll);
   const currentMessages = useConversationStore((s) => s.currentMessages);
   const setShouldAutoScroll = useConversationStore((s) => s.setShouldAutoScroll);
   const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
+  const { model } = useModelStore();
 
   const handleChangeScroll = useCallback(
     (next: boolean) => {
       setShouldAutoScroll(next);
     },
-    [setShouldAutoScroll]
+    [setShouldAutoScroll],
   );
 
   const handleSendMessage = useCallback(
-    async (inputValue: string, hasFiles?: boolean) => {
-      const { selectedAgent } = useChatSelectStore.getState();
+    async (
+      inputValue: string,
+      opts?: {
+        hasFiles?: boolean;
+      },
+    ) => {
       const conversationStore = useConversationStore.getState();
-      const deepResearchStore = useDeepResearchProcessStore.getState();
-      if (selectedAgent === "chat") {
-        await chatWithChatAssistant({
-          inputValue,
-          hasFiles,
-          uploadedFiles,
-          callingMode: "direct",
-          ...conversationStore,
-        });
-        // 发送后清理文件状态
-        if (hasFiles) {
-          clearUploadedFiles();
-        }
-      } else if (selectedAgent === "search") {
-        await chatWithSearhAssistant({
-          inputValue,
-          callingMode: "direct",
-          ...conversationStore,
-        });
-      } else if (selectedAgent === "deepResearch") {
-        deepResearchStore.resetState();
-        await chatWithDeepResearch({
-          inputValue,
-          callingMode: "direct",
-          ...conversationStore,
-          ...deepResearchStore,
-        });
+      await chatWithAgent({
+        inputValue,
+        model,
+        uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
+        ...conversationStore,
+      });
+      if (opts?.hasFiles) {
+        clearUploadedFiles();
       }
     },
-    [uploadedFiles, clearUploadedFiles]
+    [uploadedFiles, clearUploadedFiles, model],
   );
 
   return (
@@ -91,15 +68,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         />
       }
       footer={
-        <ChatInput
-          placeholder={placeholder}
-          onSend={handleSendMessage}
-          disabled={isChating}
-        />
+        <ChatInput placeholder={placeholder} onSend={handleSendMessage} disabled={isChating} />
       }
     />
   );
 };
 
 export default ChatWindow;
-

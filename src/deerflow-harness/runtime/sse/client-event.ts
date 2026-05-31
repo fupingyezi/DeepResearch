@@ -37,18 +37,41 @@ export enum ClientAgentEventType {
   HEARTBEAT = 'heartbeat',
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Payload 接口                                                               */
-/* -------------------------------------------------------------------------- */
-
 export interface StartPayload {
   sessionId?: string;
+  /**
+   * 完整的 chat_session 元信息，仅在新建 session 场景下由后端首次下发，
+   * 前端据此把临时 session 替换为真实记录并加入侧栏。
+   *
+   * - 若 `sessionId` 与前端当前 sessionId 一致，前端应跳过替换。
+   * - `created_at` / `updated_at` 为毫秒时间戳。
+   */
+  chatSession?: {
+    id: string;
+    seq_id: number;
+    title: string;
+    created_at: number;
+    updated_at: number;
+  };
+  /**
+   * 后端为本轮对话分配的真实 message id（UUID 字符串）。
+   *
+   * - `userMessageId`：后端在收到请求后立即写入 chat_message 后回传的 id。
+   *   前端据此把临时 user message 的 id 替换为真实 id（用于后续删除/截断）。
+   * - `assistantMessageId`：后端预生成的 assistant message id（在 END 时写入 DB
+   *   时使用同一个 id）。前端据此把占位 assistant message 的 id 替换为真实 id，
+   *   保持 React key 稳定与 DB 一致。
+   *
+   * 仅在普通发送 / recall / reEditCall 场景下下发；resume 场景按原行为不变。
+   */
+  userMessageId?: string;
+  assistantMessageId?: string;
 }
 
 export interface StreamChunkPayload {
-  /** 增量文本 */
-  text: string;
-  /** 可选推理/思考文本 */
+  /** 增量正文（最终答案）；纯推理时省略 */
+  text?: string;
+  /** 推理/思考文本（含 tool_calls 时的 planning 文本） */
   reasoning?: string;
 }
 
@@ -63,7 +86,7 @@ export interface ToolResultPayload {
   toolCallId: string;
   toolName: string;
   /** 工具返回结果 */
-  result: unknown;
+  result: any;
   success: boolean;
   errorMessage?: string;
 }
@@ -77,14 +100,17 @@ export interface StateUpdatePayload {
     | 'report'
     | 'research_target'
     | 'custom';
-  data: unknown;
+  data: any;
 }
 
 /**
  * TaskProgressPayload —— 折叠 task_started / task_running / task_completed /
- * task_failed / task_cancelled / task_timed_out 六类 internal 事件。
+ * task_failed / task_cancelled / task_timed_out 六类 internal 事件，并新增
+ * task_tool_call / task_tool_result 用于把 subagent 内部的工具调用透传给前端。
  *
- * - status: 'started' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+ * - status:
+ *    'started' | 'running' | 'tool_call' | 'tool_result' |
+ *    'completed' | 'failed' | 'cancelled' | 'timed_out'
  *   其余字段按 status 语义可选填。
  */
 export interface TaskProgressPayload {
@@ -94,20 +120,33 @@ export interface TaskProgressPayload {
   /** subagent 类型名（仅 started 时有值） */
   subagentType?: string;
   /** 增量 message（仅 running 时有值） */
-  message?: unknown;
+  message?: any;
   messageIndex?: number;
   totalMessages?: number;
+  /** sub-agent 内部 AI message 的思考/规划文本（仅 running 时有值） */
+  reasoning?: string;
   /** 终态结果（completed 时） */
   result?: string | null;
+  /** 终态结构化报告（completed 时，可能为 null） */
+  structured?: unknown;
   /** 终态错误（failed / cancelled / timed_out 时） */
   error?: string | null;
-  /** 兼容扩展字段 */
-  [k: string]: unknown;
+  /** subagent 内部工具调用相关字段（仅 tool_call / tool_result 时有值） */
+  toolCallId?: string;
+  toolName?: string;
+  /** tool_call 的 arguments（JSON 字符串） */
+  arguments?: string;
+  /** tool_result 的 result/success/errorMessage */
+  toolResult?: any;
+  toolSuccess?: boolean;
+  toolErrorMessage?: string;
+  /** 扩展字段（前端按需透传） */
+  [k: string]: any;
 }
 
 export interface HumanInterruptPayload {
   question: string;
-  details: unknown;
+  details: any;
 }
 
 export interface ErrorPayload {
@@ -119,10 +158,6 @@ export interface ErrorPayload {
 /** END / HEARTBEAT 不携带业务字段 */
 export type EndPayload = Record<string, never>;
 export type HeartbeatPayload = Record<string, never>;
-
-/* -------------------------------------------------------------------------- */
-/*  事件接口（discriminated union）                                            */
-/* -------------------------------------------------------------------------- */
 
 interface BaseClientAgentEvent {
   /** 事件时间戳（毫秒） */

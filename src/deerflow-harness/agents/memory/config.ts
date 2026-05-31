@@ -54,7 +54,7 @@ export function setMemoryConfig(config: MemoryConfig): void {
 }
 
 /** 从 dict 加载（部分字段可缺失，未提供则用默认）。 */
-export function loadMemoryConfigFromDict(dict: Partial<Record<string, unknown>>): void {
+export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): void {
   const out: MemoryConfig = { ...DEFAULT_MEMORY_CONFIG };
   const m = dict as Record<string, any>;
 

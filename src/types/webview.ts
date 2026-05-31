@@ -1,13 +1,13 @@
-import React, { ReactNode } from "react";
-import { ChatMessageType } from "./chat-info-define";
-import { UploadedFile } from "./chat-info-define";
+import React, { ReactNode } from 'react';
+import { ChatMessageType } from './chat-info-define';
+import { UploadedFile } from './chat-info-define';
 
 export interface ChatMessageBubbleProps {
   message: ChatMessageType;
   isLastAIMessage: boolean;
   isLastHumanMessage: boolean;
-  selectDownloadId: number;
-  setSelectDownloadId: (selectDownloadId: number) => void;
+  selectDownloadId: string;
+  setSelectDownloadId: (selectDownloadId: string) => void;
 }
 
 export interface ChatMessagesProps {
@@ -18,9 +18,13 @@ export interface ChatMessagesProps {
   className?: string;
 }
 
+export interface ChatInputSendOptions {
+  hasFiles?: boolean;
+}
+
 export interface ChatInputProps {
   placeholder?: string;
-  onSend?: (message: string, hasFiles?: boolean) => void;
+  onSend?: (message: string, opts?: ChatInputSendOptions) => void;
   disabled?: boolean;
   className?: string;
 }
@@ -36,7 +40,7 @@ export interface ChatLayoutProps {
   footer: ReactNode;
 }
 
-export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
+export interface FileItemsProps extends Omit<UploadedFile, 'error' | 'file'> {
   fileName: string;
   ImgComponent: React.ComponentType<{
     className?: string;
@@ -46,8 +50,8 @@ export interface FileItemsProps extends Omit<UploadedFile, "error" | "file"> {
   canClose?: boolean;
 }
 
-export type MessageToolType = "copy" | "recall" | "edit" | "download";
-export type SupportDownloadFileType = "pdf" | "word" | "md" | "cancel";
+export type MessageToolType = 'copy' | 'recall' | 'edit' | 'download';
+export type SupportDownloadFileType = 'pdf' | 'word' | 'md' | 'cancel';
 
 export interface MessageToolBarProps {
   tools: MessageToolType[];

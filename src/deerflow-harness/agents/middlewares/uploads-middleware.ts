@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * UploadsMiddleware（位序 1 / 基础设施）
+ * UploadsMiddleware（基础设施）
  *
  * 职责（占位）：
  * - 在 sandbox 创建前，处理用户附件上传：解析 ThreadState.uploadedFiles，

@@ -1,11 +1,8 @@
-"use client";
+'use client';
 
-import { useContext } from "react";
+import { useContext } from 'react';
 
-import {
-  AgentEventContext,
-  type AgentEventContextValue,
-} from "./agent-event-context";
+import { AgentEventContext, type AgentEventContextValue } from './agent-event-context';
 
 /**
  * useAgentEvent
@@ -17,9 +14,7 @@ import {
 export function useAgentEvent(): AgentEventContextValue {
   const ctx = useContext(AgentEventContext);
   if (!ctx) {
-    throw new Error(
-      "useAgentEvent must be used within <AgentEventProvider>",
-    );
+    throw new Error('useAgentEvent must be used within <AgentEventProvider>');
   }
   return ctx;
 }

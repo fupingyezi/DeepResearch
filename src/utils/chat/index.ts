@@ -1,15 +1,17 @@
-import { chatWithChatAssistant } from "./chat-with-chat-assistant";
-import { chatWithDeepResearch } from "./chat-with-deep-research";
-import { chatWithSearhAssistant } from "./chat-with-search-assistant";
-import { StreamChatConfig, StreamChatHandler } from "./stream-chat-handler";
-import { reChatWithAssistant } from "./re-chat-assistant";
+import { chatWithAgent } from './chat-with-agent';
+import { StreamChatConfig, StreamChatHandler } from './stream-chat-handler';
+import type { reChatWithAgentProps } from '@/types';
 
 export type { StreamChatConfig };
+export { chatWithAgent, StreamChatHandler };
 
-export {
-  chatWithChatAssistant,
-  chatWithDeepResearch,
-  chatWithSearhAssistant,
-  StreamChatHandler,
-  reChatWithAssistant,
-};
+/**
+ * 重新编辑 / 重新生成入口：与 chatWithAgent 共用同一条链路。
+ * 上层只需要把 operation 设为 'reEditCall' 或 'recall' 即可。
+ */
+export async function reChatWithAgent(params: reChatWithAgentProps) {
+  await chatWithAgent({
+    ...params,
+    operation: params.operation,
+  });
+}

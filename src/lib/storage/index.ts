@@ -1,10 +1,10 @@
-import { Client } from "minio";
-import { UUIDTypes } from "uuid";
+import { Client } from 'minio';
+import { UUIDTypes } from 'uuid';
 
 const minioClient = new Client({
   endPoint: process.env.MINIO_ENDPOINT!,
-  port: parseInt(process.env.MINIO_PORT || "9000"),
-  useSSL: process.env.MINIO_USE_SSL === "true",
+  port: parseInt(process.env.MINIO_PORT || '9000'),
+  useSSL: process.env.MINIO_USE_SSL === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY!,
   secretKey: process.env.MINIO_SECRET_KEY!,
 });
@@ -21,7 +21,7 @@ export async function ensureBucket() {
       console.log(`Bucket ${BUCKET_NAME} already exists`);
     }
   } catch (error) {
-    console.error("MinIO connection error:", error);
+    console.error('MinIO connection error:', error);
     throw new Error(`Failed to connect to MinIO: ${error}`);
   }
 }
@@ -34,13 +34,9 @@ export async function initializeBucket() {
   }
 }
 
-export async function uploadFile(
-  fileName: string,
-  fileId: UUIDTypes,
-  buffer: Buffer
-) {
+export async function uploadFile(fileName: string, fileId: UUIDTypes, buffer: Buffer) {
   await initializeBucket();
-  const extensionName = fileName.split(".").pop() || "";
+  const extensionName = fileName.split('.').pop() || '';
   const objectName = `${Date.now()}-${fileName}`;
   const objectKey = `files/${fileId}/${objectName}`;
 
@@ -52,11 +48,7 @@ export async function uploadFile(
 }
 
 export async function getFileUrl(objectKey: string, expiryHours = 24) {
-  const url = await minioClient.presignedGetObject(
-    BUCKET_NAME,
-    objectKey,
-    expiryHours * 7 * 3600
-  );
+  const url = await minioClient.presignedGetObject(BUCKET_NAME, objectKey, expiryHours * 7 * 3600);
   return url;
 }
 
@@ -70,16 +62,16 @@ export async function getFile(objectKey: string) {
 
 export function getMimeType(ext: string): string {
   const mimeMap: Record<string, string> = {
-    pdf: "application/pdf",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    doc: "application/msword",
-    md: "text/markdown",
-    txt: "text/plain",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    md: 'text/markdown',
+    txt: 'text/plain',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
   };
-  return mimeMap[ext.toLowerCase()] || "application/octet-stream";
+  return mimeMap[ext.toLowerCase()] || 'application/octet-stream';
 }
 
 export default minioClient;

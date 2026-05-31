@@ -2,7 +2,7 @@ import { createMiddleware } from 'langchain';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 
 /**
- * ClarificationMiddleware（位序 13 / 始终最后）
+ * ClarificationMiddleware（始终最后）
  *
  * 与 `ask_clarification` 工具配合实现"按需 clarification"流程：
  *
@@ -60,8 +60,7 @@ export const clarificationMiddleware = createMiddleware({
       );
       return new AIMessage({
         content:
-          '我已经把澄清问题抛给你了，请在上方决策面板中作答。' +
-          '我会根据你的回复继续推进研究。',
+          '我已经把澄清问题抛给你了，请在上方决策面板中作答。' + '我会根据你的回复继续推进研究。',
         tool_calls: [],
       });
     }

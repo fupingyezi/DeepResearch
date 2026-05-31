@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * SandboxMiddleware（位序 2 / 基础设施）
+ * SandboxMiddleware（基础设施）
  *
  * 职责（占位）：
  * - 创建 / 复用沙箱（如 e2b、本地容器），把 ThreadData & Uploads 挂载进去，

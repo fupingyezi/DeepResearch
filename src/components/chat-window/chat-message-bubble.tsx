@@ -1,21 +1,93 @@
-import { CheckCircleOutlined, LoadingOutlined } from "@ant-design/icons";
-import { Button, Spin, message as antdMessage } from "antd";
-import FileItem from "../files/file-items";
-import CustomMarkdown from "../markdown/custom-markdown";
-import MessageToolBar from "../message-tool-bar/message-tool-bar";
+import { LoadingOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Button, Spin } from 'antd';
+import FileItem from '../files/file-items';
+import CustomMarkdown from '../markdown/custom-markdown';
+import MessageToolBar from '../message-tool-bar/message-tool-bar';
+import MessageTimeline from './message-timeline';
 
-import { useState } from "react";
-import { useCopy } from "@/utils/hooks";
-import { useDeepResearchProcessStore, useConversationStore } from "@/store";
-import { ChatMessageBubbleProps, SupportDownloadFileType } from "@/types";
-import { reChatWithAssistant } from "@/utils/chat";
+import { useMemo, useState } from 'react';
+import { useCopy } from '@/utils/hooks';
+import { useConversationStore, useArtifactPanelStore } from '@/store';
+import {
+  ChatMessageBubbleProps,
+  SupportDownloadFileType,
+  isArtifactPart,
+  isFilePart,
+  isImagePart,
+  isReasoningPart,
+  isSubagentTaskPart,
+  isTaskSummaryPart,
+  isTextPart,
+  isToolCallPart,
+  type MessagePart,
+  type MessageTimelineProps,
+  type TimelineStepPart,
+} from '@/types';
+import { chatWithAgent } from '@/utils/chat';
 import {
   handleDownloadPDF,
   handleDownloadDOC,
   handleDownloadMD,
-} from "@/utils/files/file-download";
-import { getFileIcon } from "@/utils/files/file-info-handler";
-import apiClient from "@/utils/request/api";
+} from '@/utils/files/file-download';
+import { getFileIcon } from '@/utils/files/file-info-handler';
+
+/**
+ * 从 parts[] 派生：
+ *   - bodyText：所有 text part 拼接（用于正文渲染 + 复制 + 下载兜底）
+ *   - timelineSteps：reasoning / tool_call / subagent_task 三类 part 子集
+ *   - artifactPart：第一个 artifact part（点击右侧入口卡片打开 ArtifactPanel）
+ *   - taskSummaryPart：第一个 task_summary part（多 agent 工作流的任务总结）
+ *   - isMultiAgent：本轮是否为多 agent 工作流（存在 ≥1 个 subagent_task part）
+ */
+function deriveFromParts(parts: MessagePart[]): {
+  bodyText: string;
+  timelineSteps: TimelineStepPart[];
+  artifactPart: Extract<MessagePart, { type: 'artifact' }> | null;
+  taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null;
+  isMultiAgent: boolean;
+  filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>>;
+} {
+  const textSegments: string[] = [];
+  const timelineSteps: TimelineStepPart[] = [];
+  let artifactPart: Extract<MessagePart, { type: 'artifact' }> | null = null;
+  let taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null = null;
+  let isMultiAgent = false;
+  const filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>> = [];
+
+  for (const part of parts) {
+    if (isTextPart(part)) {
+      if (part.content.text.length > 0) textSegments.push(part.content.text);
+      continue;
+    }
+    if (isReasoningPart(part) || isToolCallPart(part) || isSubagentTaskPart(part)) {
+      if (isSubagentTaskPart(part)) isMultiAgent = true;
+      timelineSteps.push(part);
+      continue;
+    }
+    if (isArtifactPart(part)) {
+      if (!artifactPart) artifactPart = part;
+      continue;
+    }
+    if (isTaskSummaryPart(part)) {
+      if (!taskSummaryPart) taskSummaryPart = part;
+      continue;
+    }
+    if (isFilePart(part) || isImagePart(part)) {
+      filePartsForUser.push(part);
+      continue;
+    }
+    // tool_result 兜底 part 不在 timeline 中显示
+  }
+
+  return {
+    bodyText: textSegments.join('\n\n'),
+    timelineSteps,
+    artifactPart,
+    taskSummaryPart,
+    isMultiAgent,
+    filePartsForUser,
+  };
+}
 
 const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
@@ -24,102 +96,79 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   selectDownloadId,
   setSelectDownloadId,
 }) => {
-  const deepResearchStore = useDeepResearchProcessStore();
-  const conversationStore = useConversationStore();
-  const {
-    status,
-    report,
-    setStatus,
-    setResearchTargt,
-    setIsOpenProcessSider,
-    setTasks,
-    updateReport,
-  } = deepResearchStore;
-  const {
-    currentMessages,
-    isChating,
-    currentAbortController,
-    abortCurrentChat,
-  } = conversationStore;
-  const [isShowOtherOperators, setIsShowOtherOperators] =
-    useState<boolean>(false);
+  const isChating = useConversationStore((s) => s.isChating);
+  const currentAbortController = useConversationStore((s) => s.currentAbortController);
+  const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
+  const openArtifact = useArtifactPanelStore((s) => s.openArtifact);
+
+  const [isShowOtherOperators, setIsShowOtherOperators] = useState<boolean>(false);
   const { copyToClipboard } = useCopy();
   const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [reEditValue, setReEditValue] = useState<string>(
-    message.content as string
-  );
 
-  // 点击查看深度研究结果的处理逻辑
-  const hanldeShowDeepResearch = async () => {
-    if (status === "processing") return;
-    const response = await apiClient.post(
-      "/conversations/get_deep_research_result",
-      { session_id: message.sessionId, message_id: message.id }
-    );
-    const deepResearchResult = response.data;
-    if (!deepResearchResult) {
-      console.error("出错了，没有研究结果");
-      return;
-    }
-    setStatus("notCall");
-    setIsOpenProcessSider(true);
-    setResearchTargt(deepResearchResult.researchTarget || "");
-    setTasks(deepResearchResult.tasks || []);
-    updateReport(deepResearchResult.report);
+  const derived = useMemo(() => deriveFromParts(message.parts ?? []), [message.parts]);
+  const { bodyText, timelineSteps, artifactPart, taskSummaryPart, isMultiAgent, filePartsForUser } =
+    derived;
+
+  const [reEditValue, setReEditValue] = useState<string>(bodyText);
+
+  /**
+   * timeline 顶部状态：
+   * - assistant 消息有 interrupt → 'interrupt'
+   * - 当前正在 chating 且本条是最后一条 assistant → 'processing'
+   * - 否则 → 'end'
+   */
+  const timelineStatus: MessageTimelineProps['status'] = (() => {
+    if (message.interrupt) return 'interrupt';
+    if (isLastAIMessage && isChating) return 'processing';
+    return 'end';
+  })();
+
+  const handleOpenArtifact = () => {
+    if (!artifactPart) return;
+    openArtifact({
+      sessionId:
+        typeof message.sessionId === 'string' ? message.sessionId : String(message.sessionId ?? ''),
+      messageId: message.id,
+      title: artifactPart.content.title,
+      report: artifactPart.content.markdown,
+    });
   };
 
-  const renderContent = () => {
-    if (typeof message.content === "string") {
-      return message.content;
-    }
-    return JSON.stringify(message.content);
-  };
-
-  // 处理复制等其他操作
   const renderAdditionalOperator = (role: string) => {
-    //常量
-    const userMessagesTools: ("copy" | "edit")[] = ["copy"];
-    const aiMessagesTools: ("copy" | "recall" | "download")[] = [
-      "copy",
-      "download",
-    ];
-    const userLastMessagesTools: ("copy" | "edit")[] = ["copy", "edit"];
-    const aiLastMessagesTools: ("copy" | "recall" | "download")[] = [
-      "copy",
-      "recall",
-      "download",
-    ];
-    const supportDownloadFiles: SupportDownloadFileType[] = [
-      "pdf",
-      "word",
-      "md",
-      "cancel",
-    ];
+    const userMessagesTools: ('copy' | 'edit')[] = ['copy'];
+    const aiMessagesTools: ('copy' | 'recall' | 'download')[] = ['copy', 'download'];
+    const userLastMessagesTools: ('copy' | 'edit')[] = ['copy', 'edit'];
+    const aiLastMessagesTools: ('copy' | 'recall' | 'download')[] = ['copy', 'recall', 'download'];
+    const supportDownloadFiles: SupportDownloadFileType[] = ['pdf', 'word', 'md', 'cancel'];
 
-    const handleOperator = async (
-      op: "copy" | "edit" | "recall" | "download"
-    ) => {
+    /** 复制 / 下载 / recall 内容来源：优先 artifact.markdown，其次正文 */
+    const getDownloadSource = () => {
+      if (artifactPart) return artifactPart.content.markdown;
+      return bodyText;
+    };
+
+    const handleOperator = async (op: 'copy' | 'edit' | 'recall' | 'download') => {
       switch (op) {
-        case "copy": {
-          copyToClipboard(renderContent());
+        case 'copy': {
+          copyToClipboard(getDownloadSource());
           return;
         }
-        case "edit": {
+        case 'edit': {
+          setReEditValue(bodyText);
           setIsEditing(true);
           return;
         }
-        case "recall": {
-          await reChatWithAssistant({
-            callingMode: "recall",
-            inputValue: message.content as string,
-            mode: message.mode,
-            ...conversationStore,
-            ...deepResearchStore,
+        case 'recall': {
+          await chatWithAgent({
+            operation: 'recall',
+            inputValue: getDownloadSource(),
+            ...useConversationStore.getState(),
           });
+          return;
         }
-        case "download": {
+        case 'download': {
           if (selectDownloadId === message.id) {
-            setSelectDownloadId(0);
+            setSelectDownloadId('');
           } else {
             setSelectDownloadId(message.id);
           }
@@ -128,50 +177,33 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     };
 
     const handleDownloadFiles = (fileType: SupportDownloadFileType) => {
+      const src = getDownloadSource();
       switch (fileType) {
-        case "pdf": {
-          handleDownloadPDF(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case 'pdf':
+          handleDownloadPDF(src);
           return;
-        }
-        case "word": {
-          handleDownloadDOC(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case 'word':
+          handleDownloadDOC(src);
           return;
-        }
-        case "md": {
-          handleDownloadMD(
-            message.mode === "deepResearch"
-              ? message.deepResearchResult?.report || ""
-              : (message.content as string)
-          );
+        case 'md':
+          handleDownloadMD(src);
           return;
-        }
-        case "cancel": {
+        case 'cancel':
           return;
-        }
       }
     };
 
     return (
       <div
-        className={`absolute -bottom-10  flex transition-all  ${
-          role === "user" ? "justify-end" : "justify-start"
-        } ${isShowOtherOperators ? "opacity-100" : "opacity-0"}`}
+        className={`absolute -bottom-10 flex transition-all ${
+          role === 'user' ? 'justify-end' : 'justify-start'
+        } ${isShowOtherOperators ? 'opacity-100' : 'opacity-0'}`}
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
-        {role === "user" ? (
+        {role === 'user' ? (
           <MessageToolBar
-            tools={
-              isLastHumanMessage ? userLastMessagesTools : userMessagesTools
-            }
+            tools={isLastHumanMessage ? userLastMessagesTools : userMessagesTools}
             supportDownloadFiles={supportDownloadFiles}
             handleToolAction={handleOperator}
             handleDownloadFiles={handleDownloadFiles}
@@ -188,105 +220,8 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     );
   };
 
-  // 深度研究状态显示框展示逻辑
-  const renderShowDeepResearch = () => {
-    if (
-      message.mode !== "deepResearch" ||
-      message.role !== "assistant" ||
-      message.researchStatus === "failed"
-    ) {
-      return null;
-    }
-
-    // 历史已经完成的深度研究
-    if (
-      message.researchStatus === "finished" &&
-      message.deepResearchResult?.report
-    ) {
-      return (
-        <>
-          <Button
-            className="h-4 w-2xs rounded-2xl"
-            onClick={() => hanldeShowDeepResearch()}
-          >
-            <CheckCircleOutlined style={{ color: "green" }} />{" "}
-            深度研究完成,查看研究过程
-          </Button>
-          <div className="mt-4 p-6 border-2 border-gray-200 rounded-md bg-white relative">
-            <div className="text-gray-800 leading-relaxed">
-              <CustomMarkdown
-                content={message.deepResearchResult?.report.slice(0, 300) || ""}
-              />
-            </div>
-            <div
-              onClick={() => hanldeShowDeepResearch()}
-              className="h-1/2 w-full absolute left-0 bottom-0 z-10 flex items-center justify-center"
-              style={{
-                background:
-                  "linear-gradient(to top, rgba(255, 255, 255, 1), transparent)",
-              }}
-            >
-              <Button
-                className="h-6 w-30 rounded-2xl"
-                onClick={() => hanldeShowDeepResearch()}
-              >
-                展开文档
-              </Button>
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    // 当前正在进行的深度研究
-    if (status !== "notCall") {
-      return (
-        <>
-          <Button
-            className="h-4 w-2xs rounded-2xl"
-            onClick={() => hanldeShowDeepResearch()}
-          >
-            {status === "end" ? (
-              <>
-                <CheckCircleOutlined style={{ color: "green" }} />{" "}
-                深度研究完成,查看研究过程
-              </>
-            ) : (
-              <>
-                <LoadingOutlined />
-                正在进行深度研究
-              </>
-            )}
-          </Button>
-          {status === "end" && report && (
-            <div className="mt-4 p-6 border-2 border-gray-200 rounded-md bg-white relative">
-              <div className="text-gray-800 leading-relaxed">
-                <CustomMarkdown content={report.slice(0, 300) || ""} />
-              </div>
-              <div
-                onClick={() => hanldeShowDeepResearch()}
-                className="h-1/2 w-full absolute left-0 bottom-0 z-10 flex items-center justify-center"
-                style={{
-                  background:
-                    "linear-gradient(to top, rgba(255, 255, 255, 1), transparent)",
-                }}
-              >
-                <Button
-                  className="h-6 w-30 rounded-2xl"
-                  onClick={() => hanldeShowDeepResearch()}
-                >
-                  展开文档
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
-      );
-    }
-  };
-
-  // user气泡
-  if (message.role === "user") {
+  // user 气泡
+  if (message.role === 'user') {
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (isChating) {
@@ -299,12 +234,10 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
-        await reChatWithAssistant({
-          callingMode: "reEditCall",
+        await chatWithAgent({
+          operation: 'reEditCall',
           inputValue: reEditValue,
-          mode: currentMessages[currentMessages.length - 1].mode,
-          ...conversationStore,
-          ...deepResearchStore,
+          ...useConversationStore.getState(),
         });
       }
     };
@@ -315,107 +248,162 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         setIsEditing(false);
         return;
       }
-      if (
-        e.key === "Enter" &&
-        !e.shiftKey &&
-        reEditValue.trim() !== renderContent()
-      ) {
+      if (e.key === 'Enter' && !e.shiftKey && reEditValue.trim() !== bodyText) {
         e.preventDefault();
         handleSubmit(e);
       }
     };
 
-    // 正常气泡
     if (!isEditing) {
       return (
-        <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
-          <div className="w-1/3 grid grid-cols-1 gap-2">
-            {message.files &&
-              message.files.length !== 0 &&
-              message.files.map((file) => (
+        <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+          {/* 历史加载场景：file_metadata 表里的文件 */}
+          {message.files && message.files.length !== 0 && (
+            <div className="grid w-1/3 grid-cols-1 gap-2">
+              {message.files.map((file) => (
                 <FileItem
-                  id={file.id as string}
-                  key={file.id as KeyType}
+                  id={file.id}
+                  key={file.id}
                   fileName={file.filename}
-                  parsedStatus={"success"}
+                  parsedStatus={'success'}
                   sizeBytes={file.sizeBytes}
                   ImgComponent={getFileIcon(file.mimeType, file.filename)}
                   canClose={false}
                 />
               ))}
-          </div>
+            </div>
+          )}
+          {/* 实时发送场景：parts 中的 file/image part */}
+          {(!message.files || message.files.length === 0) && filePartsForUser.length > 0 && (
+            <div className="grid w-1/3 grid-cols-1 gap-2">
+              {filePartsForUser.map((part) => (
+                <FileItem
+                  id={part.content.fileId}
+                  key={part.partId}
+                  fileName={part.content.filename ?? part.content.fileId}
+                  parsedStatus={'success'}
+                  sizeBytes={part.content.sizeBytes}
+                  ImgComponent={getFileIcon(
+                    part.content.mimeType ?? '',
+                    part.content.filename ?? '',
+                  )}
+                  canClose={false}
+                />
+              ))}
+            </div>
+          )}
           <div
-            className="max-w-2/3 p-3 rounded-3xl bg-sky-100"
+            className="max-w-[75%] min-w-0 rounded-2xl rounded-tr-md bg-gradient-to-br from-sky-100 to-teal-50 px-4 py-3 text-[15px] break-words text-gray-800 shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
             onMouseEnter={() => setIsShowOtherOperators(true)}
             onMouseLeave={() => setIsShowOtherOperators(false)}
           >
-            <CustomMarkdown content={renderContent()} />
+            <CustomMarkdown content={bodyText} />
           </div>
           {renderAdditionalOperator(message.role)}
         </div>
       );
-    } else {
-      // 编辑气泡
-      return (
-        <div className="w-full px-3 mb-5 flex flex-col gap-2 items-end relative">
-          <textarea
-            value={reEditValue}
-            onChange={(e) => setReEditValue(e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e)}
-            rows={1}
-            className="w-2/3 px-3 py-2 border-2 border-sky-400 rounded-md focus:outline-none resize-none overflow-y-auto scrollbar-hide"
-            style={{
-              minHeight: "40px",
-              maxHeight: "100px",
-              height: "auto",
-            }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = "auto";
-              target.style.height = Math.min(target.scrollHeight, 100) + "px";
-            }}
-          />
-          <div className="flex gap-2">
-            <Button onClick={(e) => handleSubmit(e)}>确定</Button>
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                setReEditValue(message.content as string);
-                setIsEditing(false);
-              }}
-            >
-              取消
-            </Button>
-          </div>
-        </div>
-      );
     }
-  }
-
-  // loading气泡
-  if (
-    message.role === "assistant" &&
-    (message.content === "" ||
-      (Array.isArray(message) && !message.content.length))
-  ) {
     return (
-      <Spin
-        indicator={<LoadingOutlined style={{ color: "#828282" }} />}
-        size="large"
-      ></Spin>
+      <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+        <textarea
+          value={reEditValue}
+          onChange={(e) => setReEditValue(e.target.value)}
+          onKeyDown={(e) => handleKeyDown(e)}
+          rows={1}
+          className="scrollbar-hide w-2/3 resize-none overflow-y-auto rounded-md border-2 border-sky-400 px-3 py-2 focus:outline-none"
+          style={{
+            minHeight: '40px',
+            maxHeight: '100px',
+            height: 'auto',
+          }}
+          onInput={(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            target.style.height = Math.min(target.scrollHeight, 100) + 'px';
+          }}
+        />
+        <div className="flex gap-2">
+          <Button onClick={(e) => handleSubmit(e)}>确定</Button>
+          <Button
+            onClick={(e) => {
+              e.stopPropagation();
+              setReEditValue(bodyText);
+              setIsEditing(false);
+            }}
+          >
+            取消
+          </Button>
+        </div>
+      </div>
     );
   }
 
-  // ai气泡
+  // loading 气泡：assistant 还没有任何 part
+  if (message.role === 'assistant' && (!message.parts || message.parts.length === 0)) {
+    return <Spin indicator={<LoadingOutlined style={{ color: '#828282' }} />} size="large" />;
+  }
+
+  // ai 气泡（含内联工作流时间线 + 产物入口）
+  const artifactEntry = artifactPart ? (
+    <button
+      type="button"
+      onClick={handleOpenArtifact}
+      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+          <FileTextOutlined />
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium text-gray-800">
+            {artifactPart.content.title}
+          </span>
+          <span className="text-[11px] text-gray-400">点击查看完整研究报告</span>
+        </div>
+      </div>
+      <span className="shrink-0 text-xs font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
+        查看产物 →
+      </span>
+    </button>
+  ) : null;
+
   return (
-    <div className="w-full flex px-3 mb-5 justify-start flex-wrap relative">
+    <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
       <div
-        className="max-w-2/3 p-3 rounded-3xl bg-white flex flex-col gap-4"
+        className="flex min-w-0 max-w-[85%] flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
-        <CustomMarkdown content={renderContent()} />
-        {renderShowDeepResearch()}
+        {/* 工作流时间线（reasoning / tool_call / subagent_task） */}
+        <MessageTimeline
+          steps={timelineSteps}
+          status={timelineStatus}
+          interrupt={message.interrupt ?? null}
+        />
+
+        {isMultiAgent ? (
+          <>
+            {/* 多 agent 工作流：报告全文收进 artifact，气泡内只留 跳转按钮 + 任务总结 */}
+            {artifactEntry}
+            {taskSummaryPart && (
+              <div className="mt-1 min-w-0 rounded-xl border border-gray-200 bg-gray-50/70 px-3.5 py-3">
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-500" />
+                  本次工作流任务总结
+                </div>
+                <div className="min-w-0 text-sm break-words text-gray-700">
+                  <CustomMarkdown content={taskSummaryPart.content.text} />
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* 普通回答：内联正文 + 可选产物入口 */}
+            {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
+            {artifactEntry}
+          </>
+        )}
       </div>
       {renderAdditionalOperator(message.role)}
     </div>

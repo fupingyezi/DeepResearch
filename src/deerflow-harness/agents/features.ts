@@ -9,7 +9,6 @@ export interface RuntimeFeatures {
   sandbox?: FeatureToggle;
   memory?: FeatureToggle;
   summarization?: FeatureToggle; // 不允许 true
-  subagent?: FeatureToggle;
   vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
   guardrail?: FeatureToggle; // 不允许 true
@@ -20,7 +19,6 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
   sandbox: false,
   memory: false,
   summarization: false,
-  subagent: false,
   vision: false,
   autoTitle: false,
   guardrail: false,

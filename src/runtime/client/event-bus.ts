@@ -8,14 +8,11 @@
  * - 单个 handler 抛错被 try/catch 隔离，不影响其他订阅者
  */
 
-import type {
-  ClientAgentEvent,
-  ClientAgentEventType,
-} from "../protocol/client-event";
+import type { ClientAgentEvent, ClientAgentEventType } from '../protocol/client-event';
 
 export type AgentEventHandler = (event: ClientAgentEvent) => void;
 
-export type EventBusKey = ClientAgentEventType | "*";
+export type EventBusKey = ClientAgentEventType | '*';
 
 export class EventBus {
   private readonly handlers = new Map<string, Set<AgentEventHandler>>();
@@ -56,7 +53,7 @@ export class EventBus {
    */
   emit(event: ClientAgentEvent): void {
     this.dispatch(event.eventType, event);
-    this.dispatch("*", event);
+    this.dispatch('*', event);
   }
 
   /** 清空所有订阅 */
@@ -72,10 +69,7 @@ export class EventBus {
       try {
         handler(event);
       } catch (err) {
-        console.error(
-          `[EventBus] handler error for ${event.eventType}:`,
-          err,
-        );
+        console.error(`[EventBus] handler error for ${event.eventType}:`, err);
       }
     }
   }

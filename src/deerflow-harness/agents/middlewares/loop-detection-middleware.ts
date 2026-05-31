@@ -9,7 +9,7 @@ import {
 import type { ToolCall } from '@langchain/core/messages/tool';
 
 /**
- * LoopDetectionMiddleware（位序 12 / 始终启用）
+ * LoopDetectionMiddleware
  *
  * 双层检测：
  *  1. **哈希层**：将一组 tool_calls 规范化为稳定 key，命中相同哈希
@@ -22,16 +22,8 @@ import type { ToolCall } from '@langchain/core/messages/tool';
  *  - 硬停：重建最后一条 AIMessage，清空 `tool_calls` / `additional_kwargs.tool_calls`
  *    / `additional_kwargs.function_call`，并把 `response_metadata.finish_reason`
  *    从 'tool_calls' 改为 'stop'，把警告附加到 content 末尾。
- *
- * 与 Python 版差异：
- *  - 单线程 JS：无需 `threading.Lock`。
- *  - `OrderedDict` → `Map`（Map 保留插入顺序，`set/delete` 即可实现 LRU）。
- *  - `runtime.context.thread_id` → `runtime.configurable.thread_id`
- *    （TS 端 LangGraph 的 thread_id 在 configurable 而非 context 上）。
- *  - 单一 `afterModel` 异步 hook 同时覆盖 sync/async。
  */
 
-// ───── Defaults ─────────────────────────────────────────────────────────────
 const DEFAULT_WARN_THRESHOLD = 3;
 const DEFAULT_HARD_LIMIT = 5;
 const DEFAULT_WINDOW_SIZE = 20;
@@ -51,7 +43,6 @@ const toolFreqWarning = (toolName: string, count: number) =>
 const toolFreqHardStop = (toolName: string, count: number) =>
   `[FORCED STOP] Tool ${toolName} called ${count} times — exceeded the per-tool safety limit. Producing final answer with results collected so far.`;
 
-// ───── Types ────────────────────────────────────────────────────────────────
 export interface LoopDetectionOptions {
   warnThreshold?: number;
   hardLimit?: number;
@@ -68,18 +59,17 @@ interface ThreadState {
   toolFreqWarned: Set<string>;
 }
 
-// ───── Helpers ──────────────────────────────────────────────────────────────
 /** 稳定 JSON 序列化：按 key 排序，保证 hash 与 fallback key 的确定性。 */
-function stableStringify(value: unknown): string {
+function stableStringify(value: any): string {
   const seen = new WeakSet<object>();
-  const walk = (v: unknown): unknown => {
+  const walk = (v: any): any => {
     if (v === null || typeof v !== 'object') return v;
     if (seen.has(v as object)) return '[Circular]';
     seen.add(v as object);
     if (Array.isArray(v)) return v.map(walk);
-    const sorted: Record<string, unknown> = {};
-    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-      sorted[k] = walk((v as Record<string, unknown>)[k]);
+    const sorted: Record<string, any> = {};
+    for (const k of Object.keys(v as Record<string, any>).sort()) {
+      sorted[k] = walk((v as Record<string, any>)[k]);
     }
     return sorted;
   };
@@ -91,18 +81,18 @@ function stableStringify(value: unknown): string {
 }
 
 /** 把 tool_call.args 规范化为 dict + 可选 fallback key（JSON 字符串场景）。 */
-function normalizeToolCallArgs(raw: unknown): {
-  args: Record<string, unknown>;
+function normalizeToolCallArgs(raw: any): {
+  args: Record<string, any>;
   fallback: string | null;
 } {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return { args: raw as Record<string, unknown>, fallback: null };
+    return { args: raw as Record<string, any>, fallback: null };
   }
   if (typeof raw === 'string') {
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return { args: parsed as Record<string, unknown>, fallback: null };
+        return { args: parsed as Record<string, any>, fallback: null };
       }
       return { args: {}, fallback: stableStringify(parsed) };
     } catch {
@@ -114,22 +104,18 @@ function normalizeToolCallArgs(raw: unknown): {
 }
 
 /** 简易归一：trim + lowercase + 折叠多空白，提升语义近似 query 的命中率。 */
-function normalizeQueryLike(s: unknown): string {
+function normalizeQueryLike(s: any): string {
   if (typeof s !== 'string') return '';
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /** 从工具名 + 显著字段派生稳定 key（与 Python 版语义对齐）。 */
-function stableToolKey(
-  name: string,
-  args: Record<string, unknown>,
-  fallback: string | null,
-): string {
+function stableToolKey(name: string, args: Record<string, any>, fallback: string | null): string {
   // read_file: 按 200 行为粒度做行号 bucket，降低噪声
   if (name === 'read_file' && fallback === null) {
     const path = (args.path as string | undefined) ?? '';
     const bucketSize = 200;
-    const toInt = (v: unknown, def: number) => {
+    const toInt = (v: any, def: number) => {
       if (v == null) return def;
       const n = typeof v === 'number' ? v : Number(v);
       return Number.isFinite(n) ? Math.trunc(n) : def;
@@ -156,7 +142,7 @@ function stableToolKey(
 
   // 其余按显著字段子集（同时把 question 也纳入，作为 search-like 工具兜底）
   const SALIENT = ['path', 'url', 'query', 'question', 'command', 'pattern', 'glob', 'cmd'];
-  const stable: Record<string, unknown> = {};
+  const stable: Record<string, any> = {};
   for (const f of SALIENT) {
     const v = args[f];
     if (v == null) continue;
@@ -199,7 +185,7 @@ function buildHardStopMessage(last: AIMessage, finalContent: MessageContent): AI
 
   const responseMetadata = JSON.parse(JSON.stringify(last.response_metadata ?? {})) as Record<
     string,
-    unknown
+    any
   >;
   if (responseMetadata.finish_reason === 'tool_calls') {
     responseMetadata.finish_reason = 'stop';
@@ -217,7 +203,7 @@ function buildHardStopMessage(last: AIMessage, finalContent: MessageContent): AI
   });
 }
 
-// ───── Per-instance tracker (LRU via Map insertion order) ───────────────────
+// 进程内单例 tracker（按 Map 插入顺序做 LRU）
 class LoopTracker {
   private readonly threads = new Map<string, ThreadState>();
 
@@ -253,7 +239,6 @@ class LoopTracker {
   }
 }
 
-// ───── Factory ──────────────────────────────────────────────────────────────
 export function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
   const warnThreshold = options.warnThreshold ?? DEFAULT_WARN_THRESHOLD;
   const hardLimit = options.hardLimit ?? DEFAULT_HARD_LIMIT;

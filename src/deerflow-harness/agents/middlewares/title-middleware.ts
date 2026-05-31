@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 
 /**
- * TitleMiddleware（位序 8 / features.autoTitle 启用）
+ * TitleMiddleware（features.autoTitle 启用）
  *
  * 职责（占位）：
  * - 在首轮对话结束（afterModel / afterAgent）后，根据用户首条消息生成会话标题，

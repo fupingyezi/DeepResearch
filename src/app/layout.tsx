@@ -1,14 +1,13 @@
-import "./globals.css";
-import Sider from "@/components/sider/sider";
-import DeepResearchProcess from "@/components/process/deep-research-process";
-import { initialDB } from "@/lib/db";
+import './globals.css';
+import Sider from '@/components/sider/sider';
+import { initialDB } from '@/lib/db';
 
 // 初始化数据库
 try {
   await initialDB();
-  console.log("Database initialized successfully");
+  console.log('Database initialized successfully');
 } catch (error) {
-  console.error("Database initialization failed:", error);
+  console.error('Database initialization failed:', error);
 }
 
 export default async function RootLayout({
@@ -18,10 +17,10 @@ export default async function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="flex overflow-hidden">
+      <body className="flex h-screen overflow-hidden bg-[#f9fafb] text-[#111827] antialiased">
         <Sider />
+        {/* chat 主体（页面内自带 ArtifactPanel） */}
         {children}
-        <DeepResearchProcess />
       </body>
     </html>
   );

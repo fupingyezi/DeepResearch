@@ -3,7 +3,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { isGraphBubbleUp } from '@langchain/langgraph';
 
 /**
- * ToolErrorHandlingMiddleware（位序 5 / 始终启用）
+ * ToolErrorHandlingMiddleware（始终启用）
  *
  * 职责：
  * - 通过 wrapToolCall 捕获工具执行异常，转换为带 status='error' 的 ToolMessage，
@@ -22,7 +22,7 @@ function truncateDetail(detail: string): string {
 }
 
 /** 从未知错误中提取人类可读的描述与构造器名（用于日志/反馈给模型）。 */
-function describeError(err: unknown): { className: string; detail: string } {
+function describeError(err: any): { className: string; detail: string } {
   if (err instanceof Error) {
     const className = err.constructor?.name || 'Error';
     const detail = truncateDetail((err.message || '').trim() || className);

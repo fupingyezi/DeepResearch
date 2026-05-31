@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
-import apiClient from "@/utils/request/api";
-import { UploadedFile } from "@/types";
-import { formatFileSize, getFileIcon } from "@/utils/files/file-info-handler";
-import { useFileUploadStore } from "@/store";
+import { useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import apiClient from '@/utils/request/api';
+import { UploadedFile } from '@/types';
+import { formatFileSize, getFileIcon } from '@/utils/files/file-info-handler';
+import { useFileUploadStore } from '@/store';
 
 export interface UseFileUploadOptions {
   maxFileSizeMB?: number; // 默认 10 MB
@@ -11,24 +11,21 @@ export interface UseFileUploadOptions {
 
 const DEFAULT_MAX_FILE_SIZE_MB = 10;
 const SUPPORTED_TYPES = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-  "text/markdown",
-  "text/plain",
-  "text/x-markdown",
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'text/markdown',
+  'text/plain',
+  'text/x-markdown',
 ];
 
 const useFileUpload = (options: UseFileUploadOptions = {}) => {
   const { maxFileSizeMB = DEFAULT_MAX_FILE_SIZE_MB } = options;
-  const [localUploadedFiles, setLocalUploadedFiles] = useState<UploadedFile[]>(
-    []
-  );
+  const [localUploadedFiles, setLocalUploadedFiles] = useState<UploadedFile[]>([]);
   const { addUploadedFile, removeUploadedFile } = useFileUploadStore();
 
   // 校验单个文件
   const validateFile = (file: File): boolean => {
-    const isTypeSupported =
-      SUPPORTED_TYPES.includes(file.type) || /\.(md|txt)$/i.test(file.name);
+    const isTypeSupported = SUPPORTED_TYPES.includes(file.type) || /\.(md|txt)$/i.test(file.name);
     if (!isTypeSupported) {
       alert(`不支持的文件类型: ${file.name}`);
       return false;
@@ -46,27 +43,25 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
   // 解析并上传单个文件
   const parseFile = async (fileId: string, file: File) => {
     setLocalUploadedFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, parsedStatus: "parsing" } : f))
+      prev.map((f) => (f.id === fileId ? { ...f, parsedStatus: 'parsing' } : f)),
     );
 
     const formData = new FormData();
-    formData.append("file", file);
-    formData.append("fileId", fileId);
+    formData.append('file', file);
+    formData.append('fileId', fileId);
 
     try {
-      const result = await apiClient.post("/files/upload", formData);
+      const result = await apiClient.post('/files/upload', formData);
 
       const updatedFile: UploadedFile = {
         id: fileId,
         file,
-        parsedStatus: result.error ? "failed" : "success",
+        parsedStatus: result.error ? 'failed' : 'success',
         sizeBytes: file.size,
         error: result.error,
       };
 
-      setLocalUploadedFiles((prev) =>
-        prev.map((f) => (f.id === fileId ? updatedFile : f))
-      );
+      setLocalUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? updatedFile : f)));
 
       addUploadedFile({
         fileId: result.fileId,
@@ -78,17 +73,17 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
         error: result.error,
       });
     } catch (error: any) {
-      console.error("Parse failed:", error);
+      console.error('Parse failed:', error);
       setLocalUploadedFiles((prev) =>
         prev.map((f) =>
           f.id === fileId
             ? {
                 ...f,
-                parsedStatus: "failed",
-                error: error.message || "解析失败",
+                parsedStatus: 'failed',
+                error: error.message || '解析失败',
               }
-            : f
-        )
+            : f,
+        ),
       );
     }
   };
@@ -112,7 +107,7 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
         {
           id: fileId,
           file,
-          parsedStatus: "pending",
+          parsedStatus: 'pending',
         },
       ]);
     }
@@ -129,14 +124,14 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
     removeUploadedFile(id);
 
     try {
-      await apiClient.delete("/files/delete", {
+      await apiClient.delete('/files/delete', {
         body: JSON.stringify({ fileId: id }),
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
       });
     } catch (error) {
-      console.error("Failed to delete file from server:", error);
+      console.error('Failed to delete file from server:', error);
     }
   };
 

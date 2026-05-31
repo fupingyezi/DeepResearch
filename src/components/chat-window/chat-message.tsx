@@ -1,7 +1,7 @@
-import ChatMessageBubble from "./chat-message-bubble";
+import ChatMessageBubble from './chat-message-bubble';
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ChatMessagesProps } from "@/types";
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { ChatMessagesProps } from '@/types';
 
 const ChatMessage: React.FC<ChatMessagesProps> = ({
   messages,
@@ -11,12 +11,10 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   className,
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [selectDownloadId, setSelectDownLoadId] = useState<number>(0);
+  const [selectDownloadId, setSelectDownLoadId] = useState<string>('');
 
   const programmaticScrollRef = useRef(false);
-  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToBottom = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -43,8 +41,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
       // 程序化滚动期间不要回写 shouldAutoScroll，否则会和上面的 scrollToBottom 形成回路。
       if (programmaticScrollRef.current) return;
 
-      const { scrollTop, scrollHeight, clientHeight } =
-        messagesContainerRef.current;
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
 
       if (wheelEvent && wheelEvent.deltaY < 0 && !isAtBottom) {
@@ -56,7 +53,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
         setShouldAutoScroll(true);
       }
     },
-    [setShouldAutoScroll]
+    [setShouldAutoScroll],
   );
 
   // messages 引用变化（流式新增 / 编辑）时按需滚到底部。
@@ -79,11 +76,12 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   if (!messages || messages.length === 0) {
     return (
       <div
-        className={`w-full h-[70%] flex flex-col gap-2 justify-center text-center
-          font-serif text-6xl text-wrap ${className || ""} `}
+        className={`flex h-[70%] w-full flex-col items-center justify-center gap-4 text-center ${className || ''} `}
       >
-        {emptyStateComponent}
-        <p className="text-2xl" style={{ fontFamily: "楷体" }}>
+        <div className="bg-gradient-to-br from-teal-500 via-sky-500 to-teal-600 bg-clip-text font-serif text-6xl font-bold text-transparent">
+          {emptyStateComponent}
+        </div>
+        <p className="text-2xl text-gray-400" style={{ fontFamily: '楷体' }}>
           阅尽好花千万树，愿君记取此一枝。
         </p>
       </div>
@@ -92,25 +90,17 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
 
   return (
     <div
-      className={`space-y-4 ${
-        className || ""
-      } h-full overflow-y-scroll scrollbar-hide`}
+      className={`space-y-4 ${className || ''} scrollbar-hide h-full overflow-y-scroll`}
       ref={messagesContainerRef}
       onScroll={() => checkShouldAutoScroll()}
       onWheel={(e) => checkShouldAutoScroll(e)}
     >
       {messages.map((msg, index) => (
         <ChatMessageBubble
-          // 用 message.id 作为稳定 key，避免父组件每帧重建 messages 数组引用时
-          // 列表项错位 remount，叠加 stream 高频 setCurrentMessages 会放大到无法收敛。
           key={msg.id ?? index}
           message={msg}
-          isLastAIMessage={
-            msg.role === "assistant" && index === messages.length - 1
-          }
-          isLastHumanMessage={
-            msg.role === "user" && index === messages.length - 2
-          }
+          isLastAIMessage={msg.role === 'assistant' && index === messages.length - 1}
+          isLastHumanMessage={msg.role === 'user' && index === messages.length - 2}
           selectDownloadId={selectDownloadId}
           setSelectDownloadId={setSelectDownLoadId}
         />

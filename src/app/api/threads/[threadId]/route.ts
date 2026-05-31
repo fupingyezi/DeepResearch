@@ -11,10 +11,7 @@ import { getThreadService } from '../_service';
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
 
-export async function GET(
-  request: NextRequest,
-  ctx: { params: { threadId: string } },
-) {
+export async function GET(request: NextRequest, ctx: { params: { threadId: string } }) {
   try {
     const url = new URL(request.url);
     const includeCheckpoint = url.searchParams.get('include') === 'checkpoint';
@@ -36,10 +33,7 @@ export async function GET(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  ctx: { params: { threadId: string } },
-) {
+export async function DELETE(request: NextRequest, ctx: { params: { threadId: string } }) {
   try {
     const service = await getThreadService();
     await service.deleteThread({

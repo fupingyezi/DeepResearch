@@ -1,4 +1,4 @@
-export { DeerFlowClient } from './clinet';
+export { DeerFlowClient } from './client';
 export { createChatModel } from './models';
 export { createBaseAgent } from './agents/factory';
 export { searchWebTool, taskTool, getAvailableTools } from './tools';
@@ -7,18 +7,15 @@ export {
   registerSubagent,
   getSubagentConfig,
   getAvailableSubagentNames,
-  researchConfig,
+  generalPurposeConfig,
   type SubagentConfig,
 } from './subagents';
-export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent } from './types';
+export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider } from './types';
 
 export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';
 
-/* -------------------------------------------------------------------------- */
-/*  Memory subsystem                                                           */
-/* -------------------------------------------------------------------------- */
-
+// Memory 子系统
 export {
   // types
   type Fact,
@@ -94,9 +91,7 @@ export {
   type ClientAgentEventStream,
 } from './runtime/sse';
 
-/* -------------------------------------------------------------------------- */
-/*  Thread 系统（runtime + persistence）                                       */
-/* -------------------------------------------------------------------------- */
+// Thread 系统（runtime + persistence）
 
 // runtime/checkpointer
 export {
@@ -108,19 +103,10 @@ export {
 } from './runtime/checkpointer';
 
 // runtime/context
-export {
-  runWithContext,
-  getContext,
-  requireContext,
-  type RuntimeContext,
-} from './runtime/context';
+export { runWithContext, getContext, requireContext, type RuntimeContext } from './runtime/context';
 
 // runtime/stream-bridge
-export {
-  streamBridge,
-  StreamBridge,
-  ThreadChannel,
-} from './runtime/stream-bridge';
+export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
 // runtime/service
 export {

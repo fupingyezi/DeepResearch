@@ -7,10 +7,10 @@ import { RuntimeFeatures, DEFAULT_FEATURES } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool } from '../tools';
 import {
-  danglingToolCallMiddleware,
+  toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
   memoryMiddleware,
-  subagentLimitMiddleware,
+  createSubagentLimitMiddleware,
   loopDetectionMiddleware,
   clarificationMiddleware,
   qwenToolCallRecoveryMiddleware,
@@ -25,7 +25,6 @@ export interface CreateAgentOptions {
   middlewares?: AgentMiddleware[];
   features?: RuntimeFeatures;
   extraMiddlewares?: AgentMiddleware[];
-  planMode?: boolean;
   checkpointer?: BaseCheckpointSaver;
   /** 当前 model 的 provider，用于按 provider 自动启用相关中间件。 */
   provider?: ModelProvider;
@@ -59,7 +58,6 @@ export function createBaseAgent(opts: CreateAgentOptions) {
   } else {
     const feat = features ? features : DEFAULT_FEATURES;
     const { chain, extraTools } = assembleFromFeatures(feat, {
-      planMode: opts.planMode,
       extraMiddlewares,
       provider,
     });
@@ -100,6 +98,17 @@ export function createBaseAgent(opts: CreateAgentOptions) {
   });
 }
 
+/**
+ * 装配中间件链与 lead-agent 内置 extra tools。
+ *
+ * lead-agent 永远启用 subagent 能力：`taskTool` 与 `subagentLimitMiddleware`
+ * 始终挂载。其它能力（memory / qwen recovery）按 features 开关条件挂载。
+ *
+ * SubagentExecutor 内部调用 createBaseAgent 时同样会走这条路径，因此
+ * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
+ * 会过滤掉 task，最终绑定到 LLM 的工具列表里没有 task，模型不会调用它。
+ * subagentLimitMiddleware 在 subagent 上下文中无害（不会拦到 task）。
+ */
 export function assembleFromFeatures(
   features: RuntimeFeatures,
   options: AssembelOptions,
@@ -109,7 +118,7 @@ export function assembleFromFeatures(
   const chain: AgentMiddleware[] = [];
   const extraTools: StructuredToolInterface[] = [];
 
-  // [*] QwenToolCallRecoveryMiddleware
+  // QwenToolCallRecoveryMiddleware：feature 启用，或 provider=qwen 时自动启用
   const recoveryFeat = features.qwenToolCallRecovery;
   if (recoveryFeat === true) {
     chain.push(qwenToolCallRecoveryMiddleware);
@@ -119,13 +128,13 @@ export function assembleFromFeatures(
     chain.push(qwenToolCallRecoveryMiddleware);
   }
 
-  // [3] DanglingToolCallMiddleware (始终启用)
-  chain.push(danglingToolCallMiddleware);
+  // 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
+  chain.push(toolCallIntegrityMiddleware);
 
-  // [5] ToolErrorHandlingMiddleware (始终启用)
+  // 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);
 
-  // [9] MemoryMiddleware (features.memory)
+  // 可选：长期记忆
   const memoryFeat = features.memory;
   if (memoryFeat === true) {
     chain.push(memoryMiddleware);
@@ -133,23 +142,19 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // [11] SubagentLimitMiddleware (features.subagent)
-  //   plan-mode 下 lead-agent 通过 task 工具调度 research subagent，
-  //   必须用并发/总量上限兜底，防止模型 prompt 失控产生过多 task。
-  if (features.subagent === true) {
-    chain.push(subagentLimitMiddleware);
-  }
+  // 始终启用：subagent 频次/并发上限。每个 agent 实例独立 counter——
+  // 模块级单例会让 CounterRegistry 跨请求共享，异常路径下 inflight 不
+  // 回收会导致下次请求误报"concurrency limit reached"。
+  chain.push(createSubagentLimitMiddleware());
 
-  // [12] LoopDetectionMiddleware (始终启用)
+  // 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
-  // [13] ClarificationMiddleware (始终最后)
+  // 始终最后：澄清性追问
   chain.push(clarificationMiddleware);
 
-  // subagent 工具化注入 lead Agent
-  if (features.subagent === true) {
-    extraTools.push(taskTool as StructuredToolInterface);
-  }
+  // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）
+  extraTools.push(taskTool as StructuredToolInterface);
 
   return { chain, extraTools };
 }

@@ -17,23 +17,11 @@ import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import { getMemoryConfig } from './config';
-import {
-  formatConversationForUpdate,
-  MEMORY_UPDATE_PROMPT,
-} from './prompt';
+import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
-import {
-  createEmptyMemory,
-  Fact,
-  FactCategory,
-  MemoryData,
-  utcNowIsoZ,
-} from './types';
+import { createEmptyMemory, Fact, FactCategory, MemoryData, utcNowIsoZ } from './types';
 
-/* -------------------------------------------------------------------------- */
-/* Model factory injection                                                     */
-/* -------------------------------------------------------------------------- */
-
+// Model factory injection
 export type MemoryModelFactory = (modelName: string | null | undefined) => BaseChatModel;
 
 let _modelFactory: MemoryModelFactory | null = null;
@@ -47,9 +35,7 @@ export function getMemoryModelFactory(): MemoryModelFactory | null {
   return _modelFactory;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Manual fact CRUD —— 与 Python create/update/delete_memory_fact 对齐           */
-/* -------------------------------------------------------------------------- */
+// Manual fact CRUD（对齐 Python create/update/delete_memory_fact）
 
 export async function getMemoryData(
   agentName: string | null = null,
@@ -106,7 +92,8 @@ export async function createMemoryFact(
 ): Promise<MemoryData> {
   const normalized = content.trim();
   if (!normalized) throw new Error('content must be non-empty');
-  const cat = ((typeof category === 'string' ? category : 'context').trim() || 'context') as FactCategory;
+  const cat = ((typeof category === 'string' ? category : 'context').trim() ||
+    'context') as FactCategory;
   const conf = validateConfidence(confidence);
 
   const data = await getMemoryData(agentName, userId);
@@ -160,7 +147,7 @@ export async function updateMemoryFact(
       u.content = c;
     }
     if (patch.category != null) {
-      u.category = ((String(patch.category).trim() || 'context') as FactCategory);
+      u.category = (String(patch.category).trim() || 'context') as FactCategory;
     }
     if (patch.confidence != null) {
       u.confidence = validateConfidence(Number(patch.confidence));
@@ -174,9 +161,7 @@ export async function updateMemoryFact(
   return updated;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Strip upload mentions —— 对齐 Python `_strip_upload_mentions_from_memory`     */
-/* -------------------------------------------------------------------------- */
+// Strip upload mentions（对齐 Python `_strip_upload_mentions_from_memory`）
 
 const UPLOAD_SENTENCE_RE =
   /[^.!?]*\b(?:upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
@@ -184,6 +169,8 @@ const UPLOAD_SENTENCE_RE =
 function stripUploadMentions(memory: MemoryData): MemoryData {
   const out: MemoryData = JSON.parse(JSON.stringify(memory));
   for (const sec of ['user', 'history'] as const) {
+    // UserSection / HistorySection 的字段是字面量 key 而非索引签名，TS 不允许
+    // 直接断言为 Record<string, SectionData>，需要先经 unknown 中转。
     const section = out[sec] as unknown as Record<string, { summary: string; updatedAt: string }>;
     for (const k of Object.keys(section)) {
       const v = section[k];
@@ -200,22 +187,16 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
   return out;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Apply updates                                                               */
-/* -------------------------------------------------------------------------- */
+// Apply updates
 
-function factContentKey(content: unknown): string | null {
+function factContentKey(content: any): string | null {
   if (typeof content !== 'string') return null;
   const s = content.trim();
   if (!s) return null;
   return s.toLocaleLowerCase();
 }
 
-function applyUpdates(
-  current: MemoryData,
-  update: any,
-  threadId: string | null,
-): MemoryData {
+function applyUpdates(current: MemoryData, update: any, threadId: string | null): MemoryData {
   const cfg = getMemoryConfig();
   const now = utcNowIsoZ();
   const out: MemoryData = JSON.parse(JSON.stringify(current));
@@ -240,7 +221,9 @@ function applyUpdates(
 
   // remove facts
   const removeIds = new Set<string>(
-    Array.isArray(update?.factsToRemove) ? update.factsToRemove.filter((x: any) => typeof x === 'string') : [],
+    Array.isArray(update?.factsToRemove)
+      ? update.factsToRemove.filter((x: any) => typeof x === 'string')
+      : [],
   );
   if (removeIds.size > 0) {
     out.facts = out.facts.filter((f) => !removeIds.has(f.id));
@@ -289,16 +272,14 @@ function applyUpdates(
   return out;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Memory updater (LLM-based)                                                  */
-/* -------------------------------------------------------------------------- */
+// Memory updater（LLM-based）
 
 function buildCorrectionHint(correction: boolean, reinforcement: boolean): string {
   const parts: string[] = [];
   if (correction) {
     parts.push(
       'IMPORTANT: Explicit correction signals were detected in this conversation. ' +
-        "Pay special attention to what the agent got wrong, what the user corrected, " +
+        'Pay special attention to what the agent got wrong, what the user corrected, ' +
         'and record the correct approach as a fact with category ' +
         '"correction" and confidence >= 0.95 when appropriate.',
     );
@@ -330,7 +311,8 @@ function extractText(content: any): string {
         pending.push(block);
       } else if (block && typeof block === 'object') {
         flush();
-        if (typeof (block as any).text === 'string') pieces.push((block as any).text);
+        const text = (block as { text?: unknown }).text;
+        if (typeof text === 'string') pieces.push(text);
       }
     }
     flush();
@@ -416,7 +398,10 @@ export class MemoryUpdater {
       );
 
       // 与 Python 对齐：用占位符直接 replace，避免 JS 模板字符串语义冲突
-      const prompt = MEMORY_UPDATE_PROMPT.replace('{current_memory}', JSON.stringify(current, null, 2))
+      const prompt = MEMORY_UPDATE_PROMPT.replace(
+        '{current_memory}',
+        JSON.stringify(current, null, 2),
+      )
         .replace('{conversation}', conversation)
         .replace('{correction_hint}', correctionHint);
 
@@ -433,8 +418,9 @@ export class MemoryUpdater {
         runName: 'memory_agent',
         callbacks: [],
         tags: ['memory-updater'],
-      } as any);
-      let text = extractText((response as any)?.content).trim();
+      });
+      const responseContent = (response as { content?: unknown }).content;
+      let text = extractText(responseContent).trim();
       if (text.startsWith('```')) {
         const lines = text.split('\n');
         text = (lines[lines.length - 1] === '```' ? lines.slice(1, -1) : lines.slice(1)).join('\n');
@@ -465,11 +451,10 @@ export class MemoryUpdater {
             return false;
           }
         } else {
-          console.warn(
-            '[memory/updater] Failed to parse LLM JSON:',
-            (e as Error).message,
-            { len: text.length, tail: text.slice(-120) },
-          );
+          console.warn('[memory/updater] Failed to parse LLM JSON:', (e as Error).message, {
+            len: text.length,
+            tail: text.slice(-120),
+          });
           return false;
         }
       }

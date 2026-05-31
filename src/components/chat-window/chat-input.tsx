@@ -1,9 +1,10 @@
-import React, { useState, useRef } from "react";
-import { useFileUpload } from "@/utils/hooks";
-import Image from "next/image";
-import FileItem from "../files/file-items";
-import { ChatInputProps } from "@/types";
-import { agentMode, useChatSelectStore, useConversationStore } from "@/store";
+import React, { useState, useRef, useLayoutEffect } from 'react';
+import { useFileUpload } from '@/utils/hooks';
+import Image from 'next/image';
+import FileItem from '../files/file-items';
+import { ChatInputProps } from '@/types';
+import { useConversationStore } from '@/store';
+import ModelSelector from '../model-selector/model-selector';
 
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
@@ -11,24 +12,31 @@ const ChatInput: React.FC<ChatInputProps> = ({
   disabled = false,
   className,
 }) => {
-  const { isChating, currentAbortController, abortCurrentChat } =
-    useConversationStore();
-  const { selectedAgent, setSelectedAgent } = useChatSelectStore();
-  const [inputValue, setInputValue] = useState("");
+  const isChating = useConversationStore((s) => s.isChating);
+  const currentAbortController = useConversationStore((s) => s.currentAbortController);
+  const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
+  const [inputValue, setInputValue] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const {
-    localUploadedFiles,
-    handleFiles,
-    removeFile,
-    clearFiles,
-    getFileIcon,
-  } = useFileUpload();
-  const supportUploadFiles = selectedAgent === "chat";
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
+  const { localUploadedFiles, handleFiles, removeFile, clearFiles, getFileIcon } = useFileUpload();
+
+  // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内，
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+  }, [inputValue]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!localUploadedFiles.every((file) => file.parsedStatus === "success")) {
+    // 统一前置守卫：disabled 状态下任何路径都不应产生副作用
+    if (disabled) return;
+    if (isComposingRef.current) return;
+
+    if (!localUploadedFiles.every((file) => file.parsedStatus === 'success')) {
       return;
     }
 
@@ -39,34 +47,28 @@ const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
 
-    if (inputValue.trim() && onSend && !disabled) {
+    if (inputValue.trim() && onSend) {
       const hasFiles = localUploadedFiles.length > 0;
-      onSend(inputValue.trim(), hasFiles);
-      setInputValue("");
+      onSend(inputValue.trim(), { hasFiles });
+      setInputValue('');
       clearFiles();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isChating) return;
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.nativeEvent.isComposing || isComposingRef.current) {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
     }
   };
 
-  const hanleSelect = (e: any, agent: agentMode) => {
-    e.stopPropagation();
-    console.log("select agent:", agent);
-    if (selectedAgent === agent) {
-      setSelectedAgent("chat");
-    } else {
-      setSelectedAgent(agent);
-    }
-  };
-
   const handleUploadClick = () => {
-    if (fileInputRef.current && supportUploadFiles) {
+    if (fileInputRef.current) {
       fileInputRef.current.click();
     }
   };
@@ -78,11 +80,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`flex flex-col gap-2 p-4 border-2 border-[#e5e5e5] rounded-4xl ${
-        className || ""
-      }`}
+      className={`flex flex-col gap-2 rounded-3xl border border-[#e5e7eb] bg-white p-3 shadow-[0_2px_8px_rgba(16,24,40,0.06)] transition-all focus-within:border-teal-400 focus-within:shadow-[0_4px_16px_rgba(14,165,164,0.12)] ${className || ''}`}
     >
-      <div className="w-full grid grid-cols-4 gap-2">
+      <div className="grid w-full grid-cols-4 gap-2">
         {localUploadedFiles.length !== 0 &&
           localUploadedFiles.map((uploadFile) => (
             <FileItem
@@ -91,34 +91,35 @@ const ChatInput: React.FC<ChatInputProps> = ({
               fileName={uploadFile.file.name}
               parsedStatus={uploadFile.parsedStatus}
               sizeBytes={uploadFile.sizeBytes}
-              ImgComponent={getFileIcon(
-                uploadFile.file.type,
-                uploadFile.file.name
-              )}
+              ImgComponent={getFileIcon(uploadFile.file.type, uploadFile.file.name)}
               removeFile={removeFile}
               canClose={true}
             />
           ))}
       </div>
       <textarea
+        ref={textareaRef}
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          setTimeout(() => {
+            isComposingRef.current = false;
+          }, 0);
+        }}
         placeholder={placeholder}
         rows={1}
-        className="w-full px-3 py-2 border border-transparent rounded-md focus:outline-none resize-none overflow-y-auto scrollbar-hide"
+        className="scrollbar-hide w-full resize-none overflow-y-auto rounded-md border border-transparent px-3 py-2 focus:outline-none"
         style={{
-          minHeight: "40px",
-          maxHeight: "100px",
-          height: "auto",
-        }}
-        onInput={(e) => {
-          const target = e.target as HTMLTextAreaElement;
-          target.style.height = "auto";
-          target.style.height = Math.min(target.scrollHeight, 100) + "px";
+          minHeight: '40px',
+          maxHeight: '100px',
+          height: 'auto',
         }}
       />
-      <div className="flex w-full justify-between px-2">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 px-2">
         <div className="flex items-center gap-2">
           <input
             type="file"
@@ -133,41 +134,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
             alt="添加附件"
             width={30}
             height={30}
-            className="p-2 w-10 h-8 rounded-3xl hover:bg-[#e7e7e7] hover:cursor-pointer"
+            className="h-8 w-10 rounded-3xl p-2 hover:cursor-pointer hover:bg-[#e7e7e7]"
             onClick={() => handleUploadClick()}
-          ></Image>
-          <div
-            className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => hanleSelect(e, "search")}
-            style={{
-              backgroundColor: selectedAgent === "search" ? "#eceaff" : "",
-              color: selectedAgent === "search" ? "#4433ff" : "",
-            }}
-          >
-            联网搜索
-          </div>
-          <div
-            className="w-30 h-8 rounded-2xl border-[#f3f3f3] border-2 flex justify-center items-center hover:cursor-pointer hover:bg-[#e7e7e7]"
-            onClick={(e) => hanleSelect(e, "deepResearch")}
-            style={{
-              backgroundColor:
-                selectedAgent === "deepResearch" ? "#eceaff" : "",
-              color: selectedAgent === "deepResearch" ? "#4433ff" : "",
-            }}
-          >
-            深度研究
-          </div>
+          />
+          <ModelSelector showLabel={false} />
         </div>
+
         <button
           type="submit"
-          className={`p-2 rounded-[50%] bg-black hover:cursor-pointer`}
+          className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95`}
         >
           {isChating ? (
-            <div className="w-6 h-6 flex items-center justify-center">
-              <div className="w-3.5 h-3.5 bg-white rounded-xs"></div>
+            <div className="flex h-6 w-6 items-center justify-center">
+              <div className="h-3.5 w-3.5 rounded-xs bg-white"></div>
             </div>
           ) : (
-            <Image src="/send.svg" alt="发送" width={25} height={25}></Image>
+            <Image src="/send.svg" alt="发送" width={22} height={22} />
           )}
         </button>
       </div>

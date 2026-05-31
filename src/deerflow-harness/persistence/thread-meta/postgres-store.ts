@@ -22,9 +22,19 @@ interface ThreadMetaRow {
   user_id: string | null;
   display_name: string;
   status: ThreadStatus;
-  metadata: unknown;
+  metadata: Record<string, unknown> | null;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+class ThreadMetaAccessError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = 'ThreadMetaAccessError';
+  }
 }
 
 const toIso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : String(v));
@@ -35,7 +45,7 @@ const rowToMeta = (r: ThreadMetaRow): ThreadMeta => ({
   user_id: r.user_id,
   display_name: r.display_name,
   status: r.status,
-  metadata: (r.metadata && typeof r.metadata === 'object' ? (r.metadata as Record<string, unknown>) : {}),
+  metadata: r.metadata && typeof r.metadata === 'object' ? r.metadata : {},
   created_at: toIso(r.created_at),
   updated_at: toIso(r.updated_at),
 });
@@ -103,7 +113,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       limit $${limitIdx} offset $${offsetIdx}
     `;
 
-    const res = await query(sql, params as unknown[]);
+    const res = await query(sql, params);
     return (res.rows as ThreadMetaRow[]).map(rowToMeta);
   }
 
@@ -128,15 +138,15 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       throw new Error(`invalid status: ${status}`);
     }
     await this.assertOwner(thread_id, opts?.user_id);
-    await query(
-      `update threads_meta set status = $1, updated_at = now() where thread_id = $2`,
-      [status, thread_id],
-    );
+    await query(`update threads_meta set status = $1, updated_at = now() where thread_id = $2`, [
+      status,
+      thread_id,
+    ]);
   }
 
   async updateMetadata(
     thread_id: string,
-    patch: Record<string, unknown>,
+    patch: Record<string, any>,
     opts?: { user_id?: string | null },
   ): Promise<void> {
     await this.assertOwner(thread_id, opts?.user_id);
@@ -169,9 +179,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
     if (user_id == null || user_id === '') return; // 放行
     const ok = await this.checkAccess(thread_id, user_id, { require_existing: true });
     if (!ok) {
-      const err = new Error(`forbidden: ${thread_id}`);
-      (err as Error & { code?: string }).code = 'FORBIDDEN';
-      throw err;
+      throw new ThreadMetaAccessError(`forbidden: ${thread_id}`, 'FORBIDDEN');
     }
   }
 }

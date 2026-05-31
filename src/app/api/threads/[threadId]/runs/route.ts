@@ -13,14 +13,11 @@ import { getThreadService } from '../../_service';
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
 
-export async function POST(
-  request: NextRequest,
-  ctx: { params: { threadId: string } },
-) {
+export async function POST(request: NextRequest, ctx: { params: { threadId: string } }) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
       input?: string;
-      metadata?: Record<string, unknown>;
+      metadata?: Record<string, any>;
     };
     if (!body.input || typeof body.input !== 'string') {
       return NextResponse.json({ error: 'missing input' }, { status: 400 });
@@ -45,10 +42,7 @@ export async function POST(
   }
 }
 
-export async function GET(
-  request: NextRequest,
-  ctx: { params: { threadId: string } },
-) {
+export async function GET(request: NextRequest, ctx: { params: { threadId: string } }) {
   try {
     const url = new URL(request.url);
     const limit = Number(url.searchParams.get('limit') ?? '50');

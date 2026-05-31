@@ -9,26 +9,38 @@ import type {
   MessageToolType,
   SupportDownloadFileType,
   MessageToolBarProps,
-} from "./webview";
+} from './webview';
 
 // 数据定义相关
 import type {
   ChatMessageType,
   ChatSessionType,
-  taskType,
-  searchResultItem,
-  deepResearchResultType,
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
-} from "./chat-info-define";
+  ChatUploadedFileRef,
+  MessagePart,
+  MessagePartType,
+  TimelineStepPart,
+  MessageTimelineProps,
+  SubagentToolCall,
+  SubagentStructuredReport,
+} from './chat-info-define';
+
+import {
+  isTextPart,
+  isReasoningPart,
+  isToolCallPart,
+  isToolResultPart,
+  isSubagentTaskPart,
+  isFilePart,
+  isImagePart,
+  isArtifactPart,
+  isTaskSummaryPart,
+} from './chat-info-define';
 
 //函数参数相关
-import type {
-  chatWithChatAssistantProps,
-  chatWithDeepResearchProps,
-  reChatWithAssistantProps,
-} from "./chat-utils-params";
+import type { chatWithAgentProps, reChatWithAgentProps } from './chat-utils-params';
 
 export {
   FileItemsProps,
@@ -45,17 +57,28 @@ export {
 export {
   ChatMessageType,
   ChatSessionType,
-  taskType,
-  searchResultItem,
-  deepResearchResultType,
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
+  ChatUploadedFileRef,
+  MessagePart,
+  MessagePartType,
+  TimelineStepPart,
+  MessageTimelineProps,
+  SubagentToolCall,
+  SubagentStructuredReport,
 };
 
 export {
-  chatWithChatAssistantProps,
-  chatWithDeepResearchProps,
-  reChatWithAssistantProps,
+  isTextPart,
+  isReasoningPart,
+  isToolCallPart,
+  isToolResultPart,
+  isSubagentTaskPart,
+  isFilePart,
+  isImagePart,
+  isArtifactPart,
+  isTaskSummaryPart,
 };
 
+export { chatWithAgentProps, reChatWithAgentProps };

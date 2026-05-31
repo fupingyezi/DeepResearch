@@ -7,7 +7,7 @@
  * 解析失败的帧会 console.error 并跳过，不阻塞后续帧。
  */
 
-import type { ClientAgentEvent } from "../protocol/client-event";
+import type { ClientAgentEvent } from '../protocol/client-event';
 
 export interface SseFrameParser {
   /**
@@ -27,18 +27,18 @@ export interface SseFrameParser {
  * 每个流应该独占一个 parser 实例，避免不同流之间共享 buffer 状态。
  */
 export function createSseFrameParser(): SseFrameParser {
-  let buffer = "";
+  let buffer = '';
 
   function parseFrame(frame: string): ClientAgentEvent | null {
-    const lines = frame.split("\n");
+    const lines = frame.split('\n');
     for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
+      if (!line.startsWith('data: ')) continue;
       const dataStr = line.slice(6);
       if (!dataStr) continue;
       try {
         return JSON.parse(dataStr) as ClientAgentEvent;
       } catch (err) {
-        console.error("[sse-frame-parser] JSON parse failed:", err);
+        console.error('[sse-frame-parser] JSON parse failed:', err);
         return null;
       }
     }
@@ -49,9 +49,9 @@ export function createSseFrameParser(): SseFrameParser {
     feed(chunk: string): ClientAgentEvent[] {
       buffer += chunk;
       const events: ClientAgentEvent[] = [];
-      const frames = buffer.split("\n\n");
+      const frames = buffer.split('\n\n');
       // 最后一个元素可能是不完整的，保留至下次 feed
-      buffer = frames.pop() ?? "";
+      buffer = frames.pop() ?? '';
       for (const frame of frames) {
         const event = parseFrame(frame);
         if (event) events.push(event);
@@ -61,7 +61,7 @@ export function createSseFrameParser(): SseFrameParser {
     flush(): ClientAgentEvent[] {
       if (!buffer.trim()) return [];
       const event = parseFrame(buffer);
-      buffer = "";
+      buffer = '';
       return event ? [event] : [];
     },
   };
