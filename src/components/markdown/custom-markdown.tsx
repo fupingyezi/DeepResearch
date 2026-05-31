@@ -9,7 +9,7 @@ import CopyButton from './copy-button';
 
 const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
   return (
-    <div className="prose prose-zinc dark:prose-invert max-w-none">
+    <div className="prose prose-zinc max-w-none min-w-0 break-words prose-headings:scroll-mt-4 prose-headings:font-semibold prose-headings:text-gray-900 prose-h1:text-[26px] prose-h1:leading-snug prose-h1:mb-4 prose-h2:text-[20px] prose-h2:mt-8 prose-h2:mb-3 prose-h2:border-b prose-h2:border-gray-100 prose-h2:pb-2 prose-h3:text-[17px] prose-p:text-[15px] prose-p:leading-7 prose-p:text-gray-700 prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline prose-strong:text-gray-900 prose-li:text-[15px] prose-li:text-gray-700 prose-blockquote:border-l-teal-400 prose-blockquote:bg-teal-50/40 prose-blockquote:py-1 prose-blockquote:text-gray-600 prose-blockquote:not-italic prose-table:text-sm prose-th:bg-gray-50 prose-img:rounded-xl prose-img:shadow-sm">
       <Markdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -49,15 +49,15 @@ const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
                 : extractText(children);
 
               return (
-                <div className="not-prose my-4 rounded-md border border-zinc-200 dark:border-zinc-700">
-                  <div className="flex h-12 items-center justify-between bg-zinc-100 px-4 dark:bg-zinc-900">
+                <div className="not-prose my-4 w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200">
+                  <div className="flex h-11 items-center justify-between bg-zinc-50 px-4">
                     <div className="flex items-center gap-2">
-                      <Terminal size={18} />
-                      <p className="text-sm text-zinc-600 dark:text-zinc-400">{language}</p>
+                      <Terminal size={16} className="text-teal-600" />
+                      <p className="text-xs font-medium text-zinc-500">{language}</p>
                     </div>
                     <CopyButton id={id} />
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="scrollbar-slim overflow-x-auto">
                     <SyntaxHighlighter
                       style={vs}
                       language={language}
@@ -66,6 +66,7 @@ const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
                         margin: 0,
                         padding: '1rem',
                         background: 'transparent',
+                        fontSize: '13px',
                       }}
                       wrapLongLines={true}
                     >
@@ -81,7 +82,7 @@ const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
               return (
                 <code
                   {...props}
-                  className="not-prose rounded bg-gray-100 px-1 py-0.5 text-sm dark:bg-zinc-800"
+                  className="not-prose rounded bg-teal-50 px-1.5 py-0.5 text-[13px] break-words text-teal-700"
                 >
                   {children}
                 </code>

@@ -80,7 +80,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`flex flex-col gap-2 rounded-4xl border-2 border-[#e5e5e5] p-4 ${className || ''}`}
+      className={`flex flex-col gap-2 rounded-3xl border border-[#e5e7eb] bg-white p-3 shadow-[0_2px_8px_rgba(16,24,40,0.06)] transition-all focus-within:border-teal-400 focus-within:shadow-[0_4px_16px_rgba(14,165,164,0.12)] ${className || ''}`}
     >
       <div className="grid w-full grid-cols-4 gap-2">
         {localUploadedFiles.length !== 0 &&
@@ -140,13 +140,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <ModelSelector showLabel={false} />
         </div>
 
-        <button type="submit" className={`rounded-[50%] bg-black p-2 hover:cursor-pointer`}>
+        <button
+          type="submit"
+          className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95`}
+        >
           {isChating ? (
             <div className="flex h-6 w-6 items-center justify-center">
               <div className="h-3.5 w-3.5 rounded-xs bg-white"></div>
             </div>
           ) : (
-            <Image src="/send.svg" alt="发送" width={25} height={25} />
+            <Image src="/send.svg" alt="发送" width={22} height={22} />
           )}
         </button>
       </div>

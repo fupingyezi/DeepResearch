@@ -28,7 +28,7 @@ type SubagentToolItem = NonNullable<SubagentTaskStep['content']['children']>[num
 const ReasoningBubble: React.FC<{ step: ReasoningStep }> = ({ step }) => {
   const [open, setOpen] = useState(true);
   return (
-    <div className="border-l-2 border-gray-200 py-1.5 pl-3">
+    <div className="min-w-0 border-l-2 border-amber-200 py-1.5 pl-3">
       <div
         className="flex cursor-pointer items-center gap-2 text-gray-600 select-none"
         onClick={() => setOpen((v) => !v)}
@@ -40,7 +40,7 @@ const ReasoningBubble: React.FC<{ step: ReasoningStep }> = ({ step }) => {
         <span className="text-sm font-medium">思考</span>
       </div>
       {open && (
-        <div className="mt-1 ml-5 text-sm leading-relaxed text-gray-600">
+        <div className="mt-1 ml-5 min-w-0 overflow-hidden text-sm leading-relaxed break-words text-gray-600">
           <CustomMarkdown content={step.content.text} />
         </div>
       )}
@@ -123,34 +123,35 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
   const searchResults = extractSearchResults(c.name, c.result);
 
   return (
-    <div className="border-l-2 border-gray-200 py-1.5 pl-3">
+    <div className="min-w-0 border-l-2 border-sky-200 py-1.5 pl-3">
       <div
-        className="flex cursor-pointer items-center gap-2 select-none"
+        className="flex min-w-0 cursor-pointer items-center gap-2 select-none"
         onClick={() => setOpen((v) => !v)}
       >
         <CaretRightOutlined
-          className={`text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
         />
-        {icon}
-        <span className="flex-1 truncate text-sm text-gray-700">{label}</span>
-        {renderStatus()}
+        <span className="shrink-0">{icon}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{label}</span>
+        <span className="shrink-0">{renderStatus()}</span>
       </div>
 
       {open && (
-        <div className="mt-2 ml-5 space-y-1.5 text-xs">
+        <div className="mt-2 ml-5 min-w-0 space-y-1.5 text-xs">
           {searchResults && searchResults.length > 0 && (
-            <ul className="list-none space-y-1 rounded-lg bg-[#f4f4f4] p-2">
+            <ul className="list-none space-y-1 rounded-lg border border-gray-100 bg-gray-50 p-2">
               {searchResults.slice(0, 8).map((item, idx) => {
                 const r = item as { url?: string; sourceUrl?: string; title?: string };
                 return (
-                  <li key={idx}>
+                  <li key={idx} className="min-w-0">
                     <a
                       href={r.url || r.sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block truncate text-gray-600 hover:text-blue-600"
+                      className="flex items-center gap-1.5 truncate text-gray-600 transition-colors hover:text-teal-600"
                     >
-                      {r.title || r.url || r.sourceUrl || '未命名结果'}
+                      <GlobalOutlined className="shrink-0 text-[10px] text-gray-400" />
+                      <span className="truncate">{r.title || r.url || r.sourceUrl || '未命名结果'}</span>
                     </a>
                   </li>
                 );
@@ -158,7 +159,7 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
             </ul>
           )}
           {!searchResults && c.args !== undefined && (
-            <pre className="overflow-x-auto rounded bg-[#f4f4f4] p-2 break-all whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-48 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
               {(() => {
                 try {
                   return JSON.stringify(c.args, null, 2);
@@ -168,9 +169,9 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
               })()}
             </pre>
           )}
-          {c.errorMessage && <div className="text-red-500">错误：{c.errorMessage}</div>}
+          {c.errorMessage && <div className="break-words text-red-500">错误：{c.errorMessage}</div>}
           {!searchResults && c.result !== undefined && (
-            <pre className="max-h-60 overflow-x-auto rounded bg-[#f4f4f4] p-2 break-all whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-60 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
               {typeof c.result === 'string'
                 ? c.result
                 : (() => {
@@ -192,19 +193,19 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
 const ReasoningBlock: React.FC<{ text: string }> = ({ text }) => {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-l-2 border-amber-200 py-0.5 pl-2">
+    <div className="min-w-0 border-l-2 border-amber-200 py-0.5 pl-2">
       <div
-        className="flex cursor-pointer items-center gap-1.5 text-gray-500 select-none"
+        className="flex min-w-0 cursor-pointer items-center gap-1.5 text-gray-500 select-none"
         onClick={() => setOpen((v) => !v)}
       >
         <CaretRightOutlined
-          className={`text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
         />
         <BulbOutlined className="text-xs text-amber-400" />
         <span className="text-xs font-medium">思考过程</span>
       </div>
       {open && (
-        <div className="mt-1 ml-4 text-xs leading-relaxed text-gray-500">
+        <div className="mt-1 ml-4 min-w-0 overflow-hidden text-xs leading-relaxed break-words text-gray-500">
           <CustomMarkdown content={text} />
         </div>
       )}
@@ -234,32 +235,34 @@ const SubagentTaskBubble: React.FC<{
   const structured = c.structured;
 
   return (
-    <div className="border-l-2 border-purple-200 py-1.5 pl-3">
+    <div className="min-w-0 border-l-2 border-purple-200 py-1.5 pl-3">
       <div
-        className="flex cursor-pointer items-center gap-2 select-none"
+        className="flex min-w-0 cursor-pointer items-center gap-2 select-none"
         onClick={() => setOpen((v) => !v)}
       >
         <CaretRightOutlined
-          className={`text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
         />
-        <ApartmentOutlined className="text-purple-500" />
-        <span className="flex-1 truncate text-sm text-gray-700">
+        <ApartmentOutlined className="shrink-0 text-purple-500" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700">
           {c.description || `子任务 ${index + 1}`}
         </span>
         {hasChildren && (
-          <span className="shrink-0 text-xs text-gray-400">{children.length} 步</span>
+          <span className="shrink-0 rounded-full bg-purple-50 px-1.5 py-0.5 text-xs text-purple-500">
+            {children.length} 步
+          </span>
         )}
-        {renderStatus()}
+        <span className="shrink-0">{renderStatus()}</span>
       </div>
 
       {open && (
-        <div className="mt-2 ml-5 space-y-2">
+        <div className="mt-2 ml-5 min-w-0 space-y-2">
           {/* 思考/规划文本（可折叠） */}
           {c.reasoning && <ReasoningBlock text={c.reasoning} />}
 
           {/* 子工具调用按时序展开 */}
           {hasChildren && (
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               {children.map((item) => (
                 <SubagentToolCallRow key={item.id} item={item} />
               ))}
@@ -268,9 +271,9 @@ const SubagentTaskBubble: React.FC<{
 
           {/* 结构化报告（completed 后） */}
           {structured && (
-            <div className="rounded-lg border border-purple-100 bg-purple-50 p-2 text-xs">
+            <div className="min-w-0 rounded-xl border border-purple-100 bg-purple-50/60 p-3 text-xs">
               <div className="mb-1 font-semibold text-purple-700">摘要</div>
-              <div className="mb-2 text-gray-700">{structured.summary}</div>
+              <div className="mb-2 break-words text-gray-700">{structured.summary}</div>
               {structured.keyFindings?.length > 0 && (
                 <>
                   <div className="mb-1 font-semibold text-purple-700">
@@ -309,12 +312,12 @@ const SubagentTaskBubble: React.FC<{
 
           {/* fallback：没有 structured 时展示原文 result */}
           {!structured && c.result && (
-            <div className="text-sm text-gray-700">
+            <div className="min-w-0 overflow-hidden text-sm break-words text-gray-700">
               <CustomMarkdown content={c.result} />
             </div>
           )}
 
-          {c.error && <div className="text-sm text-red-500">错误：{c.error}</div>}
+          {c.error && <div className="break-words text-sm text-red-500">错误：{c.error}</div>}
         </div>
       )}
     </div>
@@ -337,31 +340,31 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
   const searchResults = extractSearchResults(item.name, item.result);
 
   return (
-    <div className="border-l-2 border-gray-100 py-0.5 pl-2">
+    <div className="min-w-0 border-l-2 border-gray-100 py-0.5 pl-2">
       <div
-        className="flex cursor-pointer items-center gap-1.5 select-none"
+        className="flex min-w-0 cursor-pointer items-center gap-1.5 select-none"
         onClick={() => setOpen((v) => !v)}
       >
         <CaretRightOutlined
-          className={`text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
         />
         <span className="shrink-0">{icon}</span>
-        <span className="flex-1 truncate text-xs text-gray-600">{label}</span>
-        {renderStatus()}
+        <span className="min-w-0 flex-1 truncate text-xs text-gray-600">{label}</span>
+        <span className="shrink-0">{renderStatus()}</span>
       </div>
       {open && (
-        <div className="mt-1 ml-4 space-y-1 text-xs">
+        <div className="mt-1 ml-4 min-w-0 space-y-1 text-xs">
           {searchResults && searchResults.length > 0 && (
-            <ul className="list-none space-y-0.5 rounded bg-[#f4f4f4] p-1.5">
+            <ul className="list-none space-y-0.5 rounded-lg border border-gray-100 bg-gray-50 p-1.5">
               {searchResults.slice(0, 6).map((entry, i) => {
                 const r = entry as { url?: string; sourceUrl?: string; title?: string };
                 return (
-                  <li key={i} className="truncate">
+                  <li key={i} className="min-w-0 truncate">
                     <a
                       href={r.url || r.sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-gray-600 hover:text-blue-600"
+                      className="text-gray-600 transition-colors hover:text-teal-600"
                     >
                       {r.title || r.url || r.sourceUrl || '未命名'}
                     </a>
@@ -371,7 +374,7 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
             </ul>
           )}
           {!searchResults && item.args !== undefined && (
-            <pre className="max-h-24 overflow-x-auto rounded bg-[#f4f4f4] p-1.5 break-all whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-24 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-[12px] break-words whitespace-pre-wrap text-gray-600">
               {(() => {
                 try {
                   return JSON.stringify(item.args, null, 2);
@@ -381,7 +384,7 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
               })()}
             </pre>
           )}
-          {item.errorMessage && <div className="text-red-500">错误：{item.errorMessage}</div>}
+          {item.errorMessage && <div className="break-words text-red-500">错误：{item.errorMessage}</div>}
         </div>
       )}
     </div>
@@ -397,9 +400,9 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ steps, status, interr
   let subagentCounter = 0;
 
   return (
-    <div className="my-2 rounded-xl border border-gray-200 bg-white/70 backdrop-blur-sm">
-      <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
-        {status === 'processing' && <LoadingOutlined className="text-blue-500" />}
+    <div className="my-2 min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white/80 shadow-[0_1px_2px_rgba(16,24,40,0.04)] backdrop-blur-sm">
+      <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50/60 px-3.5 py-2.5">
+        {status === 'processing' && <LoadingOutlined className="text-teal-500" />}
         {status === 'end' && <CheckCircleOutlined className="text-green-500" />}
         {status === 'failed' && <CloseCircleOutlined className="text-red-500" />}
         <span className="text-sm font-medium text-gray-700">
@@ -411,7 +414,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ steps, status, interr
         </span>
       </div>
 
-      <div className="flex flex-col gap-1 px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-1 px-3.5 py-2.5">
         {steps.map((step) => {
           if (step.type === 'reasoning') {
             return <ReasoningBubble key={step.partId} step={step} />;

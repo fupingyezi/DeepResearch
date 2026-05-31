@@ -63,7 +63,11 @@ const SessionBubble: React.FC<{
 
     return (
       <>
-        {isShowDate && <div className="w-full px-3 text-[12px] text-[#81858c]">{showDate}</div>}
+        {isShowDate && (
+          <div className="mt-3 mb-1 w-full px-3 text-[11px] font-medium tracking-wide text-[#9ca3af]">
+            {showDate}
+          </div>
+        )}
         <Popover
           content={
             <div onClick={(e) => e.stopPropagation()}>
@@ -92,10 +96,11 @@ const SessionBubble: React.FC<{
           open={selectedSession?.id === chatSession.id && !isModalOpen}
         >
           <div
-            className="relative min-h-10 w-full overflow-hidden rounded-2xl px-3 leading-10 text-ellipsis whitespace-nowrap hover:cursor-pointer hover:bg-[#ebedef]"
+            className="relative min-h-10 w-full overflow-hidden rounded-xl px-3 leading-10 text-ellipsis whitespace-nowrap transition-colors hover:cursor-pointer hover:bg-[#eef0f2]"
             style={{
-              backgroundColor: chatSession.id === currentSessionId ? '#e4ecfc' : '',
-              color: chatSession.id === currentSessionId ? 'blue' : '',
+              backgroundColor: chatSession.id === currentSessionId ? '#d7f2f0' : '',
+              color: chatSession.id === currentSessionId ? '#0f766e' : '#374151',
+              fontWeight: chatSession.id === currentSessionId ? 600 : 400,
             }}
             onMouseEnter={() => setIsHover(true)}
             onMouseLeave={() => setIsHover(false)}
@@ -105,14 +110,14 @@ const SessionBubble: React.FC<{
             {isHover && (
               <div
                 className={`absolute top-1/2 right-0 flex h-full w-9 -translate-y-1/2 transform items-center justify-center ${
-                  chatSession.id === currentSessionId ? 'bg-[#e4ecfc]' : 'bg-[#ebedef]'
+                  chatSession.id === currentSessionId ? 'bg-[#d7f2f0]' : 'bg-[#eef0f2]'
                 }`}
               >
                 <EllipsisOutlined
-                  className={`h-6 w-6 rounded-4xl p-0.5 ${
+                  className={`h-6 w-6 rounded-full p-0.5 ${
                     chatSession.id === currentSessionId
-                      ? 'hover:bg-[#d9e3f3]'
-                      : 'hover:bg-[#e5e8eb]'
+                      ? 'hover:bg-[#bfe9e5]'
+                      : 'hover:bg-[#e0e3e6]'
                   } transition`}
                   style={{ fontSize: 20 }}
                   onClick={(e) => {
@@ -238,10 +243,10 @@ const SiderContent = () => {
   return (
     <div className="flex h-full w-full flex-col items-center gap-6">
       <div
-        className="flex h-10 w-[92%] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-transparent bg-white shadow-[0px_-2px_2px_rgba(72,104,178,0.04),0px_2px_2px_rgba(106,111,117,0.09),0px_1px_2px_rgba(72,104,178,0.08)] hover:shadow-[0_4px_4px_rgba(72,104,178,0.04),0_-3px_4px_rgba(72,104,178,0.04),0_6px_6px_rgba(106,111,117,0.1)]"
+        className="flex h-10 w-[92%] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[#e5e7eb] bg-white font-medium text-gray-700 shadow-[0px_1px_2px_rgba(16,24,40,0.05)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
         onClick={() => handleCreateNewSession()}
       >
-        <PlusCircleOutlined style={{ color: 'black', fontSize: 20 }} />
+        <PlusCircleOutlined style={{ color: '#0f766e', fontSize: 18 }} />
         开启新对话
       </div>
       <div className="scrollbar-hide flex h-4/5 w-[92%] flex-col overflow-y-scroll">

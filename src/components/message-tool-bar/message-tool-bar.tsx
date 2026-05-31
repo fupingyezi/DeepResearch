@@ -79,7 +79,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
                 alt={`${tool}`}
                 width={20}
                 height={20}
-                className={`m-0.5 mb-2 h-7 w-7 rounded-xl p-1 hover:cursor-pointer hover:bg-[#e7e7e7] ${className}`}
+                className={`m-0.5 mb-2 h-7 w-7 rounded-lg p-1 transition-colors hover:cursor-pointer hover:bg-gray-100 ${className}`}
                 onClick={() => handleToolOperator(tool)}
               ></Image>
             </Popover>
@@ -89,7 +89,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
               alt={`${tool}`}
               width={20}
               height={20}
-              className={`m-0.5 mb-2 h-7 w-7 rounded-xl p-1 hover:cursor-pointer hover:bg-[#e7e7e7] ${className}`}
+              className={`m-0.5 mb-2 h-7 w-7 rounded-lg p-1 transition-colors hover:cursor-pointer hover:bg-gray-100 ${className}`}
               onClick={() => handleToolOperator(tool)}
             ></Image>
           )}

@@ -17,7 +17,7 @@ export default async function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="flex overflow-hidden">
+      <body className="flex h-screen overflow-hidden bg-[#f9fafb] text-[#111827] antialiased">
         <Sider />
         {/* chat 主体（页面内自带 ArtifactPanel） */}
         {children}

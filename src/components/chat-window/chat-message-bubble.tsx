@@ -293,7 +293,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             </div>
           )}
           <div
-            className="max-w-2/3 rounded-3xl bg-sky-100 p-3"
+            className="max-w-[75%] min-w-0 rounded-2xl rounded-tr-md bg-gradient-to-br from-sky-100 to-teal-50 px-4 py-3 text-[15px] break-words text-gray-800 shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
             onMouseEnter={() => setIsShowOtherOperators(true)}
             onMouseLeave={() => setIsShowOtherOperators(false)}
           >
@@ -348,22 +348,29 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     <button
       type="button"
       onClick={handleOpenArtifact}
-      className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
     >
-      <div className="flex items-center gap-2">
-        <FileTextOutlined className="text-blue-500" />
-        <span className="truncate text-sm font-medium text-gray-700">
-          {artifactPart.content.title}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+          <FileTextOutlined />
         </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium text-gray-800">
+            {artifactPart.content.title}
+          </span>
+          <span className="text-[11px] text-gray-400">点击查看完整研究报告</span>
+        </div>
       </div>
-      <span className="shrink-0 text-xs text-blue-500">查看产物 →</span>
+      <span className="shrink-0 text-xs font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
+        查看产物 →
+      </span>
     </button>
   ) : null;
 
   return (
     <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
       <div
-        className="flex max-w-2/3 flex-col gap-2 rounded-3xl bg-white p-3"
+        className="flex min-w-0 max-w-[85%] flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
@@ -379,9 +386,12 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             {/* 多 agent 工作流：报告全文收进 artifact，气泡内只留 跳转按钮 + 任务总结 */}
             {artifactEntry}
             {taskSummaryPart && (
-              <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
-                <div className="mb-1 text-xs font-semibold text-gray-500">本次工作流任务总结</div>
-                <div className="text-sm text-gray-700">
+              <div className="mt-1 min-w-0 rounded-xl border border-gray-200 bg-gray-50/70 px-3.5 py-3">
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-500" />
+                  本次工作流任务总结
+                </div>
+                <div className="min-w-0 text-sm break-words text-gray-700">
                   <CustomMarkdown content={taskSummaryPart.content.text} />
                 </div>
               </div>

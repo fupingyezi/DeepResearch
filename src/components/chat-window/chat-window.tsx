@@ -9,9 +9,13 @@ import { chatWithAgent } from '@/utils/chat';
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {
   return (
-    <div className="flex h-screen flex-1 flex-col pb-8">
-      <div className="scrollbar-hide flex-1 overflow-y-auto p-4">{content}</div>
-      <div className="shrink-0 bg-white">{footer}</div>
+    <div className="flex h-screen flex-1 flex-col pb-6">
+      <div className="scrollbar-hide flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto h-full w-full max-w-[960px]">{content}</div>
+      </div>
+      <div className="shrink-0 bg-transparent px-6">
+        <div className="mx-auto w-full max-w-[960px]">{footer}</div>
+      </div>
     </div>
   );
 };

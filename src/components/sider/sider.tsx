@@ -24,8 +24,8 @@ const Sider = () => {
 
   return (
     <div
-      className={`flex h-screen flex-col border-r-2 border-[#f3f3f3] transition-all ${
-        isExpand ? 'w-[18%] bg-[#f9f9f9]' : 'w-14 bg-white'
+      className={`flex h-screen shrink-0 flex-col border-r border-[#e5e7eb] transition-all ${
+        isExpand ? 'w-[220px] bg-[#f9fafb]' : 'w-14 bg-white'
       }`}
     >
       <div className="flex items-center justify-between p-2">

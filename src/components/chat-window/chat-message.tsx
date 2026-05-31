@@ -76,10 +76,12 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   if (!messages || messages.length === 0) {
     return (
       <div
-        className={`flex h-[70%] w-full flex-col justify-center gap-2 text-center font-serif text-6xl text-wrap ${className || ''} `}
+        className={`flex h-[70%] w-full flex-col items-center justify-center gap-4 text-center ${className || ''} `}
       >
-        {emptyStateComponent}
-        <p className="text-2xl" style={{ fontFamily: '楷体' }}>
+        <div className="bg-gradient-to-br from-teal-500 via-sky-500 to-teal-600 bg-clip-text font-serif text-6xl font-bold text-transparent">
+          {emptyStateComponent}
+        </div>
+        <p className="text-2xl text-gray-400" style={{ fontFamily: '楷体' }}>
           阅尽好花千万树，愿君记取此一枝。
         </p>
       </div>
