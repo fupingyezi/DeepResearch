@@ -1,207 +1,213 @@
-# LangChain Next.js Application
+# mini-DeepResearch
 
-这是一个基于 Next.js 14 和 LangChain 构建的智能聊天应用，提供了 AI 交互功能和现代化的用户界面。
+一个基于 **Next.js + LangGraph** 实现的多智能体深度研究助手。
+参考 DeerFlow 2.0 架构，前端提供 DeerFlow 风格的浅色精致 UI（聊天 + 思考时间线 + Artifact 浮窗产物面板），后端通过自研 `deerflow-harness` 框架编排 Planner / Researcher / Reporter / Coder 等子智能体协同完成复杂研究任务。
 
-## ✨ 主要功能特性
+## ✨ 主要特性
 
-- 🤖 **智能聊天**：基于 LangChain 实现普通聊天、网络搜索和深度研究
-- 📁 **文件上传**：支持多种格式文件上传和处理
-- 📊 **深度研究流程**：集成 Tavily 搜索和 LangGraph 实现复杂研究任务
-- 📱 **响应式设计**：使用 Ant Design 构建的现代化 UI
-- 📝 **Markdown 支持**：完整的 Markdown 渲染，包括数学公式
-- 💾 **状态管理**：使用 Zustand 进行高效的状态管理
-- 🔧 **可扩展架构**：模块化设计，便于功能扩展
+- 🤖 **多智能体协同（DeerFlow Harness）**：Planner 拆解任务 → Researcher 并发检索 → Reporter 汇总报告 → Coder 处理结构化数据，全流程通过 LangGraph + checkpoint 持久化。
+- 🧠 **可视化思考时间线**：聊天气泡内实时展示 reasoning / tool_call / subagent_task 折叠卡片，支持思考过程、工具入参、搜索结果、子任务摘要分级查看。
+- 📄 **Artifact 浮窗产物面板**：研究报告自动收进右侧浮窗卡片（DeerFlow 风格的"分隔区+悬浮卡片"层次），气泡内仅保留入口与任务总结，避免长报告淹没对话。
+- 🔍 **多模式对话**：basic 普通聊天 / search 联网搜索 / deep_research 深度研究，统一走 `/api/chat/v2`。
+- 📁 **多格式文件上传**：PDF、Word、图片等，自动入 MinIO 并参与上下文。
+- 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
+- 🎨 **浅色精致 UI**：青绿主色 + 卡片化布局 + 细滚动条 + 渐变按钮，整体观感对齐 DeerFlow 2.0。
+- 💾 **会话持久化**：PostgreSQL 存对话与 LangGraph checkpoint，Redis 做缓存与状态。
 
 ## 🛠️ 技术栈
 
 ### 前端
+- **Next.js 14**（App Router）+ **React 18** + **TypeScript**
+- **Tailwind CSS v4**（`@theme inline` token 主题）
+- **Ant Design** + **Lucide / @ant-design/icons**
+- **Zustand**（轻量状态管理，按 store 分片）
+- **react-markdown** + **remark-gfm/math** + **rehype-katex** + **react-syntax-highlighter**
 
-- **Next.js 14** - React 框架，支持 App Router
-- **TypeScript** - 类型安全的 JavaScript
-- **Ant Design** - 企业级 UI 组件库
-- **Zustand** - 轻量级状态管理
-- **React Markdown** - Markdown 渲染
-- **KaTeX** - 数学公式渲染
+### Agent / AI
+- **LangChain 1.x** + **LangGraph 1.x**（多智能体编排 + checkpoint）
+- **@langchain/langgraph-checkpoint-postgres**（PostgreSQL checkpoint）
+- **@langchain/openai**（OpenAI 兼容协议，支持 OpenAI / 千问 / 星火等）
+- **Tavily**（联网搜索）
+- 自研 **deerflow-harness**：Planner / Researcher / Reporter / Coder 子智能体框架
 
-### 后端/AI
-
-- **LangChain** - AI 应用开发框架
-- **LangGraph** - 构建智能代理和工作流
-- **OpenAI API** - 强大的语言模型
-- **Tavily** - 智能搜索服务
-
-### 数据库/存储
-
-- **PostgreSQL** - 关系型数据库，用于存储对话历史
-- **Redis** - 缓存和会话管理
-- **Minio** - 文件存储管理
+### 存储
+- **PostgreSQL**：会话、消息、checkpoint
+- **Redis**：缓存与会话状态
+- **MinIO**：上传文件对象存储
 
 ## 📁 项目结构
 
 ```
 ├── src/
-│   ├── agents/             # Agent 智能体业务逻辑
-│   │   ├── eventStream/    # 事件流适配器（LangChain → AgentEvent）
-│   │   ├── harness/        # Harness 子代理系统
-│   │   │   ├── hooks/      # Harness 钩子实现
-│   │   │   └── subagents/  # 子代理配置
-│   │   ├── modules/        # Agent 组合模块（事件发射器、流处理器）
-│   │   └── tools/          # Agent 工具定义
-│   ├── app/                # Next.js App Router
-│   │   ├── api/            # API 路由
-│   │   │   ├── chat/
-│   │   │   │   └── v2/     # 统一路由（支持 basic/search/deep_research）
-│   │   │   ├── conversations/  # 会话管理 API
-│   │   │   └── files/      # 文件上传/删除 API
-│   │   ├── layout.tsx      # 根布局
-│   │   └── page.tsx        # 主页
-│   ├── components/         # UI 组件
-│   │   ├── ChatWindow/     # 聊天窗口组件
-│   │   ├── Files/          # 文件处理组件
-│   │   ├── Markdown/       # Markdown 渲染组件
-│   │   ├── MessageToolBar/ # 消息工具栏组件
-│   │   ├── Process/        # 深度研究流程组件
-│   │   └── Sider/          # 侧边栏组件
-│   ├── lib/                # 基础设施层
-│   │   ├── cache/          # 缓存配置
-│   │   ├── db/             # 数据库配置
-│   │   ├── llm/            # LLM API 构建
-│   │   ├── storage/        # 文件存储（MinIO）
-│   │   └── stream/         # 流处理（AgentEvent SSE 构建）
-│   ├── store/              # Zustand 状态管理
-│   ├── types/              # TypeScript 类型定义
-│   └── utils/              # 前端工具函数
-│       ├── chat/           # 聊天相关工具
-│       ├── files/          # 文件处理工具
-│       ├── hooks/          # 自定义 React Hooks
-│       └── request/        # API 请求封装
-├── public/                 # 静态资源
-├── docker-compose.yaml     # Docker 配置
-├── next.config.js          # Next.js 配置
-├── package.json            # 项目依赖
-└── tsconfig.json           # TypeScript 配置
+│   ├── app/                       # Next.js App Router
+│   │   ├── api/
+│   │   │   ├── chat/v2/           # 统一聊天入口（basic / search / deep_research）
+│   │   │   ├── conversations/     # 会话/消息/历史 API
+│   │   │   └── files/             # 文件上传 / 删除 API
+│   │   ├── globals.css            # 全局样式 + 浅色主题 token + prose/滚动条微调
+│   │   ├── layout.tsx             # 根布局（Sider + 主体）
+│   │   └── page.tsx               # 主页（聊天区 + Artifact 浮窗面板）
+│   │
+│   ├── components/                # UI 组件（小写-横线命名）
+│   │   ├── chat-window/           # 聊天容器、消息列表、气泡、思考时间线、输入框
+│   │   ├── markdown/              # CustomMarkdown（prose 排版 + 代码块 + 数学公式）
+│   │   ├── message-tool-bar/      # 消息悬浮工具条（复制/编辑/下载）
+│   │   ├── model-selector/        # 模型切换
+│   │   ├── files/                 # 文件上传/预览
+│   │   ├── process/               # ArtifactPanel 浮窗产物面板
+│   │   └── sider/                 # 左侧会话侧边栏
+│   │
+│   ├── deerflow-harness/          # ⭐ 多智能体编排核心
+│   │   ├── agents/                # Planner / Researcher / Reporter / Coder 等
+│   │   ├── subagents/             # 子代理调度与上下文隔离
+│   │   ├── runtime/               # 运行时（事件流、状态机、中断恢复）
+│   │   ├── tools/                 # 工具定义（搜索、抓取、代码执行等）
+│   │   ├── persistence/           # checkpoint 持久化
+│   │   ├── models/                # 模型适配
+│   │   ├── mcp/                   # MCP 协议接入
+│   │   ├── sandbox/ skills/ config/
+│   │   ├── types/                 # 共享类型（subagent / event / artifact）
+│   │   ├── client.ts              # Harness 入口
+│   │   └── index.ts
+│   │
+│   ├── runtime/                   # 前端运行时（事件解析、流式状态机）
+│   ├── store/                     # Zustand 切片（会话、消息、文件、模型、Artifact 面板）
+│   ├── lib/                       # 基础设施（db / cache / storage / llm / stream）
+│   ├── types/                     # 全局类型
+│   ├── utils/
+│   │   ├── chat/                  # 流处理、最终消息提取、消息归一化
+│   │   ├── files/                 # 文件解析
+│   │   ├── hooks/                 # 自定义 React hooks
+│   │   └── request/               # API 请求封装
+│   └── config/                    # 应用配置
+│
+├── public/                        # 静态资源（svg 图标）
+├── docker-compose.yaml            # PostgreSQL + Redis + MinIO 一键启动
+├── next.config.js / eslint.config.mjs / postcss.config.mjs
+├── package.json
+└── tsconfig.json
 ```
 
 ## 🚀 快速开始
 
 ### 环境要求
 
-- Node.js 18+
-- PostgreSQL 8+
-- Redis 5+
-- Minio 8+
+- **Node.js 18+**
+- **pnpm**（推荐）
+- **Docker & Docker Compose**（启动 PostgreSQL / Redis / MinIO）
 
 ### 安装依赖
 
 ```bash
-# 使用 npm
-npm install
-
-# 使用 pnpm
 pnpm install
 ```
 
 ### 配置环境变量
 
-创建 `.env` 文件并配置以下环境变量：
+在项目根目录创建 `.env`：
 
 ```env
-# OpenAI API 配置
+# === 模型 API（任选其一或多个）===
+# OpenAI
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_API_BASE=https://api.openai.com/v1
 
-# 阿里千问API
+# 阿里千问（OpenAI 兼容）
 OPENAI_QWEN_API_KEY=your-qwen-api-key
-OPENAI_QWEN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+OPENAI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
-# 星火大模型API
+# 讯飞星火（OpenAI 兼容）
 OPENAI_SPARK_API_KEY=your-spark-api-key
-OPENAI_SPARK_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+OPENAI_SPARK_BASE_URL=https://spark-api-open.xf-yun.com/v1
 
-# PostgreSQL 配置
-DATABASE_URL="postgresql://yezi:fupingyezi123@localhost:5432/mini-DeepResearch"
+# === 检索 ===
+TAVILY_API_KEY=your-tavily-api-key
 
-# Redis 配置
+# === PostgreSQL ===
+DATABASE_URL=postgresql://yezi:fupingyezi123@localhost:5432/mini-DeepResearch
+
+# === Redis ===
 REDIS_HOST=localhost
 REDIS_PORT=6379
-REDIS_URL="redis://localhost:6379"
+REDIS_URL=redis://localhost:6379
 
-# Minio 配置
+# === MinIO ===
 MINIO_ENDPOINT=localhost
 MINIO_PORT=9000
 MINIO_USE_SSL=false
 MINIO_ACCESS_KEY=yezi
 MINIO_SECRET_KEY=fupingyezi123
 MINIO_BUCKET=chat-files
-
-# Tavily API 配置
-TAVILY_API_KEY=your-tavily-api-key
 ```
 
-注意：
+> 注意：`.env` 与 `docker-compose.yaml` 中的账密、端口需保持一致。如需切换默认模型，请到 `src/deerflow-harness/models` 与 `src/lib/llm` 对应处调整。
 
-1. 本项目目前使用千问，如果需要使用其他模型，请到 agent 对应处修改代码。
-2. 环境配置和 docker 配置是相对应的，如修改请同时修改两处。
-
-### 使用 Docker
-
-使用 Docker Compose 启动数据库服务：
+### 启动基础设施
 
 ```bash
 docker-compose up -d
 ```
 
+会启动 PostgreSQL / Redis / MinIO 三个服务。
+
 ### 启动开发服务器
 
 ```bash
-npm run dev
-# or
 pnpm dev
 ```
 
-打开 [http://localhost:3000](http://localhost:3000) 查看应用。
+访问 [http://localhost:3000](http://localhost:3000)。
+
+### 构建与运行生产版本
+
+```bash
+pnpm build
+pnpm start
+```
 
 ## 📖 使用指南
 
-### 基础聊天
+### 基础聊天 / 联网搜索 / 深度研究
 
-1. 在聊天输入框中输入问题或消息
-2. 点击发送按钮或按 Enter 键发送
-3. 等待 AI 回复
-4. 可以继续与 AI 进行多轮对话
+- 顶部模型选择器切换模型；输入框右侧的工具按钮切换 **basic / search / deep_research** 模式。
+- 深度研究模式会触发 Planner → Researcher → Reporter 全流程，气泡内可实时看到子任务规划与每一步检索的搜索结果。
+- 研究产出的完整报告自动收进右侧 **Artifact 浮窗面板**，气泡内只保留入口卡片 + 任务总结，点击入口即可查看完整 Markdown 报告。
 
-### 深度研究
+### 思考时间线
 
-1. 点击侧边栏的深度研究按钮
-2. 输入研究主题
-3. AI 将自动进行搜索和分析
-4. 查看研究结果和过程
+每条 AI 回复内嵌一个折叠时间线卡片：
+
+- 🟡 **思考**（reasoning）—— 模型规划文本
+- 🔵 **工具调用**（tool_call）—— 入参 / 错误 / 结果，搜索结果列表化展示
+- 🟣 **子任务**（subagent_task）—— 子代理描述、步骤数、结构化摘要
+
+所有项默认折叠，可逐项展开排查；JSON 与搜索结果自带最大高度与细滚动条，不会撑破气泡。
 
 ### 文件上传
 
-1. 点击聊天窗口的文件上传按钮
-2. 选择要上传的文件
-3. 文件将被自动处理和分析
-4. 可以基于文件内容进行提问
+输入框左侧的回形针图标支持上传 PDF、Word、图片等，文件解析后参与本轮对话上下文。
+
+## 🎨 UI 设计要点（DeerFlow 2.0 风格）
+
+- **浅色基调** + **青绿主色**（teal-500/600）+ 灰阶层次。
+- **三栏弹性布局**：左侧固定 220px session 栏 / 中间限宽 880px 居中聊天区 / 右侧 440~680px 浮窗 Artifact 面板。
+- **浮窗卡片**：Artifact 面板外层是浅灰底+左分隔线的"分隔区"，内层是白底圆角双层阴影的"卡片"，与 DeerFlow 2.0 一致的层次感。
+- **细节**：自定义 `scrollbar-slim` 滚动条、prose 长串 break-words 兜底、代码块限宽、聚焦态青绿描边。
 
 ## 🛠️ 开发流程
 
-### 代码风格
-
-使用 ESLint 进行代码检查：
-
 ```bash
-pnpm run lint
+# 代码检查
+pnpm lint
+
+# 格式化
+pnpm format
+pnpm format:check
+
+# 构建
+pnpm build
 ```
 
-### 构建生产版本
+## 📝 License
 
-```bash
-pnpm run build
-```
-
-### 启动生产服务器
-
-```bash
-pnpm start
-```
+MIT
