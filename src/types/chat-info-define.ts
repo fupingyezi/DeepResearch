@@ -67,7 +67,7 @@ export interface SubagentStructuredReport {
  *
  * 一条 ChatMessageType 由一个 parts[] 时序数组组成，每个 part 用 partId 唯一标识。
  *
- * 八种 part_type：
+ * 九种 part_type：
  *  - text          AI/用户的正文文本片段（同类相邻合并）
  *  - reasoning     AI 推理/规划（同类相邻合并）
  *  - tool_call     单次工具调用，结果回写到本 part 的 content（status / result / success）
@@ -75,6 +75,7 @@ export interface SubagentStructuredReport {
  *  - subagent_task 子代理任务，按 taskId upsert；children 内嵌子工具调用
  *  - file / image  用户上传的附件块（仅在 user message 中出现）
  *  - artifact      最终产物（如研究报告 markdown）
+ *  - task_summary  多 agent 工作流的任务总结（完成 N 个子任务 + 每子任务关键发现）
  */
 export type MessagePart =
   | {
@@ -157,6 +158,12 @@ export type MessagePart =
       type: 'artifact';
       createdAt: number;
       content: { title: string; markdown: string };
+    }
+  | {
+      partId: string;
+      type: 'task_summary';
+      createdAt: number;
+      content: { text: string };
     };
 
 export type MessagePartType = MessagePart['type'];
@@ -194,6 +201,9 @@ export const isImagePart = (p: MessagePart): p is Extract<MessagePart, { type: '
   p.type === 'image';
 export const isArtifactPart = (p: MessagePart): p is Extract<MessagePart, { type: 'artifact' }> =>
   p.type === 'artifact';
+export const isTaskSummaryPart = (
+  p: MessagePart,
+): p is Extract<MessagePart, { type: 'task_summary' }> => p.type === 'task_summary';
 
 /**
  * ChatMessageType —— 一条消息（user / assistant 同构）

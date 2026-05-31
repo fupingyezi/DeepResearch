@@ -351,7 +351,7 @@ export async function POST(request: NextRequest) {
     } finally {
       if (collector && typeof assistantMessageId === 'string') {
         const finalized: { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } =
-          collector.finalize();
+          collector.finalize(inputText);
         if (finalized.parts.length > 0) {
           try {
             await insertAssistantMessageRecord({

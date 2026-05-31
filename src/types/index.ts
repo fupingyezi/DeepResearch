@@ -36,6 +36,7 @@ import {
   isFilePart,
   isImagePart,
   isArtifactPart,
+  isTaskSummaryPart,
 } from './chat-info-define';
 
 //函数参数相关
@@ -77,6 +78,7 @@ export {
   isFilePart,
   isImagePart,
   isArtifactPart,
+  isTaskSummaryPart,
 };
 
 export { chatWithAgentProps, reChatWithAgentProps };

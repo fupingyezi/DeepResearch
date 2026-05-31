@@ -10,6 +10,7 @@ import type { ModelPresetName } from '@/config/models';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
+import { extractFinalMessageParts } from './final-message-extract';
 
 export interface StreamChatConfig {
   operation?: 'resume' | 'recall' | 'reEditCall';
@@ -82,7 +83,6 @@ export class StreamChatHandler {
 
     await this.executeStreamRequest();
   }
-
 
   // session / messages 初始化
   private handleSession(): void {
@@ -353,7 +353,8 @@ export class StreamChatHandler {
           break;
 
         case ClientAgentEventType.END: {
-          this.maybeExtractArtifactFromText();
+          this.parts = extractFinalMessageParts(this.parts, this.config.inputValue ?? '');
+          this.lastPartType = this.parts[this.parts.length - 1]?.type ?? this.lastPartType;
           this.flushMessageSync();
           return;
         }
@@ -367,12 +368,8 @@ export class StreamChatHandler {
   }
 
   /**
-   * 处理 START 事件：把临时 sessionId / 占位 messageId 替换为后端下发的真实 uuid。
-   *
-   * - sessionId：仅当与当前不同才替换
-   * - userMessageId：替换 currentMessages 中倒数第二条 user 消息的 id
-   * - assistantMessageId：替换最后一条 assistant 消息（流式占位）的 id，并同步
-   *   `this.assistantMessageId`，确保后续 commitFlush 能命中
+   * 处理 START 事件：把临时 sessionId / 占位 messageId 替换为后端下发的真实 uuid，
+   * 并在新会话时把 chatSession 注入侧边栏列表。
    */
   private applyStartEvent(payload: {
     sessionId?: string;
@@ -380,83 +377,107 @@ export class StreamChatHandler {
     userMessageId?: string;
     assistantMessageId?: string;
   }): void {
-    const realId = payload?.sessionId;
-    const tempId = this.sessionId;
-    const sessionChanged = !!realId && realId !== tempId;
-
-    if (sessionChanged && realId) {
-      this.sessionId = realId;
-      this.config.setCurrentSessionId(realId);
-    }
-
-    const realUserId =
-      typeof payload?.userMessageId === 'string' ? payload.userMessageId : undefined;
-    const realAssistantId =
-      typeof payload?.assistantMessageId === 'string' ? payload.assistantMessageId : undefined;
-
+    const {
+      sessionId: realSessionId,
+      userMessageId: realUserId,
+      assistantMessageId: realAssistantId,
+      chatSession,
+    } = payload;
+    const tempSessionId = this.sessionId;
     const tempAssistantId = this.assistantMessageId;
-    let tempUserId: string | undefined;
-    for (let i = this.initialUpdateMessages.length - 1; i >= 0; i--) {
-      const msg = this.initialUpdateMessages[i];
-      if (msg.role === 'user') {
-        tempUserId = String(msg.id);
-        break;
-      }
-    }
 
-    if (typeof realAssistantId === 'string') {
+    if (realSessionId && realSessionId !== tempSessionId) {
+      this.sessionId = realSessionId;
+      this.config.setCurrentSessionId(realSessionId);
+    }
+    if (realAssistantId) {
       this.assistantMessageId = realAssistantId;
     }
 
-    let mutated = false;
-    const updated = this.initialUpdateMessages.map((msg) => {
-      let next = msg;
-      if (sessionChanged && msg.sessionId === tempId) {
-        next = { ...next, sessionId: realId! };
-        mutated = true;
-      }
-      if (typeof realUserId === 'string' && msg.role === 'user' && msg.id === tempUserId) {
-        next = { ...next, id: realUserId };
-        mutated = true;
-      }
-      if (
-        typeof realAssistantId === 'string' &&
-        msg.role === 'assistant' &&
-        msg.id === tempAssistantId
-      ) {
-        next = { ...next, id: realAssistantId };
-        mutated = true;
-      }
-      return next;
+    this.rewriteMessageIds({
+      tempSessionId,
+      realSessionId,
+      realUserId,
+      tempAssistantId,
+      realAssistantId,
     });
+    this.addChatSession(chatSession);
+  }
+
+  /**
+   * 单次扫描 initialUpdateMessages：
+   * - 把临时 sessionId 替换为真实 sessionId
+   * - 把"最后一条 user"的临时 id 替换为 realUserId
+   * - 把匹配 tempAssistantId 的 assistant 消息 id 替换为 realAssistantId
+   */
+  private rewriteMessageIds(params: {
+    tempSessionId: UUIDTypes;
+    realSessionId?: string;
+    realUserId?: string;
+    tempAssistantId: string;
+    realAssistantId?: string;
+  }): void {
+    const { tempSessionId, realSessionId, realUserId, tempAssistantId, realAssistantId } = params;
+    if (!realSessionId && !realUserId && !realAssistantId) return;
+
+    // 反向找到最后一条 user 消息的下标（仅当需要替换 user id 时）
+    let lastUserIdx = -1;
+    if (realUserId) {
+      for (let i = this.initialUpdateMessages.length - 1; i >= 0; i--) {
+        if (this.initialUpdateMessages[i].role === 'user') {
+          lastUserIdx = i;
+          break;
+        }
+      }
+    }
+
+    let mutated = false;
+    const updated = this.initialUpdateMessages.map((msg, idx) => {
+      const patch: Partial<ChatMessageType> = {};
+      if (realSessionId && msg.sessionId === tempSessionId) patch.sessionId = realSessionId;
+      if (realUserId && idx === lastUserIdx) patch.id = realUserId;
+      if (realAssistantId && msg.role === 'assistant' && msg.id === tempAssistantId)
+        patch.id = realAssistantId;
+      if (Object.keys(patch).length === 0) return msg;
+      mutated = true;
+      return { ...msg, ...patch };
+    });
+
     if (mutated) {
       this.initialUpdateMessages = updated;
       this.config.setCurrentMessages(updated);
     }
+  }
 
-    const cs = payload?.chatSession;
-    if (cs && typeof cs === 'object' && typeof cs.id === 'string') {
-      this.config.addChatSession({
-        id: cs.id,
-        seq_id: typeof cs.seq_id === 'number' ? cs.seq_id : this.config.chatSessions.length + 1,
-        title:
-          typeof cs.title === 'string' && cs.title.length > 0
-            ? cs.title
-            : this.config.inputValue.slice(0, 15) || 'New thread',
-        created_at: typeof cs.created_at === 'number' ? cs.created_at : Date.now(),
-        updated_at: typeof cs.updated_at === 'number' ? cs.updated_at : Date.now(),
-      });
-    }
+  private addChatSession(chatSession: ChatSessionType | undefined): void {
+    if (!chatSession || typeof chatSession.id !== 'string') return;
+    this.config.addChatSession({
+      id: chatSession.id,
+      seq_id: chatSession.seq_id ?? this.config.chatSessions.length + 1,
+      title: chatSession.title || this.config.inputValue.slice(0, 15) || 'New thread',
+      created_at: chatSession.created_at ?? Date.now(),
+      updated_at: chatSession.updated_at ?? Date.now(),
+    });
   }
 
   // parts 维护
+  //
+  // 合并策略：在 parts 数组中**自尾部反向**寻找最近的同类型 part。
+  // 必须穿过 subagent_task / tool_call / tool_result 等"穿插事件"，因为
+  // lead-agent 在等待并行 task 工具时，会有 TASK_PROGRESS 反复 upsert 同一个
+  // subagent_task part（不改变其在数组中的位置），与 lead 自身的 reasoning chunk
+  // 交替到达。如果只看最末一个 part 的类型，会把每个 reasoning chunk 都当成
+  // 新 part 创建，导致 UI 出现"一字一块"的折叠条。
   private appendOrMergeTextPart(text: string): void {
-    if (this.lastPartType === 'text') {
-      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'text' }>;
+    const idx = this.findMergeTarget('text');
+    if (idx >= 0) {
+      const last = this.parts[idx] as Extract<MessagePart, { type: 'text' }>;
       this.parts = [
-        ...this.parts.slice(0, -1),
+        ...this.parts.slice(0, idx),
         { ...last, content: { text: last.content.text + text } },
+        ...this.parts.slice(idx + 1),
       ];
+      this.lastPartType = 'text';
       return;
     }
     this.parts = [
@@ -472,12 +493,15 @@ export class StreamChatHandler {
   }
 
   private appendOrMergeReasoningPart(text: string): void {
-    if (this.lastPartType === 'reasoning') {
-      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'reasoning' }>;
+    const idx = this.findMergeTarget('reasoning');
+    if (idx >= 0) {
+      const last = this.parts[idx] as Extract<MessagePart, { type: 'reasoning' }>;
       this.parts = [
-        ...this.parts.slice(0, -1),
+        ...this.parts.slice(0, idx),
         { ...last, content: { text: last.content.text + text } },
+        ...this.parts.slice(idx + 1),
       ];
+      this.lastPartType = 'reasoning';
       return;
     }
     this.parts = [
@@ -490,6 +514,23 @@ export class StreamChatHandler {
       },
     ];
     this.lastPartType = 'reasoning';
+  }
+
+  /**
+   * 自尾向前找可合并的同类型 part 下标；穿过 subagent_task / tool_call /
+   * tool_result（这些 part 会持续被 upsert 但不代表"流式文本段已结束"）；
+   * 一旦遇到另一个文本类 part（text/reasoning 中的另一种）则视为段落边界。
+   */
+  private findMergeTarget(target: 'text' | 'reasoning'): number {
+    const other = target === 'text' ? 'reasoning' : 'text';
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const t = this.parts[i].type;
+      if (t === target) return i;
+      if (t === other) return -1;
+      if (t === 'subagent_task' || t === 'tool_call' || t === 'tool_result') continue;
+      return -1;
+    }
+    return -1;
   }
 
   private pushToolCallPart(payload: {
@@ -750,91 +791,6 @@ export class StreamChatHandler {
     this.lastPartType = 'artifact';
   }
 
-  /**
-   * 启发式 artifact 抽取：
-   *
-   * 1. 优先识别显式标记（命中即精确提取并从 text part 剥离）：
-   *    a) `<final_report>...</final_report>` 标签
-   *    b) ```` ```final_report ... ``` ```` 代码块
-   * 2. Fallback：若已有 artifact part 则跳过；否则把所有 text parts 拼接判断
-   *    （>800 字符 + ≥2 个 H2 标题）→ 视为研究报告并追加 artifact part。
-   */
-  private maybeExtractArtifactFromText(): void {
-    if (this.parts.some((p) => p.type === 'artifact')) return;
-
-    const textIndices: number[] = [];
-    let combined = '';
-    for (let i = 0; i < this.parts.length; i++) {
-      const part = this.parts[i];
-      if (part.type === 'text') {
-        textIndices.push(i);
-        combined += (combined ? '\n' : '') + part.content.text;
-      }
-    }
-    if (combined.length === 0) return;
-
-    const tagRegex = /<final_report>([\s\S]*?)<\/final_report>/;
-    const tagMatch = combined.match(tagRegex);
-    if (tagMatch) {
-      const reportContent = tagMatch[1].trim();
-      this.stripFromTextParts(textIndices, tagRegex);
-      this.commitArtifact(reportContent);
-      return;
-    }
-
-    const fenceRegex = /```final_report\s*\n([\s\S]*?)```/;
-    const fenceMatch = combined.match(fenceRegex);
-    if (fenceMatch) {
-      const reportContent = fenceMatch[1].trim();
-      this.stripFromTextParts(textIndices, fenceRegex);
-      this.commitArtifact(reportContent);
-      return;
-    }
-
-    if (combined.length <= 800) return;
-    const h2Matches = combined.match(/^##\s+/gm);
-    if (!h2Matches || h2Matches.length < 2) return;
-
-    let title = '';
-    const headingMatch = combined.match(/^#{1,2}\s+(.+?)\s*$/m);
-    if (headingMatch && headingMatch[1]) title = headingMatch[1].trim();
-    if (!title) title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
-
-    this.pushArtifactPart(title, combined);
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(
-        `[StreamChatHandler] heuristic artifact extracted: title="${title}" len=${combined.length} h2=${h2Matches.length}`,
-      );
-    }
-  }
-
-  /** 把命中的 regex 段落从所有 text parts 内容中剥离（仅命中第一处） */
-  private stripFromTextParts(textIndices: number[], regex: RegExp): void {
-    let matched = false;
-    const next = [...this.parts];
-    for (const i of textIndices) {
-      if (matched) break;
-      const part = next[i];
-      if (part.type !== 'text') continue;
-      if (regex.test(part.content.text)) {
-        next[i] = {
-          ...part,
-          content: { text: part.content.text.replace(regex, '').trim() },
-        };
-        matched = true;
-      }
-    }
-    this.parts = next;
-  }
-
-  private commitArtifact(reportContent: string): void {
-    let title = '';
-    const headingMatch = reportContent.match(/^#{1,2}\s+(.+?)\s*$/m);
-    if (headingMatch && headingMatch[1]) title = headingMatch[1].trim();
-    if (!title) title = (this.config.inputValue ?? '').slice(0, 20) || '研究报告';
-    this.pushArtifactPart(title, reportContent);
-  }
-
   // flush（rAF 合帧）
   private rafHandle: number | null = null;
   private pendingFlush = false;
@@ -961,6 +917,8 @@ function clonePart(part: MessagePart): MessagePart {
     case 'image':
       return { ...part, content: { ...part.content } };
     case 'artifact':
+      return { ...part, content: { ...part.content } };
+    case 'task_summary':
       return { ...part, content: { ...part.content } };
     default: {
       const _never: never = part;

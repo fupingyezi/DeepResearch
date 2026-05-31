@@ -16,6 +16,7 @@ import {
   isImagePart,
   isReasoningPart,
   isSubagentTaskPart,
+  isTaskSummaryPart,
   isTextPart,
   isToolCallPart,
   type MessagePart,
@@ -35,16 +36,22 @@ import { getFileIcon } from '@/utils/files/file-info-handler';
  *   - bodyText：所有 text part 拼接（用于正文渲染 + 复制 + 下载兜底）
  *   - timelineSteps：reasoning / tool_call / subagent_task 三类 part 子集
  *   - artifactPart：第一个 artifact part（点击右侧入口卡片打开 ArtifactPanel）
+ *   - taskSummaryPart：第一个 task_summary part（多 agent 工作流的任务总结）
+ *   - isMultiAgent：本轮是否为多 agent 工作流（存在 ≥1 个 subagent_task part）
  */
 function deriveFromParts(parts: MessagePart[]): {
   bodyText: string;
   timelineSteps: TimelineStepPart[];
   artifactPart: Extract<MessagePart, { type: 'artifact' }> | null;
+  taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null;
+  isMultiAgent: boolean;
   filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>>;
 } {
   const textSegments: string[] = [];
   const timelineSteps: TimelineStepPart[] = [];
   let artifactPart: Extract<MessagePart, { type: 'artifact' }> | null = null;
+  let taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null = null;
+  let isMultiAgent = false;
   const filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>> = [];
 
   for (const part of parts) {
@@ -53,11 +60,16 @@ function deriveFromParts(parts: MessagePart[]): {
       continue;
     }
     if (isReasoningPart(part) || isToolCallPart(part) || isSubagentTaskPart(part)) {
+      if (isSubagentTaskPart(part)) isMultiAgent = true;
       timelineSteps.push(part);
       continue;
     }
     if (isArtifactPart(part)) {
       if (!artifactPart) artifactPart = part;
+      continue;
+    }
+    if (isTaskSummaryPart(part)) {
+      if (!taskSummaryPart) taskSummaryPart = part;
       continue;
     }
     if (isFilePart(part) || isImagePart(part)) {
@@ -71,6 +83,8 @@ function deriveFromParts(parts: MessagePart[]): {
     bodyText: textSegments.join('\n\n'),
     timelineSteps,
     artifactPart,
+    taskSummaryPart,
+    isMultiAgent,
     filePartsForUser,
   };
 }
@@ -92,7 +106,8 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(false);
 
   const derived = useMemo(() => deriveFromParts(message.parts ?? []), [message.parts]);
-  const { bodyText, timelineSteps, artifactPart, filePartsForUser } = derived;
+  const { bodyText, timelineSteps, artifactPart, taskSummaryPart, isMultiAgent, filePartsForUser } =
+    derived;
 
   const [reEditValue, setReEditValue] = useState<string>(bodyText);
 
@@ -126,10 +141,16 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     const aiLastMessagesTools: ('copy' | 'recall' | 'download')[] = ['copy', 'recall', 'download'];
     const supportDownloadFiles: SupportDownloadFileType[] = ['pdf', 'word', 'md', 'cancel'];
 
+    /** 复制 / 下载 / recall 内容来源：优先 artifact.markdown，其次正文 */
+    const getDownloadSource = () => {
+      if (artifactPart) return artifactPart.content.markdown;
+      return bodyText;
+    };
+
     const handleOperator = async (op: 'copy' | 'edit' | 'recall' | 'download') => {
       switch (op) {
         case 'copy': {
-          copyToClipboard(bodyText);
+          copyToClipboard(getDownloadSource());
           return;
         }
         case 'edit': {
@@ -140,7 +161,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         case 'recall': {
           await chatWithAgent({
             operation: 'recall',
-            inputValue: bodyText,
+            inputValue: getDownloadSource(),
             ...useConversationStore.getState(),
           });
           return;
@@ -153,12 +174,6 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           }
         }
       }
-    };
-
-    /** 下载内容来源：优先 artifact.markdown，其次正文 */
-    const getDownloadSource = () => {
-      if (artifactPart) return artifactPart.content.markdown;
-      return bodyText;
     };
 
     const handleDownloadFiles = (fileType: SupportDownloadFileType) => {
@@ -329,6 +344,22 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   }
 
   // ai 气泡（含内联工作流时间线 + 产物入口）
+  const artifactEntry = artifactPart ? (
+    <button
+      type="button"
+      onClick={handleOpenArtifact}
+      className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+    >
+      <div className="flex items-center gap-2">
+        <FileTextOutlined className="text-blue-500" />
+        <span className="truncate text-sm font-medium text-gray-700">
+          {artifactPart.content.title}
+        </span>
+      </div>
+      <span className="shrink-0 text-xs text-blue-500">查看产物 →</span>
+    </button>
+  ) : null;
+
   return (
     <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
       <div
@@ -343,24 +374,25 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           interrupt={message.interrupt ?? null}
         />
 
-        {/* 正文 */}
-        {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
-
-        {/* 产物入口（点击打开右侧 ArtifactPanel） */}
-        {artifactPart && (
-          <button
-            type="button"
-            onClick={handleOpenArtifact}
-            className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/40"
-          >
-            <div className="flex items-center gap-2">
-              <FileTextOutlined className="text-blue-500" />
-              <span className="truncate text-sm font-medium text-gray-700">
-                {artifactPart.content.title}
-              </span>
-            </div>
-            <span className="shrink-0 text-xs text-blue-500">查看产物 →</span>
-          </button>
+        {isMultiAgent ? (
+          <>
+            {/* 多 agent 工作流：报告全文收进 artifact，气泡内只留 跳转按钮 + 任务总结 */}
+            {artifactEntry}
+            {taskSummaryPart && (
+              <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                <div className="mb-1 text-xs font-semibold text-gray-500">本次工作流任务总结</div>
+                <div className="text-sm text-gray-700">
+                  <CustomMarkdown content={taskSummaryPart.content.text} />
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* 普通回答：内联正文 + 可选产物入口 */}
+            {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
+            {artifactEntry}
+          </>
         )}
       </div>
       {renderAdditionalOperator(message.role)}

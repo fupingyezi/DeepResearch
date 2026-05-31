@@ -16,6 +16,10 @@
  * - HUMAN_INTERRUPT → 写顶层 interrupt（不入 parts）
  * - START / END / HEARTBEAT → 不入 parts
  *
+ * finalize 阶段：调用与前端共享的 extractFinalMessageParts，把 lead 最终消息里
+ * `<final_report>` / `<task_summary>` 标记解析为 artifact / task_summary part，
+ * 确保持久化（reload）与实时流式（live）两端结构一致。
+ *
  * 设计要点：
  * - partIndexByToolCallId / partIndexByTaskId 双 Map 让反查 O(1)
  * - lastPartType 跟踪上一个 part 的类型，避免把"其他 part 之后的 text"误并入
@@ -31,6 +35,7 @@ import type {
 } from '@deerflow-harness/runtime/sse/client-event';
 import { ClientAgentEventType as Et } from '@deerflow-harness/runtime/sse/client-event';
 import type { ChatMessageType, MessagePart, SubagentToolCall } from '@/types';
+import { extractFinalMessageParts } from '@/utils/chat/final-message-extract';
 
 type ToolCallPart = Extract<MessagePart, { type: 'tool_call' }>;
 type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
@@ -97,8 +102,9 @@ export class AssistantPartsCollector {
     }
   }
 
-  finalize(): { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } {
-    return { parts: this.parts, interrupt: this.interrupt };
+  finalize(fallbackTitle = ''): { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } {
+    const parts = extractFinalMessageParts(this.parts, fallbackTitle);
+    return { parts, interrupt: this.interrupt };
   }
 
   // ────────────────────────────────────────────────────────
@@ -106,9 +112,11 @@ export class AssistantPartsCollector {
   // ────────────────────────────────────────────────────────
 
   private appendOrMergeText(text: string): void {
-    if (this.lastPartType === 'text') {
-      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'text' }>;
+    const idx = this.findMergeTarget('text');
+    if (idx >= 0) {
+      const last = this.parts[idx] as Extract<MessagePart, { type: 'text' }>;
       last.content.text += text;
+      this.lastPartType = 'text';
       return;
     }
     this.parts.push({
@@ -121,9 +129,11 @@ export class AssistantPartsCollector {
   }
 
   private appendOrMergeReasoning(text: string): void {
-    if (this.lastPartType === 'reasoning') {
-      const last = this.parts[this.parts.length - 1] as Extract<MessagePart, { type: 'reasoning' }>;
+    const idx = this.findMergeTarget('reasoning');
+    if (idx >= 0) {
+      const last = this.parts[idx] as Extract<MessagePart, { type: 'reasoning' }>;
       last.content.text += text;
+      this.lastPartType = 'reasoning';
       return;
     }
     this.parts.push({
@@ -133,6 +143,24 @@ export class AssistantPartsCollector {
       content: { text },
     });
     this.lastPartType = 'reasoning';
+  }
+
+  /**
+   * 自尾向前找可合并的同类型 part 下标；穿过 subagent_task / tool_call /
+   * tool_result（lead 在等待并行 task 工具时，TASK_PROGRESS 会反复 upsert
+   * 同一个 subagent_task part，与 lead 自身的 reasoning chunk 交替到达）；
+   * 一旦遇到另一个文本类 part（text/reasoning 中的另一种）则视为段落边界。
+   */
+  private findMergeTarget(target: 'text' | 'reasoning'): number {
+    const other = target === 'text' ? 'reasoning' : 'text';
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const t = this.parts[i].type;
+      if (t === target) return i;
+      if (t === other) return -1;
+      if (t === 'subagent_task' || t === 'tool_call' || t === 'tool_result') continue;
+      return -1;
+    }
+    return -1;
   }
 
   private pushToolCall(payload: {

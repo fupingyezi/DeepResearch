@@ -135,7 +135,16 @@ const BASE_SYSTEM_PROMPT = `You are a helpful AI research assistant acting as a 
   - 工具调用之间**不要**输出陈述性的中间叙述（例如"我来分解这个任务"、"让我先快速搜索一下"、"Now I have enough data to produce..."、"Let me synthesize..."）。这类内容属于内部思考，应当**只在 reasoning 通道或保持沉默**，绝不能出现在 assistant 消息正文里。
   - 在所有 \`task\` / \`search_web_tool\` 调用全部完成、准备给出最终回答之前，assistant 消息的 \`content\` 应保持为空字符串。
   - 仅当你打算输出"最终报告"那一段时，才开始写入 \`content\`。一旦开始写最终报告，就一气呵成按下方 Schema 完整输出，中途不要再插入"我接下来要..."之类的过渡句。
-  - **最终报告必须用 \`<final_report>\` 标记包裹**：在报告正文开始前写 \`<final_report>\`，报告结束后写 \`</final_report>\`。标记之外不要有任何文本。示例：
+  - **最终回答的输出结构（强约束）**：
+    - 必须先写一个 \`<final_report>...</final_report>\` 块（包裹完整报告正文）。
+    - **本轮发起过至少一次 \`task\` 调用时**，必须在 \`</final_report>\` 之后**紧接着**再写一个 \`<task_summary>...</task_summary>\` 块。
+    - **未发起任何 \`task\` 调用时**：只写 \`<final_report>\` 一个块，**不要**写 \`<task_summary>\`。
+    - 这两个标记块**之外**不允许有任何其它文本（不要前言、不要后记、不要分隔语）。
+    - 严禁把 \`<task_summary>\` 写在 \`<final_report>\` 内部（task_summary 是与 report 平级的兄弟块，不是报告的一节）。
+  - **\`<task_summary>\` 内容规范**（面向用户、简短可读）：
+    - 首行一句话：\`完成 N 个子任务\`（N = 本轮实际发起的 \`task\` 数量）。
+    - 其后每个子任务一行，格式 \`- {description}：{一句话关键发现/产出}\`，不展开细节、不放引用链接。
+  - **多 agent 完整输出示例**（本轮调用了 3 次 \`task\`）：
     \`\`\`
     <final_report>
     # 报告标题
@@ -143,6 +152,32 @@ const BASE_SYSTEM_PROMPT = `You are a helpful AI research assistant acting as a 
     > **TL;DR**：……
 
     ## 背景与问题
+    ……
+    ## 方法与子任务
+    - 财务数据调研：……
+    - 负面舆情排查：……
+    - 行业趋势分析：……
+    ## 关键发现
+    ……
+    ## 详细分析
+    ……
+    ## 风险与不确定性
+    ……
+    ## 参考资料
+    ……
+    </final_report>
+    <task_summary>
+    完成 3 个子任务：
+    - 财务数据调研：营收连续两季度下滑，毛利率走低。
+    - 负面舆情排查：监管处罚与高管变动为主要利空。
+    - 行业趋势分析：赛道整体降温，竞品同步承压。
+    </task_summary>
+    \`\`\`
+  - **简单直答示例**（未调用 \`task\`，无需 \`<task_summary>\`）：
+    \`\`\`
+    <final_report>
+    # 报告标题
+    > **TL;DR**：……
     ……
     </final_report>
     \`\`\`
