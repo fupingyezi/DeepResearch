@@ -1,3 +1,16 @@
+/**
+ * 子 agent 流式标记 tag。
+ *
+ * 用途：阻断子 agent 的 LLM token 泄漏进 lead 流。
+ * - executor 在构建子 agent 模型时通过 `model.withConfig({ tags: [SUBAGENT_STREAM_TAG] })`
+ *   打上此 tag，使子 agent 的每次 chat model run 都携带它（会出现在 langgraph
+ *   StreamMessagesHandler 的 tags 中，并随 messages 帧的 metadata 下发）。
+ * - lead（client.ts）在 messages 分支读取 metadata.tags，命中此 tag 即判定为
+ *   子 agent 泄漏帧并跳过，不再当作 lead 自身的 stream_chunk。
+ * 子 agent 自身的 executor 流不做此过滤，task_running 照常推送。
+ */
+export const SUBAGENT_STREAM_TAG = 'deerflow:subagent';
+
 export enum SubagentStatus {
   PENDING = 'pending',
   RUNNING = 'running',
@@ -82,8 +95,13 @@ export type SubagentEvent =
       taskId: string;
       /** 给 lead-agent 的纯文本结果（去掉 fenced JSON block 的 markdown） */
       result: string | null;
-      /** 解析自 final-report 的结构化数据；失败时为 null */
+      /** 解析自 final-report / markdown 的结构化数据；失败时为 null */
       structured?: unknown;
+      /**
+       * 子 agent 执行过程中通过 web_search 累积下来的来源列表。
+       * 当 structured 缺失或其 sources 为空时，task-tool 会用此数组兜底。
+       */
+      accumulatedSources?: Array<{ title: string; url: string }>;
     }
   | { kind: 'failed'; taskId: string; error: string }
   | { kind: 'timed_out'; taskId: string; error: string }

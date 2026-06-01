@@ -15,10 +15,29 @@ import { ClientAgentEventType, type ClientAgentEvent } from '../sse/client-event
 
 const EV = 'ev';
 
+/**
+ * buffer 上限（条）。超限时丢弃最旧的非关键帧，防止超长运行线程的内存无界膨胀。
+ * 触发条件：单 run 事件数超过上限；后果：晚订阅回放只能拿到裁剪后的尾部历史；
+ * 对策：关键帧（START/ERROR/END/HUMAN_INTERRUPT）永不丢弃，保证回放语义完整。
+ */
+const BUFFER_MAX = (() => {
+  const raw = Number(process.env.STREAM_BRIDGE_BUFFER_MAX);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+})();
+
+/** 关键帧：影响订阅/回放语义，裁剪时必须保留。 */
+const CRITICAL_EVENT_TYPES = new Set<ClientAgentEventType>([
+  ClientAgentEventType.START,
+  ClientAgentEventType.ERROR,
+  ClientAgentEventType.END,
+  ClientAgentEventType.HUMAN_INTERRUPT,
+]);
+
 export class ThreadChannel {
   private readonly bus = new EventEmitter();
   private readonly buffer: ClientAgentEvent[] = [];
   private closed = false;
+  private droppedCount = 0;
 
   constructor(
     public readonly threadId: string,
@@ -35,6 +54,7 @@ export class ThreadChannel {
   publish(ev: ClientAgentEvent): void {
     if (this.closed) return;
     this.buffer.push(ev);
+    this.trimBufferIfNeeded();
     this.bus.emit(EV, ev);
     // END 一律视为终止；ERROR 仅在 recoverable=false 时终止
     if (ev.eventType === ClientAgentEventType.END) {
@@ -48,6 +68,27 @@ export class ThreadChannel {
     ) {
       // 不立即 close —— 让消费者读到 ERROR 帧后再关闭
       // 终止由 publish END 兜底
+    }
+  }
+
+  /**
+   * buffer 超限时丢弃最旧的一个非关键帧（每次 publish 至多丢一个，保持开销 O(n) 且
+   * buffer 稳定在 BUFFER_MAX 附近）。关键帧永不丢弃。
+   */
+  private trimBufferIfNeeded(): void {
+    if (this.buffer.length <= BUFFER_MAX) return;
+    for (let i = 0; i < this.buffer.length; i++) {
+      if (!CRITICAL_EVENT_TYPES.has(this.buffer[i].eventType)) {
+        this.buffer.splice(i, 1);
+        this.droppedCount += 1;
+        if (this.droppedCount === 1 || this.droppedCount % 500 === 0) {
+          console.warn(
+            `[stream-bridge] buffer trimmed (dropped=${this.droppedCount}, max=${BUFFER_MAX}) ` +
+              `thread=${this.threadId} run=${this.runId}`,
+          );
+        }
+        return;
+      }
     }
   }
 

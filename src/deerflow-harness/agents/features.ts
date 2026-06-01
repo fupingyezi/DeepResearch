@@ -8,7 +8,8 @@ export type FeatureToggle<M extends AgentMiddleware = AgentMiddleware> = false |
 export interface RuntimeFeatures {
   sandbox?: FeatureToggle;
   memory?: FeatureToggle;
-  summarization?: FeatureToggle; // 不允许 true
+  summarization?: FeatureToggle; // 不允许 true（须传 createSummarizationMiddleware 实例）
+  todo?: FeatureToggle; // 现成 todoListMiddleware；true=默认实现
   vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
   guardrail?: FeatureToggle; // 不允许 true
@@ -19,6 +20,7 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
   sandbox: false,
   memory: false,
   summarization: false,
+  todo: false,
   vision: false,
   autoTitle: false,
   guardrail: false,

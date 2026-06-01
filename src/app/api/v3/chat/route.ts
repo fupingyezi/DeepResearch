@@ -39,7 +39,7 @@ import {
   type ClientAgentEvent,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
-import { getThreadService, getDeerFlowClientWithModelConfig } from '../../threads/_service';
+import { getThreadService, resolveModelConfigFromConfiguration } from '../../threads/_service';
 import {
   createChatSessionRecord,
   insertAssistantMessageRecord,
@@ -221,12 +221,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const hasModelValue =
-    typeof body.configuration?.model?.value === 'string' &&
-    body.configuration.model.value.length > 0;
-  const dynamicClient = hasModelValue
-    ? await getDeerFlowClientWithModelConfig(body.configuration ?? undefined)
-    : null;
+  // 单路径：始终走 submitRun（fire-and-forget）+ StreamBridge.subscribe。
+  // 带模型配置时把 modelConfig 透传给 submitRun，由 service 解析对应 client，
+  // 不再有 dynamicClient 直连分支（避免 Agent 被执行两次、断线无法回放）。
+  const modelConfig = resolveModelConfigFromConfiguration(body.configuration ?? undefined);
 
   // —— 幂等创建 thread ——
   try {
@@ -307,11 +305,19 @@ export async function POST(request: NextRequest) {
   let run_id: string;
   try {
     const threadService = await getThreadService();
-    const r = await threadService.submitRun({
-      thread_id: resolvedThreadId,
-      user_id,
-      input: inputText,
-    });
+    const r = isResume
+      ? await threadService.resume({
+          thread_id: resolvedThreadId,
+          user_id,
+          decision: inputText,
+          ...(modelConfig ? { modelConfig } : {}),
+        })
+      : await threadService.submitRun({
+          thread_id: resolvedThreadId,
+          user_id,
+          input: inputText,
+          ...(modelConfig ? { modelConfig } : {}),
+        });
     run_id = r.run_id;
   } catch (e) {
     const code = (e as Error & { code?: string })?.code;
@@ -368,15 +374,9 @@ export async function POST(request: NextRequest) {
     }
   };
 
-  let merged: AsyncGenerator<ClientAgentEvent>;
-  if (dynamicClient) {
-    const eventStream = dynamicClient.stream(inputText, resolvedThreadId);
-    merged = wrapWithPersistence(eventStream);
-  } else {
-    const service = await getThreadService();
-    const subscription = service.subscribe({ thread_id: resolvedThreadId, run_id });
-    merged = wrapWithPersistence(subscription);
-  }
+  const service = await getThreadService();
+  const subscription = service.subscribe({ thread_id: resolvedThreadId, run_id });
+  const merged: AsyncGenerator<ClientAgentEvent> = wrapWithPersistence(subscription);
 
   const stream = createSseStream(request, merged);
   return new Response(stream, {

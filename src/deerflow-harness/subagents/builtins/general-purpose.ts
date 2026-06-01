@@ -48,14 +48,11 @@ export const generalPurposeConfig: SubagentConfig = {
     '',
     SUBAGENT_REPORT_FORMAT_INSTRUCTION,
   ].join('\n'),
-  // 复用 lead 的模型和配置；具体逻辑在 SubagentExecutor 内部实现，支持动态继承和中途切换。
   model: 'inherit',
   maxTurns: 100,
   timeout: 600,
-  // tools=undefined 表示"继承 lead 工具集"；具体装载逻辑在 task-tool 中按
-  // disabledTools 黑名单过滤后传入 SubagentExecutor。
-  tools: undefined,
-  disabledTools: ['task'],
+  tools: undefined, // 继承 lead 的全部工具
+  disabledTools: ['task'], // 禁止子 agent 再次调用 task，防止套娃
 };
 
 registerSubagent(generalPurposeConfig);

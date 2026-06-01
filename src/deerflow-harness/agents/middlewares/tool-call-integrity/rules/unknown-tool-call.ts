@@ -87,7 +87,9 @@ function sanitizeAiMessage(
       return !!name && known.has(name);
     });
     if (keptRaw.length !== rawList.length && msg.additional_kwargs) {
-      msg.additional_kwargs.tool_calls = keptRaw;
+      // LangChain 类型升级后 additional_kwargs.tool_calls 要求 OpenAIToolCall（含 type 字段）；
+      // keptRaw 是对原始数组的过滤结果，运行时形态与原值一致，按第三方对象边界单层断言。
+      msg.additional_kwargs.tool_calls = keptRaw as typeof msg.additional_kwargs.tool_calls;
     }
   }
 

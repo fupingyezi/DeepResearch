@@ -79,7 +79,7 @@ function getToolMeta(name: string, args: unknown): { label: string; icon: React.
   }
 }
 
-/** 把工具调用结果归一化为搜索结果数组（兼容直接数组 / { results } / JSON 字符串） */
+/** 把工具调用结果归一化为搜索结果数组（兼容直接数组 / { results } / JSON 字符串 / search_web_tool 文本格式） */
 function extractSearchResults(toolName: string, raw: unknown): unknown[] | null {
   if (toolName !== 'web_search' && toolName !== 'tavily_search' && toolName !== 'search_web_tool') {
     return null;
@@ -101,10 +101,48 @@ function extractSearchResults(toolName: string, raw: unknown): unknown[] | null 
         return (parsed as { results: unknown[] }).results;
       }
     } catch {
-      return null;
+      // fall through to text-format parsing
     }
+    // search_web_tool 文本格式：`结果 N: 标题: xxx 来源: <URL> 内容: ... ---`
+    const items = parseSearchWebToolText(raw);
+    if (items.length > 0) return items;
   }
   return null;
+}
+
+/** 解析 search_web_tool 的拼接文本结果为 `{ title, url }[]`。 */
+function parseSearchWebToolText(text: string): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+  const re = /标题:\s*([^\n]+?)\s*\n\s*来源:\s*(https?:\/\/[^\s]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const title = m[1].trim();
+    const url = m[2].trim();
+    if (!title || !url || seen.has(url)) continue;
+    seen.add(url);
+    out.push({ title, url });
+  }
+  return out;
+}
+
+/** 子工具调用是否「有意义」：args 非空对象 或 result 已到达。 */
+function hasMeaningfulSubagentToolCall(item: SubagentToolItem): boolean {
+  if (item.result !== undefined) return true;
+  if (item.errorMessage) return true;
+  return hasMeaningfulArgs(item.args);
+}
+
+/** args 是否非空（非 undefined / 非空字符串 / 非 `{}` / 非空对象）。 */
+function hasMeaningfulArgs(args: unknown): boolean {
+  if (args === undefined || args === null) return false;
+  if (typeof args === 'string') {
+    const trimmed = args.trim();
+    return trimmed.length > 0 && trimmed !== '{}';
+  }
+  if (Array.isArray(args)) return args.length > 0;
+  if (typeof args === 'object') return Object.keys(args).length > 0;
+  return true;
 }
 
 const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
@@ -151,7 +189,9 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
                       className="flex items-center gap-1.5 truncate text-gray-600 transition-colors hover:text-teal-600"
                     >
                       <GlobalOutlined className="shrink-0 text-[10px] text-gray-400" />
-                      <span className="truncate">{r.title || r.url || r.sourceUrl || '未命名结果'}</span>
+                      <span className="truncate">
+                        {r.title || r.url || r.sourceUrl || '未命名结果'}
+                      </span>
                     </a>
                   </li>
                 );
@@ -230,7 +270,7 @@ const SubagentTaskBubble: React.FC<{
     return <LoadingOutlined className="text-blue-500" />;
   };
 
-  const children = c.children ?? [];
+  const children = (c.children ?? []).filter(hasMeaningfulSubagentToolCall);
   const hasChildren = children.length > 0;
   const structured = c.structured;
 
@@ -317,7 +357,7 @@ const SubagentTaskBubble: React.FC<{
             </div>
           )}
 
-          {c.error && <div className="break-words text-sm text-red-500">错误：{c.error}</div>}
+          {c.error && <div className="text-sm break-words text-red-500">错误：{c.error}</div>}
         </div>
       )}
     </div>
@@ -326,6 +366,9 @@ const SubagentTaskBubble: React.FC<{
 
 /** 嵌套在 subagent 卡片里的单条子工具调用 */
 const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => {
+  // ghost 兜底：args 与 result 都为空的「幽灵调用」直接不渲染，
+  // 防止 timeline 里出现可展开但内容空白的工具行。
+  if (!hasMeaningfulSubagentToolCall(item)) return null;
   const [open, setOpen] = useState(false);
   const { label, icon } = getToolMeta(item.name, item.args);
   const isFailed = item.status === 'failed';
@@ -373,7 +416,7 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
               })}
             </ul>
           )}
-          {!searchResults && item.args !== undefined && (
+          {hasMeaningfulArgs(item.args) && (
             <pre className="scrollbar-slim max-h-24 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-[12px] break-words whitespace-pre-wrap text-gray-600">
               {(() => {
                 try {
@@ -384,7 +427,9 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
               })()}
             </pre>
           )}
-          {item.errorMessage && <div className="break-words text-red-500">错误：{item.errorMessage}</div>}
+          {item.errorMessage && (
+            <div className="break-words text-red-500">错误：{item.errorMessage}</div>
+          )}
         </div>
       )}
     </div>

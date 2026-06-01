@@ -6,6 +6,7 @@ import { SubagentExecutor, getSubagentConfig, getAvailableSubagentNames } from '
 import type { SubagentConfig } from '../../subagents';
 import { getContext } from '../../runtime/context';
 import type { SubagentEvent } from '../../types';
+import { getAvailableTools } from '../index';
 
 /**
  * task tool —— 事件委派核心
@@ -92,7 +93,7 @@ function toWriterPayload(
         type: 'task_completed',
         task_id: publicTaskId,
         result: ev.result,
-        structured: ev.structured ?? null,
+        structured: mergeStructuredWithSources(ev.structured, ev.accumulatedSources),
       };
     case 'failed':
       return { type: 'task_failed', task_id: publicTaskId, error: ev.error };
@@ -104,7 +105,7 @@ function toWriterPayload(
 }
 
 export const taskTool = tool(
-  async (input, runtime: any) => {
+  async (input, runtime: Record<string, any>) => {
     const { description, prompt, subagent_type, max_turns, task_id } = input;
 
     // 校验 subagent 类型
@@ -119,17 +120,10 @@ export const taskTool = tool(
     }
 
     // 从 runtime 中提取 signal / writer / toolCallId
-    const runtimeConfig = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
-    const parentSignal: AbortSignal | undefined =
-      (runtime?.signal as AbortSignal | undefined) ??
-      (runtimeConfig.signal as AbortSignal | undefined);
-    const writer: ((p: any) => void) | undefined =
-      (runtime?.writer as ((p: any) => void) | undefined) ??
-      (runtimeConfig.writer as ((p: any) => void) | undefined);
-    const toolCallId: string =
-      (runtime?.toolCall?.id as string | undefined) ??
-      (runtime?.toolCallId as string | undefined) ??
-      uuidv4().slice(0, 8);
+    const runtimeConfig: Record<string, any> = runtime?.config ?? runtime ?? {};
+    const parentSignal: AbortSignal | undefined = runtime?.signal ?? runtimeConfig.signal;
+    const writer: ((p: any) => void) | undefined = runtime?.writer ?? runtimeConfig.writer;
+    const toolCallId: string = runtime?.toolCall?.id ?? runtime?.toolCallId ?? uuidv4().slice(0, 8);
 
     const publicTaskId = task_id ?? toolCallId;
 
@@ -137,7 +131,6 @@ export const taskTool = tool(
     // - config.tools=undefined：继承 lead 默认工具集
     // - config.tools=string[]：白名单
     // 始终强制 allowTaskTool=false，杜绝 subagent 再调用 task。
-    const { getAvailableTools } = await import('../index');
     const inherited = await getAvailableTools({
       groups: config.tools, // undefined → 全集
       allowTaskTool: false,
@@ -147,20 +140,21 @@ export const taskTool = tool(
     const disabled = new Set(config.disabledTools ?? []);
     // 始终强制屏蔽 task，防止白名单 / 自定义 disabledTools 漏配。
     disabled.add('task');
-    const tools = inherited.filter((t) => !disabled.has((t as { name?: string }).name ?? ''));
+    const tools = inherited.filter((t) => !disabled.has(t.name ?? ''));
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(
         `[taskTool] subagent="${config.name}" tools=[${tools
-          .map((t) => (t as { name?: string }).name ?? '?')
+          .map((t) => t.name ?? '?')
           .join(', ')}] (inherited=${inherited.length}, disabled=[${[...disabled].join(', ')}])`,
       );
     }
 
     // 创建 executor 并消费事件流
     const ctxModelConfig = getContext()?.currentModelConfig;
-    const configurableModelConfig = (runtimeConfig.configurable as Record<string, any> | undefined)
-      ?.currentModelConfig as typeof ctxModelConfig | undefined;
+    const configurableModelConfig = runtimeConfig.configurable?.currentModelConfig as
+      | typeof ctxModelConfig
+      | undefined;
     const inheritedModelConfig = ctxModelConfig ?? configurableModelConfig;
     if (process.env.NODE_ENV !== 'production' && !inheritedModelConfig) {
       console.warn(
@@ -253,3 +247,37 @@ export const taskTool = tool(
     schema: TaskInputSchema,
   },
 );
+
+/**
+ * 把 executor 累积的 web_search 来源合并进 structured 的 sources 字段。
+ *
+ * 合并语义：
+ * - structured 为 null → 当 accumulatedSources 非空时构造一个最小可用 structured
+ *   `{ summary, keyFindings, sources }`，让前端紫色摘要块至少能展示「来源」。
+ * - structured 已有非空 sources → 不修改，模型给的更可信。
+ * - structured.sources 为空 → 用 accumulatedSources 兜底填充。
+ *
+ * 不会改变协议字段名，仅增量填充内容。
+ */
+function mergeStructuredWithSources(
+  structured: unknown,
+  accumulated: ReadonlyArray<{ title: string; url: string }> | undefined,
+): unknown {
+  const acc = Array.isArray(accumulated) ? accumulated : [];
+
+  if (structured && typeof structured === 'object') {
+    const obj = structured as { sources?: unknown; summary?: unknown; keyFindings?: unknown };
+    const existing = Array.isArray(obj.sources) ? (obj.sources as Array<{ url?: unknown }>) : [];
+    if (existing.length > 0 || acc.length === 0) return structured;
+    return { ...obj, sources: acc };
+  }
+
+  if (acc.length === 0) return structured ?? null;
+
+  // structured 缺失但有累积来源：构造最小报告，summary/keyFindings 给占位
+  return {
+    summary: '（模型未输出结构化总结，以下为本次调研中收集到的来源）',
+    keyFindings: [{ point: `已采集 ${acc.length} 条参考来源`, sourceIndexes: [] }],
+    sources: acc,
+  };
+}
