@@ -6,6 +6,7 @@ import { SubagentExecutor, getSubagentConfig, getAvailableSubagentNames } from '
 import type { SubagentConfig } from '../../subagents';
 import { getContext } from '../../runtime/context';
 import type { SubagentEvent } from '../../types';
+import { getAvailableTools } from '../index';
 
 /**
  * task tool —— 事件委派核心
@@ -104,7 +105,7 @@ function toWriterPayload(
 }
 
 export const taskTool = tool(
-  async (input, runtime: any) => {
+  async (input, runtime: Record<string, any>) => {
     const { description, prompt, subagent_type, max_turns, task_id } = input;
 
     // 校验 subagent 类型
@@ -119,17 +120,10 @@ export const taskTool = tool(
     }
 
     // 从 runtime 中提取 signal / writer / toolCallId
-    const runtimeConfig = (runtime?.config ?? runtime ?? {}) as Record<string, any>;
-    const parentSignal: AbortSignal | undefined =
-      (runtime?.signal as AbortSignal | undefined) ??
-      (runtimeConfig.signal as AbortSignal | undefined);
-    const writer: ((p: any) => void) | undefined =
-      (runtime?.writer as ((p: any) => void) | undefined) ??
-      (runtimeConfig.writer as ((p: any) => void) | undefined);
-    const toolCallId: string =
-      (runtime?.toolCall?.id as string | undefined) ??
-      (runtime?.toolCallId as string | undefined) ??
-      uuidv4().slice(0, 8);
+    const runtimeConfig: Record<string, any> = runtime?.config ?? runtime ?? {};
+    const parentSignal: AbortSignal | undefined = runtime?.signal ?? runtimeConfig.signal;
+    const writer: ((p: any) => void) | undefined = runtime?.writer ?? runtimeConfig.writer;
+    const toolCallId: string = runtime?.toolCall?.id ?? runtime?.toolCallId ?? uuidv4().slice(0, 8);
 
     const publicTaskId = task_id ?? toolCallId;
 
@@ -137,7 +131,6 @@ export const taskTool = tool(
     // - config.tools=undefined：继承 lead 默认工具集
     // - config.tools=string[]：白名单
     // 始终强制 allowTaskTool=false，杜绝 subagent 再调用 task。
-    const { getAvailableTools } = await import('../index');
     const inherited = await getAvailableTools({
       groups: config.tools, // undefined → 全集
       allowTaskTool: false,
@@ -147,20 +140,21 @@ export const taskTool = tool(
     const disabled = new Set(config.disabledTools ?? []);
     // 始终强制屏蔽 task，防止白名单 / 自定义 disabledTools 漏配。
     disabled.add('task');
-    const tools = inherited.filter((t) => !disabled.has((t as { name?: string }).name ?? ''));
+    const tools = inherited.filter((t) => !disabled.has(t.name ?? ''));
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(
         `[taskTool] subagent="${config.name}" tools=[${tools
-          .map((t) => (t as { name?: string }).name ?? '?')
+          .map((t) => t.name ?? '?')
           .join(', ')}] (inherited=${inherited.length}, disabled=[${[...disabled].join(', ')}])`,
       );
     }
 
     // 创建 executor 并消费事件流
     const ctxModelConfig = getContext()?.currentModelConfig;
-    const configurableModelConfig = (runtimeConfig.configurable as Record<string, any> | undefined)
-      ?.currentModelConfig as typeof ctxModelConfig | undefined;
+    const configurableModelConfig = runtimeConfig.configurable?.currentModelConfig as
+      | typeof ctxModelConfig
+      | undefined;
     const inheritedModelConfig = ctxModelConfig ?? configurableModelConfig;
     if (process.env.NODE_ENV !== 'production' && !inheritedModelConfig) {
       console.warn(

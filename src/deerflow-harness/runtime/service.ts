@@ -21,6 +21,7 @@ import {
 
 import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
 import type { RunStore } from '../persistence/runs';
+import type { ModelConfig } from '../types';
 
 import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
@@ -61,11 +62,27 @@ export interface SubmitRunInput {
   user_id?: string;
   input: string;
   metadata?: Record<string, any>;
+  /**
+   * 本次 run 使用的模型配置。带模型配置时由 createClientForModel 解析出对应
+   * DeerFlowClient；不传则使用装配时的默认 client。
+   * 注意：modelConfig 不会进入 client.stream 的 metadata（避免污染事件载荷）。
+   */
+  modelConfig?: ModelConfig;
 }
 
 export interface SubscribeInput {
   thread_id: string;
   run_id: string;
+}
+
+export interface ResumeRunInput {
+  thread_id: string;
+  user_id?: string;
+  /** 用户对 interrupt（如 ask_clarification）的决策，作为 Command(resume) 的载荷。 */
+  decision: unknown;
+  metadata?: Record<string, any>;
+  /** 与 submitRun 一致：带模型配置时解析对应 client。 */
+  modelConfig?: ModelConfig;
 }
 
 export interface GetCheckpointInput {
@@ -81,8 +98,11 @@ export interface ThreadService {
   submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
   subscribe(input: SubscribeInput): AsyncIterable<ClientAgentEvent>;
   getCheckpoint(input: GetCheckpointInput): Promise<any>;
-  /** 占位：interrupt/resume 后续版本提供 */
-  resume(input: { thread_id: string; run_id: string; decision: any }): Promise<never>;
+  /**
+   * 续跑被 interrupt 暂停的 thread：以用户决策 decision 作为 Command(resume) 输入，
+   * 复用同一 thread_id（共享 checkpoint），返回新的 run_id。事件经 StreamBridge 推送。
+   */
+  resume(input: ResumeRunInput): Promise<{ run_id: string }>;
 }
 
 export interface ThreadServiceDeps {
@@ -90,6 +110,12 @@ export interface ThreadServiceDeps {
   checkpointer: BaseCheckpointSaver;
   threads: ThreadMetaStore;
   runs: RunStore;
+  /**
+   * 可选：按模型配置解析 DeerFlowClient。用于单次请求切换模型——
+   * submitRun 携带 modelConfig 时调用此工厂获取对应 client（实现侧自行缓存）。
+   * 缺省时一律使用默认 client。
+   */
+  createClientForModel?: (modelConfig: ModelConfig) => DeerFlowClient;
 }
 
 /** 自定义错误：携带 code 字段，用于路由层做精细化响应。 */
@@ -108,7 +134,75 @@ interface CheckpointerWithDeleteThread {
 }
 
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
-  const { client, checkpointer, threads, runs } = deps;
+  const { client, checkpointer, threads, runs, createClientForModel } = deps;
+
+  // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
+  // 关键不变量：fire-and-forget 立即返回 run_id；try/catch/finally 三段收敛状态，
+  // finally 始终 publish END（channel 对已 closed 的 publish 是 no-op）。
+  const executeRun = async (params: {
+    thread_id: string;
+    user_id?: string;
+    threadMeta: ThreadMeta;
+    inputForDb: string;
+    makeStream: () => AsyncIterable<ClientAgentEvent>;
+  }): Promise<{ run_id: string }> => {
+    const { thread_id, user_id, threadMeta, inputForDb, makeStream } = params;
+
+    const run_id = uuidv4();
+    await runs.create({
+      run_id,
+      thread_id,
+      assistant_id: threadMeta.assistant_id,
+      user_id: user_id ?? null,
+      input: inputForDb,
+    });
+    await threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
+    await runs.setStatus(run_id, 'running');
+
+    const channel = streamBridge.channel(thread_id, run_id);
+    const ctx: RuntimeContext = {
+      thread_id,
+      run_id,
+      assistant_id: threadMeta.assistant_id,
+      ...(user_id ? { user_id } : {}),
+    };
+
+    void (async () => {
+      try {
+        await runWithContext(ctx, async () => {
+          for await (const ev of makeStream()) {
+            channel.publish(ev);
+          }
+        });
+
+        await runs.setStatus(run_id, 'succeeded');
+        await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
+        console.info(`${LOG} run succeeded thread_id=${thread_id} run_id=${run_id}`);
+      } catch (e) {
+        const message = (e as Error)?.message ?? String(e);
+        channel.publish(
+          createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
+            errorCode: 'THREAD_RUN_ERROR',
+            errorMessage: message,
+            recoverable: false,
+          }),
+        );
+        try {
+          await runs.setStatus(run_id, 'failed', message);
+          await threads.updateStatus(thread_id, 'error', { user_id: user_id ?? null });
+        } catch (e2) {
+          console.error(`${LOG} status persist on error failed:`, (e2 as Error)?.message);
+        }
+        console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
+      } finally {
+        channel.publish(
+          createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
+        );
+      }
+    })();
+
+    return { run_id };
+  };
 
   return {
     async createThread(input) {
@@ -164,69 +258,25 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       console.info(`${LOG} deleteThread thread_id=${thread_id}`);
     },
 
-    async submitRun({ thread_id, user_id, input, metadata }) {
+    async submitRun({ thread_id, user_id, input, metadata, modelConfig }) {
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
       }
 
-      const run_id = uuidv4();
-      await runs.create({
-        run_id,
+      // 单次请求模型切换：带 modelConfig 且注入了工厂时解析对应 client，
+      // 否则用装配时的默认 client。统一走「submitRun → channel」单路径，
+      // 不再有 route 层 dynamicClient 直连分支。
+      const runClient =
+        modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+
+      return executeRun({
         thread_id,
-        assistant_id: threadMeta.assistant_id,
-        user_id: user_id ?? null,
-        input,
+        user_id,
+        threadMeta,
+        inputForDb: input,
+        makeStream: () => runClient.stream(input, thread_id, metadata ?? {}),
       });
-      await threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
-      await runs.setStatus(run_id, 'running');
-
-      const channel = streamBridge.channel(thread_id, run_id);
-      const ctx: RuntimeContext = {
-        thread_id,
-        run_id,
-        assistant_id: threadMeta.assistant_id,
-        ...(user_id ? { user_id } : {}),
-      };
-
-      // fire-and-forget：不阻塞返回
-      void (async () => {
-        try {
-          await runWithContext(ctx, async () => {
-            const stream = client.stream(input, thread_id, metadata ?? {});
-            for await (const ev of stream) {
-              channel.publish(ev);
-            }
-          });
-
-          await runs.setStatus(run_id, 'succeeded');
-          await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
-          console.info(`${LOG} run succeeded thread_id=${thread_id} run_id=${run_id}`);
-        } catch (e) {
-          const message = (e as Error)?.message ?? String(e);
-          channel.publish(
-            createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
-              errorCode: 'THREAD_RUN_ERROR',
-              errorMessage: message,
-              recoverable: false,
-            }),
-          );
-          try {
-            await runs.setStatus(run_id, 'failed', message);
-            await threads.updateStatus(thread_id, 'error', { user_id: user_id ?? null });
-          } catch (e2) {
-            console.error(`${LOG} status persist on error failed:`, (e2 as Error)?.message);
-          }
-          console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
-        } finally {
-          // 兜底 END：channel 自身会去重（已 closed 后 publish 是 no-op）
-          channel.publish(
-            createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
-          );
-        }
-      })();
-
-      return { run_id };
     },
 
     subscribe({ thread_id, run_id }) {
@@ -237,8 +287,23 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       return getTupleSafe(checkpointer, thread_id, checkpoint_id);
     },
 
-    async resume() {
-      throw new Error('[thread-service] resume is not implemented yet');
+    async resume({ thread_id, user_id, decision, metadata, modelConfig }) {
+      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
+      if (!threadMeta) {
+        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+      }
+
+      const runClient =
+        modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+      const decisionText = typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
+
+      return executeRun({
+        thread_id,
+        user_id,
+        threadMeta,
+        inputForDb: decisionText,
+        makeStream: () => runClient.resumeStream(decision, thread_id, metadata ?? {}),
+      });
     },
   };
 }

@@ -14,7 +14,9 @@
  * 10. ViewImageMiddleware               (features.vision)
  * 11. SubagentLimitMiddleware           (始终启用)
  * 12. LoopDetectionMiddleware           (始终启用)
- * 13. ClarificationMiddleware           (始终最后)
+ *
+ * 澄清追问已改用 LangGraph 原生 interrupt（ask_clarification 工具 + Command resume），
+ * 不再依赖中间件短路，详见 tools/builtins/clarification-tool.ts。
  *
  * 关键顺序约束：
  * - ToolCallIntegrity (3) **先于** ToolErrorHandling (5)：在到达 ToolNode
@@ -38,7 +40,8 @@ export {
 export type { IntegrityRule, RuleContext, ToolCallIntegrityOptions } from './tool-call-integrity';
 export { guardrailMiddleware } from './guardrail-middleware';
 export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
-export { summarizationMiddleware } from './summarization-middleware';
+export { summarizationMiddleware, createSummarizationMiddleware } from './summarization-middleware';
+export type { SummarizationOptions } from './summarization-middleware';
 export { todoMiddleware } from './todo-middleware';
 export { titleMiddleware } from './title-middleware';
 export { memoryMiddleware } from './memory-middleware';
@@ -49,7 +52,6 @@ export {
   type SubagentLimitOptions,
 } from './subagent-limit-middleware';
 export { loopDetectionMiddleware } from './loop-detection-middleware';
-export { clarificationMiddleware } from './clarification-middleware';
 export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
 export { withCallLog, withCallLogAll } from './with-call-log';
 export type { WithCallLogOptions } from './with-call-log';
@@ -69,10 +71,9 @@ import { viewImageMiddleware } from './view-image-middleware';
 // 真实链路装配请用 createSubagentLimitMiddleware()，详见 ../factory.ts。
 import { subagentLimitMiddleware } from './subagent-limit-middleware';
 import { loopDetectionMiddleware } from './loop-detection-middleware';
-import { clarificationMiddleware } from './clarification-middleware';
 
 /**
- * 严格按编排位序（0 → 13）排列的中间件数组。
+ * 严格按编排位序排列的中间件数组。
  * 装配层可基于 RuntimeFeatures 在此基础上做过滤 / 替换。
  */
 export const ORDERED_MIDDLEWARES = [
@@ -89,5 +90,4 @@ export const ORDERED_MIDDLEWARES = [
   viewImageMiddleware, // 10
   subagentLimitMiddleware, // 11
   loopDetectionMiddleware, // 12
-  clarificationMiddleware, // 13
 ] as const;

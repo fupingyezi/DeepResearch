@@ -1,5 +1,5 @@
 import { createMiddleware } from 'langchain';
-import { AIMessage, BaseMessage } from '@langchain/core/messages';
+import { AIMessage, BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { IntegrityRule, RuleContext } from './types';
 import { DEFAULT_INTEGRITY_RULES } from './rules';
 
@@ -98,6 +98,10 @@ export function createToolCallIntegrityMiddleware(options: ToolCallIntegrityOpti
         );
       }
 
+      // 最终防线：sanitize 之后仍存在不一致时记一条 error 日志，方便定位
+      // （此处不再 mutate；规则链里若有 bug，先暴露问题再修复）。
+      assertToolCallIntegrity(effectiveRequest.messages);
+
       const result = await handler(effectiveRequest);
 
       try {
@@ -116,6 +120,40 @@ export function createToolCallIntegrityMiddleware(options: ToolCallIntegrityOpti
 
 /** 默认实例：装配链直接使用即可。 */
 export const toolCallIntegrityMiddleware = createToolCallIntegrityMiddleware();
+
+/**
+ * 严格紧邻校验：每条 AIMessage 的 tool_calls[i].id 都必须在它之后的连续
+ * ToolMessage 序列中按相同顺序找到匹配。任一偏差只 console.error，不抛异常 ——
+ * 真正交给 OpenAI 的请求格式问题应在规则链里修复，本函数仅作为问题暴露层。
+ */
+function assertToolCallIntegrity(messages: BaseMessage[]): void {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!AIMessage.isInstance(m)) continue;
+    const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+    const ids = calls.map((tc) => tc?.id).filter((id): id is string => !!id);
+    if (ids.length === 0) continue;
+
+    const expected = new Set(ids);
+    let j = i + 1;
+    const matched = new Set<string>();
+    while (j < messages.length && messages[j] instanceof ToolMessage) {
+      const tm = messages[j] as ToolMessage;
+      if (tm.tool_call_id && expected.has(tm.tool_call_id)) {
+        matched.add(tm.tool_call_id);
+      }
+      j += 1;
+    }
+    if (matched.size !== expected.size) {
+      const missing = ids.filter((id) => !matched.has(id));
+      console.error(
+        `[ToolCallIntegrity] post-sanitize check failed at message #${i}: ` +
+          `${missing.length}/${ids.length} tool_call_id(s) without matching ` +
+          `ToolMessage immediately after AIMessage; missing=[${missing.join(', ')}]`,
+      );
+    }
+  }
+}
 
 export type { IntegrityRule, RuleContext } from './types';
 export { DEFAULT_INTEGRITY_RULES } from './rules';

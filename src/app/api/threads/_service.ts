@@ -67,21 +67,21 @@ function getDefaultModelConfig(): ModelConfig {
  * 从请求 body 的 configuration 中解析 modelConfig：
  * - body.configuration.model.value: string  → 在 MODEL_PRESETS 中查找
  *
- * 兼容直接传入 ModelPresetName 字符串的旧调用风格（仅供内部 helper 复用）。
+ * 返回 null 表示请求未指定模型（由调用方决定走默认 client）。
  */
-function resolveModelConfigFromConfiguration(
+export function resolveModelConfigFromConfiguration(
   configuration?: { model?: { value?: string } } | null,
-): ModelConfig {
+): ModelConfig | null {
   const value = configuration?.model?.value;
   if (typeof value === 'string' && value.length > 0) {
     try {
       return buildModelConfigFromPreset(value as ModelPresetName);
     } catch (e) {
       console.warn('[resolveModelConfigFromConfiguration] Failed to resolve preset key:', e);
-      return getDefaultModelConfig();
+      return null;
     }
   }
-  return getDefaultModelConfig();
+  return null;
 }
 
 async function build(): Promise<ThreadService> {
@@ -96,11 +96,26 @@ async function build(): Promise<ThreadService> {
     checkpointer,
   });
 
+  // 按模型名缓存 client，供 submitRun 在单次请求切换模型时复用（避免每请求新建丢失 agentCache）。
+  const clientByModel = new Map<string, DeerFlowClient>();
+  const createClientForModel = (modelConfig: ModelConfig): DeerFlowClient => {
+    const cached = clientByModel.get(modelConfig.modelName);
+    if (cached) return cached;
+    const next = new DeerFlowClient(modelConfig, {
+      agentName: 'lead',
+      memoryEnabled: true,
+      checkpointer,
+    });
+    clientByModel.set(modelConfig.modelName, next);
+    return next;
+  };
+
   return createThreadService({
     client,
     checkpointer,
     threads: new PgThreadMetaStore(),
     runs: new PgRunStore(),
+    createClientForModel,
   });
 }
 
@@ -113,22 +128,4 @@ export async function getThreadService(): Promise<ThreadService> {
     });
   }
   return initPromise;
-}
-
-/**
- * 按 configuration 动态构造一个 DeerFlowClient（用于一次性切换模型的请求）。
- */
-export async function getDeerFlowClientWithModelConfig(
-  configuration?: { model?: { value?: string } } | null,
-): Promise<DeerFlowClient> {
-  const modelConfig = resolveModelConfigFromConfiguration(configuration);
-  const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
-
-  ensureMemoryModelFactory();
-
-  return new DeerFlowClient(modelConfig, {
-    agentName: 'lead',
-    memoryEnabled: true,
-    checkpointer,
-  });
 }

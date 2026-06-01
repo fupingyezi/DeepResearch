@@ -10,9 +10,9 @@ import {
   toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
   memoryMiddleware,
+  todoMiddleware,
   createSubagentLimitMiddleware,
   loopDetectionMiddleware,
-  clarificationMiddleware,
   qwenToolCallRecoveryMiddleware,
   withCallLogAll,
 } from './middlewares';
@@ -134,6 +134,20 @@ export function assembleFromFeatures(
   // 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);
 
+  // 可选：历史摘要（features.summarization 不允许 true，须传 createSummarizationMiddleware 实例）
+  const summarizationFeat = features.summarization;
+  if (typeof summarizationFeat === 'object' && summarizationFeat !== null) {
+    chain.push(summarizationFeat as AgentMiddleware);
+  }
+
+  // 可选：todo 规划（现成 todoListMiddleware）
+  const todoFeat = features.todo;
+  if (todoFeat === true) {
+    chain.push(todoMiddleware);
+  } else if (typeof todoFeat === 'object' && todoFeat !== null) {
+    chain.push(todoFeat as AgentMiddleware);
+  }
+
   // 可选：长期记忆
   const memoryFeat = features.memory;
   if (memoryFeat === true) {
@@ -149,9 +163,6 @@ export function assembleFromFeatures(
 
   // 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
-
-  // 始终最后：澄清性追问
-  chain.push(clarificationMiddleware);
 
   // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）
   extraTools.push(taskTool as StructuredToolInterface);

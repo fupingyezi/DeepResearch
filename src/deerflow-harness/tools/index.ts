@@ -10,12 +10,9 @@
  */
 
 import type { StructuredToolInterface } from '@langchain/core/tools';
+import { taskTool, searchWebTool } from './builtins';
 
-import { searchWebTool } from './search-web-tool';
-import { taskTool } from './builtins';
-
-export { searchWebTool } from './search-web-tool';
-export { taskTool } from './builtins';
+export { taskTool, askClarificationTool, searchWebTool } from './builtins';
 
 export interface GetAvailableToolsOptions {
   /** 工具名白名单（按工具的 `name` 属性匹配）；缺省返回所有非 task 工具。 */
@@ -51,22 +48,22 @@ export async function getAvailableTools(
   const { groups, allowTaskTool } = opts;
   const registry = buildToolRegistry();
 
-  const wanted: StructuredToolInterface[] = [];
+  const availableTools: StructuredToolInterface[] = [];
   if (groups && groups.length > 0) {
     for (const name of groups) {
       const t = registry.get(name);
-      if (t) wanted.push(t);
+      if (t) availableTools.push(t);
     }
   } else {
     // 缺省：所有工具，但默认排除 task（仅 lead agent 显式启用 subagent 时才注入）
     for (const [name, t] of registry) {
       if (name === 'task') continue;
-      wanted.push(t);
+      availableTools.push(t);
     }
   }
 
   if (allowTaskTool === false) {
-    return wanted.filter((t) => (t as { name?: string }).name !== 'task');
+    return availableTools.filter((t) => t.name !== 'task');
   }
-  return wanted;
+  return availableTools;
 }
