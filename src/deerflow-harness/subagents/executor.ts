@@ -5,7 +5,7 @@ import { StructuredToolInterface } from '@langchain/core/tools';
 import { createBaseAgent } from '../agents/factory';
 import { createChatModel, inferProvider } from '../models';
 import { getContext } from '../runtime/context';
-import { ModelConfig, SubagentEvent } from '../types';
+import { ModelConfig, SubagentEvent, SUBAGENT_STREAM_TAG } from '../types';
 import { SubagentConfig } from './config';
 import { extractSubagentReport } from './schema';
 
@@ -205,6 +205,9 @@ export class SubagentExecutor {
         // 增加 'updates' 用于补抓 ToolMessage（subagent 内部工具结果）
         streamMode: ['messages', 'updates'],
         recursionLimit: Math.max(2, config.maxTurns) * 2,
+        // 给本次子 agent run 打上流式标记 tag，避免子 agent 内容被误当作 lead 自身的 stream_chunk。
+        // 子 agent 自身（本流）不做该过滤，task_running 照常推送。
+        tags: [SUBAGENT_STREAM_TAG],
       };
       if (ctxThreadId) {
         streamOpts.configurable = { thread_id: ctxThreadId };

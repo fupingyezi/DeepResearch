@@ -32,13 +32,10 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
 
   switch (event.eventType) {
     case AgentEventType.LIFECYCLE: {
+      // LIFECYCLE{stage:'start'} 在边界 drop：对外的权威 START 由路由层
+      // （/api/v3/chat 的 wrapWithPersistence）统一下发。
       if (event.payload.stage === 'start') {
-        const sessionId = (event.metadata?.sessionId as string | undefined) ?? undefined;
-        return createClientAgentEvent(
-          ClientAgentEventType.START,
-          agentId,
-          sessionId ? { sessionId } : {},
-        );
+        return null;
       }
       return createClientAgentEvent(ClientAgentEventType.END, agentId, {} as Record<string, never>);
     }

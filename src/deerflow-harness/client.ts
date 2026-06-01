@@ -7,7 +7,7 @@ import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool } from './tools';
-import { ModelConfig, ClientOptions, AgentConfigKey } from './types';
+import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
 import type { StateUpdatePayload } from './types/agent-event';
 import {
@@ -254,8 +254,7 @@ export class DeerFlowClient {
     // ── 调试开关：打印完整 AI 输出 ──
     // 这些状态需要在 try / finally 之间共享，因此提升到 try 之外，
     // 防止 try 块在声明这些变量之前抛错时，finally 引用 ReferenceError。
-    const debugAi =
-      process.env.DEERFLOW_DEBUG === '1' || process.env.DEERFLOW_DEBUG_AI === '1';
+    const debugAi = process.env.DEERFLOW_DEBUG === '1' || process.env.DEERFLOW_DEBUG_AI === '1';
     const aiLogPrefix = `[ai-debug ${agentId} ${effectiveThreadId.slice(0, 8)}]`;
     let fullAiText = '';
     let fullAiReasoning = '';
@@ -311,9 +310,6 @@ export class DeerFlowClient {
       // deerflow 2.0 原则：含 tool_calls 的 AI message 的 content 是
       // "思考/规划"（归入 reasoning），不含 tool_calls 的 content 是
       // "最终答案"（归入正文）。
-      // 由于流式 chunk 中 content 可能先于 tool_call_chunks 到达，
-      // 需要短暂缓冲：tool_call_chunks 一旦出现则缓冲刷为 reasoning；
-      // 超过阈值仍未出现则刷为 text（大概率是最终答案）。
       let stepHasToolCalls = false;
       let pendingContent = '';
       const PENDING_FLUSH_THRESHOLD = 200;
@@ -637,7 +633,13 @@ export class DeerFlowClient {
         }
 
         if (mode === 'messages') {
-          const [msgChunk] = payload as [any, any];
+          const [msgChunk, msgMeta] = payload as [any, any];
+          // 过滤子 agent 泄漏帧：子 agent 在 task tool 内用 agent.stream 运行，
+          // 内容只应通过 task_progress（custom 通道）归到对应子 agent 卡片。
+          const tags = msgMeta?.tags;
+          if (Array.isArray(tags) && tags.includes(SUBAGENT_STREAM_TAG)) {
+            continue;
+          }
           // ToolMessage 统一走 updates 分支，避免双重 emit
           if (msgChunk?._getType?.() === 'ai') {
             yield* handleAiChunk(msgChunk);
