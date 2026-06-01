@@ -34,6 +34,21 @@ function buildConfigKey(modelConfig: ModelConfig, opts: RuntimeRunOptions): Agen
 }
 
 /**
+ * 判定缓冲文本是否以 markdown 研究报告的起始结构开头。
+ *
+ * 命中条件（去除前导空白后）：
+ * - `# ` / `## ` / `### ` 标题
+ * - `> **` 摘要引用块（报告范式约定的摘要卡片）
+ *
+ * 用于把「最终报告正文」与「工具调用前的规划叙述」区分开：报告范式强制以
+ * `# 标题` 开头，规划叙述不会以 `#` 开头，因此该信号不会误判规划叙述。
+ */
+function looksLikeFinalReportStart(text: string): boolean {
+  const head = text.replace(/^[\s\u3000]+/, '');
+  return /^#{1,3}\s/.test(head) || /^>\s*\*\*/.test(head);
+}
+
+/**
  * 共享 AsyncLocalStorage：与 runtime/context.ts 中的 als 是同一对象。
  * 这里通过 import 拿到 getContext，再原地写 RuntimeContext 的字段，
  * 把当前 modelConfig 注入给 task-tool 在 'inherit' 模式下读取
@@ -312,7 +327,10 @@ export class DeerFlowClient {
       // "最终答案"（归入正文）。
       let stepHasToolCalls = false;
       let pendingContent = '';
-      const PENDING_FLUSH_THRESHOLD = 200;
+      // 是否已确认进入「最终报告正文」。命中 markdown 报告起始信号（# 标题 / > **摘要**）
+      // 后置 true，之后该 step 的 content 直接作为正文流式下发，保持打字机效果。
+      // 规划叙述不以 # 开头，会一直缓冲到 step 边界再按 tool_calls 有无分类为 reasoning。
+      let inFinalReportBody = false;
 
       const emitToolCallStart = (acc: ToolCallAcc): ClientAgentEvent | null => {
         if (acc.startEmitted || !acc.toolCallId || !acc.toolName) return null;
@@ -389,11 +407,25 @@ export class DeerFlowClient {
               ),
             );
             if (ev) yield ev;
+          } else if (inFinalReportBody) {
+            // 已确认进入最终报告正文：后续 content 直接作为 text 流式下发
+            fullAiText += content;
+            const ev = emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.LLM_STREAM,
+                agentId,
+                { text: content },
+                { sessionId: effectiveThreadId, ...metadata },
+              ),
+            );
+            if (ev) yield ev;
           } else {
-            // 尚未出现 tool_call_chunks → 缓冲，等待分类
+            // 分类待定：先缓冲。命中 markdown 报告起始信号（# 标题 / > **摘要**）
+            // → 判定为最终正文并开始流式；否则继续缓冲，待 tool_call_chunks 出现时
+            // 整体转 reasoning（规划叙述不以 # 开头，绝不会误判为正文）。
             pendingContent += content;
-            // 超过阈值仍未出现 tool_call_chunks → 大概率是最终答案，刷为 text
-            if (pendingContent.length > PENDING_FLUSH_THRESHOLD) {
+            if (looksLikeFinalReportStart(pendingContent)) {
+              inFinalReportBody = true;
               yield* flushPendingContent(false);
             }
           }
@@ -422,6 +454,7 @@ export class DeerFlowClient {
           yield* flushPendingContent(stepHasToolCalls);
         }
         stepHasToolCalls = false;
+        inFinalReportBody = false;
 
         if (debugAi) {
           const resultText =
@@ -730,6 +763,7 @@ export class DeerFlowClient {
                 yield* flushPendingContent(hasToolCalls || stepHasToolCalls);
               }
               stepHasToolCalls = false;
+              inFinalReportBody = false;
             } else if (msgType === 'tool') {
               yield* handleToolMessage(msg);
             }

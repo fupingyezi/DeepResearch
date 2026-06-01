@@ -120,10 +120,10 @@ const ANY_JSON_FENCE_RE = /(`{3,}|~{3,})[ \t]*(?:json|jsonc)?[ \t]*\n([\s\S]*?)\
  *   1) 容忍变体的 ```final-report``` 围栏 → 严格 schema → 宽松 schema
  *   2) 末尾 ```json``` 围栏 → 严格 schema → 宽松 schema
  *   3) 文末"裸"JSON 对象（容错最后一次）
- *
+ *   4) markdown 兜底解析（## Sources / ### / 列表项 / 首段）
  *
  * @returns { json, markdown }
- *   - json:     解析（严格或宽松）成功的报告对象；都失败时为 null
+ *   - json:     解析（严格、宽松、或 markdown 兜底）成功的报告对象；都失败时为 null
  *   - markdown: 已剥掉所有 final-report 围栏 + 已采用 JSON 块的纯 markdown 正文
  */
 export function extractSubagentReport(raw: string | null | undefined): {
@@ -140,7 +140,6 @@ export function extractSubagentReport(raw: string | null | undefined): {
   const labelled = LABELLED_FENCE_RE.exec(workingText);
   if (labelled) {
     parsed = parseReportFlexible(labelled[2] ?? '');
-    // 关键：无论 parse 成功与否，都把这个块从 markdown 里抠掉
     workingText = workingText.replace(labelled[0], '');
   }
 
@@ -173,7 +172,141 @@ export function extractSubagentReport(raw: string | null | undefined): {
   // 兜底清洗：任何残留的 final-report 围栏（含未闭合、变体）一律剥掉
   const markdown = workingText.replace(STRIP_LABELLED_FENCE_RE, '').trim();
 
+  // 4) markdown 兜底：JSON 提取全部失败 / 提取到的报告 sources 为空时，
+  //    从 markdown 正文回填 summary / sources / keyFindings。
+  if (!parsed) {
+    parsed = parseReportFromMarkdown(markdown);
+  } else if ((parsed.sources ?? []).length === 0) {
+    const fromMd = parseReportFromMarkdown(markdown);
+    if (fromMd && fromMd.sources.length > 0) {
+      parsed = { ...parsed, sources: fromMd.sources };
+    }
+  }
+
   return { json: parsed, markdown };
+}
+
+/**
+ * 从 markdown 正文兜底解析 SubagentReport。
+ *
+ * 解析口径：
+ * - summary：取首个非 heading 段落，截断到 200 字。
+ * - sources：从 `## Sources` / `## 参考资料` 章节解析所有 markdown 链接 `[Title](URL)`，
+ *   并在段尾抓取 `- 描述` 部分作为 snippet；按 url 去重。
+ * - keyFindings：取 `### {子标题}` 与正文 `- ` 列表项前 8 条作为 point。
+ *
+ * 返回 null 表示 markdown 信息量不足以构成报告。
+ */
+export function parseReportFromMarkdown(markdown: string): SubagentReport | null {
+  const text = (markdown ?? '').trim();
+  if (text.length === 0) return null;
+
+  const summary = extractFirstParagraph(text);
+  const sources = extractSourcesFromMarkdown(text);
+  const keyFindings = extractKeyFindingsFromMarkdown(text);
+
+  if (!summary && sources.length === 0 && keyFindings.length === 0) return null;
+
+  const finalSummary = summary || keyFindings[0]?.point || '(no summary)';
+  const finalKeyFindings =
+    keyFindings.length > 0
+      ? keyFindings
+      : [{ point: finalSummary.slice(0, 80) || '(no findings)', sourceIndexes: [] }];
+
+  return {
+    summary: finalSummary,
+    keyFindings: finalKeyFindings,
+    sources,
+  };
+}
+
+/** 取首个非 heading、非空白段落，截断到 200 字。 */
+function extractFirstParagraph(text: string): string {
+  const blocks = text.split(/\n{2,}/);
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (trimmed.length === 0) continue;
+    if (/^#{1,6}\s+/.test(trimmed)) continue;
+    if (/^>\s*/.test(trimmed)) continue; // 跳过 TL;DR 引用块
+    const oneLine = trimmed.replace(/\s+/g, ' ').trim();
+    return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine;
+  }
+  return '';
+}
+
+/**
+ * 从 ## Sources / ## 参考资料 章节中解析 [Title](URL) 链接 + 可选 snippet。
+ * 章节边界：从 H2 到下一个 H2 / EOF。
+ *
+ * JS 正则没有 \Z (EOF anchor)，使用 lookahead `(?=^##\s+|$(?![\s\S]))` 表示
+ * 「下一个 H2 或文末」。
+ */
+function extractSourcesFromMarkdown(
+  text: string,
+): Array<{ title: string; url: string; snippet?: string }> {
+  const sectionPattern =
+    /^##\s+(?:sources|参考资料|references|引用)\b[\s\S]*?(?=^##\s+|$(?![\s\S]))/gim;
+  const sections = text.match(sectionPattern) ?? [];
+  const out: Array<{ title: string; url: string; snippet?: string }> = [];
+  const seenUrls = new Set<string>();
+
+  // 章节内整行匹配： `- [Title](URL) - 描述` 或 `[Title](URL)`
+  const linkLineRe = /^[\s>*\-+]*\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)\s*(?:[-—–:]\s*(.+))?$/gm;
+
+  for (const section of sections) {
+    let match: RegExpExecArray | null;
+    linkLineRe.lastIndex = 0;
+    while ((match = linkLineRe.exec(section)) !== null) {
+      const title = match[1].trim();
+      const url = match[2].trim();
+      const snippet = match[3]?.trim();
+      if (!title || !url || seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      out.push(snippet ? { title, url, snippet } : { title, url });
+    }
+  }
+  return out;
+}
+
+/**
+ * 提取关键发现：优先取 `### {子标题}` 后的首句；否则取顶层 `- ` 列表项。
+ * 上限 8 条，去除引用编号 `[n]`，截断到 80 字。
+ */
+function extractKeyFindingsFromMarkdown(
+  text: string,
+): Array<{ point: string; sourceIndexes: number[] }> {
+  const out: Array<{ point: string; sourceIndexes: number[] }> = [];
+
+  const h3Re = /^###\s+(.+?)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = h3Re.exec(text)) !== null) {
+    if (out.length >= 8) break;
+    const point = sanitizeFindingText(m[1]);
+    if (point) out.push({ point, sourceIndexes: [] });
+  }
+
+  if (out.length < 8) {
+    const bulletRe = /^[\s]*[-*+]\s+(.+?)\s*$/gm;
+    while ((m = bulletRe.exec(text)) !== null) {
+      if (out.length >= 8) break;
+      // 跳过链接行（已在 sources 中处理）
+      if (/^\s*\[[^\]]+\]\(https?:/.test(m[1])) continue;
+      const point = sanitizeFindingText(m[1]);
+      if (point) out.push({ point, sourceIndexes: [] });
+    }
+  }
+
+  return out;
+}
+
+function sanitizeFindingText(raw: string): string {
+  const stripped = raw
+    .replace(/\[citation:[^\]]+\]\([^)]+\)/g, '')
+    .replace(/\[(\d+)\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (stripped.length === 0) return '';
+  return stripped.length > 80 ? `${stripped.slice(0, 80)}…` : stripped;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

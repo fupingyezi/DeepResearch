@@ -680,6 +680,9 @@ export class StreamChatHandler {
 
     if (incomingStatus === 'tool_call') {
       const args = parseJsonSafe(payload.arguments);
+      // ghost 防御：args 为空且无 result → 跳过入 children；
+      // 与后端 _parts-collector / 前端 timeline 同口径，避免 UI 出现空白工具行。
+      if (!hasMeaningfulArgs(args)) return;
       const existIdx = children.findIndex((c) => c.toolCallId === toolCallId);
       const item: SubagentToolCall = {
         id: toolCallId || uuidv4(),
@@ -935,6 +938,18 @@ function parseJsonSafe(raw: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+/** args 是否非空（与后端 collector / 前端 timeline 同口径） */
+function hasMeaningfulArgs(args: unknown): boolean {
+  if (args === undefined || args === null) return false;
+  if (typeof args === 'string') {
+    const trimmed = args.trim();
+    return trimmed.length > 0 && trimmed !== '{}';
+  }
+  if (Array.isArray(args)) return args.length > 0;
+  if (typeof args === 'object') return Object.keys(args).length > 0;
+  return true;
 }
 
 function isObjectWithStringKey<K extends string>(data: unknown, key: K): data is Record<K, string> {

@@ -1,11 +1,14 @@
 @import 'tailwindcss';
 @import 'katex/dist/katex.min.css';
 
+/* 官方 typography 插件：CustomMarkdown 的 prose / prose-* 排版依赖 */
+@plugin '@tailwindcss/typography';
+
 :root {
   --background: #ffffff;
   --foreground: #111827;
 
-  /* 浅色精致主题 token（参考 DeerFlow 2.0） */
+  /* 浅色精致主题 token */
   --color-surface: #ffffff;
   --color-surface-muted: #f9fafb;
   --color-surface-subtle: #f3f4f6;
@@ -45,7 +48,13 @@ body {
   background: var(--color-surface-muted);
   color: var(--text-primary);
   font-family:
-    'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    'PingFang SC',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
     sans-serif;
 }
 

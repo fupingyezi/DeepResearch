@@ -95,8 +95,13 @@ export type SubagentEvent =
       taskId: string;
       /** 给 lead-agent 的纯文本结果（去掉 fenced JSON block 的 markdown） */
       result: string | null;
-      /** 解析自 final-report 的结构化数据；失败时为 null */
+      /** 解析自 final-report / markdown 的结构化数据；失败时为 null */
       structured?: unknown;
+      /**
+       * 子 agent 执行过程中通过 web_search 累积下来的来源列表。
+       * 当 structured 缺失或其 sources 为空时，task-tool 会用此数组兜底。
+       */
+      accumulatedSources?: Array<{ title: string; url: string }>;
     }
   | { kind: 'failed'; taskId: string; error: string }
   | { kind: 'timed_out'; taskId: string; error: string }

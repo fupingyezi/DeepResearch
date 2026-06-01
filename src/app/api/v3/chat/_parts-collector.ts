@@ -17,8 +17,10 @@
  * - START / END / HEARTBEAT → 不入 parts
  *
  * finalize 阶段：调用与前端共享的 extractFinalMessageParts，把 lead 最终消息里
- * `<final_report>` / `<task_summary>` 标记解析为 artifact / task_summary part，
- * 确保持久化（reload）与实时流式（live）两端结构一致。
+ * 符合「研究报告」结构（H1 + ≥2 个 H2）的 markdown 段落整段提升为 artifact，
+ * `<task_summary>` 块解析为 task_summary part；多 agent 工作流时若模型未输出
+ * `<task_summary>`，从 subagent_task parts 派生兜底总结。确保持久化（reload）
+ * 与实时流式（live）两端结构一致。
  *
  * 设计要点：
  * - partIndexByToolCallId / partIndexByTaskId 双 Map 让反查 O(1)
@@ -303,6 +305,8 @@ export class AssistantPartsCollector {
 
     if (status === 'tool_call') {
       const args = parseJsonSafe(payload.arguments);
+      // ghost 防御：args 为空且尚无 result → 跳过入 children，避免落库脏数据
+      if (!hasMeaningfulArgs(args)) return;
       const existIdx = children.findIndex((c) => c.toolCallId === toolCallId);
       const item: SubagentToolCall = {
         id: toolCallId || uuidv4(),
@@ -419,6 +423,18 @@ function parseJsonSafe(raw: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+/** args 是否非空（与前端 timeline 同口径，避免落库出现 ghost 子调用记录） */
+function hasMeaningfulArgs(args: unknown): boolean {
+  if (args === undefined || args === null) return false;
+  if (typeof args === 'string') {
+    const trimmed = args.trim();
+    return trimmed.length > 0 && trimmed !== '{}';
+  }
+  if (Array.isArray(args)) return args.length > 0;
+  if (typeof args === 'object') return Object.keys(args).length > 0;
+  return true;
 }
 
 function isObjectWithKey<V>(data: unknown, key: string): data is Record<string, V> {

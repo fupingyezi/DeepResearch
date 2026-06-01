@@ -106,7 +106,7 @@ export function buildModelConfigFromPreset(presetKey: ModelPresetName): ModelCon
     provider: preset.provider,
     temperature: 0.7,
     topP: 0.8,
-    maxTokens: 4096,
+    maxTokens: 8192,
   };
 
   // 根据 provider 注入对应的 API 密钥和 base URL

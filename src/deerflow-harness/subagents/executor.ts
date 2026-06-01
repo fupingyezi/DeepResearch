@@ -79,6 +79,11 @@ class ToolCallTracker {
   /**
    * 从完整 AIMessage.tool_calls 中补齐 acc 字段；
    * 对从未在分片中出现过的则现场创建。
+   *
+   * args 覆盖语义（关键不变量）：final 帧的 `tc.args` 永远比 chunks 累积更可信
+   * （chunks 在某些 OpenAI 兼容流下会被截断/乱序），因此只要 final 帧给出非空
+   * args，就**无条件覆盖** acc.argsBuffer。
+   *
    * 返回需要 emit `tool_call` 事件的 acc 列表（按 tool_calls 顺序）。
    */
   upsertFromFinal(toolCalls: NonNullable<RawMessageChunk['tool_calls']>): ToolCallAcc[] {
@@ -90,16 +95,14 @@ class ToolCallTracker {
         acc = {
           toolCallId: tc.id,
           toolName: tc.name ?? '',
-          argsBuffer:
-            typeof tc.args === 'string' ? tc.args : tc.args ? safeJsonStringify(tc.args) : '',
+          argsBuffer: stringifyToolArgs(tc.args),
           startEmitted: false,
         };
         this.accsByToolCallId.set(tc.id, acc);
       } else {
         if (!acc.toolName && tc.name) acc.toolName = tc.name;
-        if (!acc.argsBuffer && tc.args) {
-          acc.argsBuffer = typeof tc.args === 'string' ? tc.args : safeJsonStringify(tc.args);
-        }
+        const finalArgs = stringifyToolArgs(tc.args);
+        if (finalArgs.length > 0) acc.argsBuffer = finalArgs;
       }
       out.push(acc);
     }
@@ -110,9 +113,23 @@ class ToolCallTracker {
     return this.accsByToolCallId.get(toolCallId);
   }
 
-  /** 幂等地标记 acc 已 emit；返回 true 表示首次 emit（外层应发出事件）。 */
+  /** 所有累积器（用于终态扫描丢弃 ghost）。 */
+  allAccs(): ToolCallAcc[] {
+    const seen = new Set<ToolCallAcc>();
+    for (const acc of this.accsByToolCallId.values()) seen.add(acc);
+    for (const acc of this.accsByChunkIndex.values()) seen.add(acc);
+    return [...seen];
+  }
+
+  /**
+   * 幂等地标记 acc 已 emit。
+   * 必须满足：toolCallId / toolName 齐全，且 argsBuffer 是合法的非空 args。
+   * 不达标返回 false（外层不 emit），等待 final/updates 兜底。
+   */
   tryMarkStart(acc: ToolCallAcc): boolean {
-    if (acc.startEmitted || !acc.toolCallId || !acc.toolName) return false;
+    if (acc.startEmitted) return false;
+    if (!acc.toolCallId || !acc.toolName) return false;
+    if (!isCompleteArgs(acc.argsBuffer)) return false;
     acc.startEmitted = true;
     return true;
   }
@@ -216,6 +233,7 @@ export class SubagentExecutor {
 
       // 跨 chunk 状态
       const tracker = new ToolCallTracker();
+      const sourcesAccumulator = new SearchSourcesAccumulator();
       const runState = {
         aiMessageCount: 0,
         // 累计完整文本，用于在终态尝试 schema 解析
@@ -232,8 +250,13 @@ export class SubagentExecutor {
 
       // 分支 handler：messages 流（AIMessage chunk）
       const handleAiMessageChunk = function* (msgChunk: RawMessageChunk): Generator<SubagentEvent> {
-        // 5a) tool_call 分片：累积后跳过本帧，等完整 AIMessage 再 emit
-        if (tracker.ingestChunks(msgChunk.tool_call_chunks)) return;
+        // 5a) tool_call 分片到达：本轮要调用工具，此前累积的文本是「planning 开场白」
+        //     （如 "I'll search for ..."），绝非最终报告。清空 aggregatedFinalText，
+        //     保证它最终只含「最后一次工具调用之后」的纯文本（真正的最终报告）。
+        if (tracker.ingestChunks(msgChunk.tool_call_chunks)) {
+          runState.aggregatedFinalText = '';
+          return;
+        }
 
         // 5b) 完整 AIMessage：可能含 tool_calls 和/或 文本
         const content = msgChunk.content;
@@ -248,6 +271,8 @@ export class SubagentExecutor {
 
         // 5c) 拿到完整 tool_calls 时，把累积完成的 acc emit 为 tool_call 事件
         if (hasFinalToolCalls && toolCalls) {
+          // 同 5a：本轮要调用工具 → 丢弃此前累积的 planning 文本
+          runState.aggregatedFinalText = '';
           for (const acc of tracker.upsertFromFinal(toolCalls)) {
             if (tracker.tryMarkStart(acc)) yield buildToolCallEvent(acc);
           }
@@ -288,13 +313,18 @@ export class SubagentExecutor {
             }
             const toolName = msg.name ?? acc?.toolName ?? '';
             const status = msg.status; // 'error' / undefined
+            const success = status !== 'error';
+            // 把 search_web_tool 的文本结果解析为 sources 累积
+            if (success && isSearchWebToolName(toolName)) {
+              sourcesAccumulator.ingest(msg.content);
+            }
             yield {
               kind: 'tool_result',
               taskId,
               toolCallId,
               toolName,
               result: msg.content,
-              success: status !== 'error',
+              success,
               errorMessage: status === 'error' ? String(msg.content ?? '') : undefined,
             };
           }
@@ -320,7 +350,30 @@ export class SubagentExecutor {
       }
 
       // 6) 终态：completed -------------------------------------------------
-      // 尝试从最终输出中提取 schema 化的 final-report 块
+      // 6a) 终态前扫描 tracker：args 已完整但漏发的补 emit；args 始终不完整的 acc
+      //     视为「ghost」直接丢弃，不向上推送，避免 UI 出现可展开但内容空白的工具行。
+      let droppedGhostCount = 0;
+      for (const acc of tracker.allAccs()) {
+        if (acc.startEmitted) continue;
+        if (!acc.toolCallId || !acc.toolName) {
+          droppedGhostCount += 1;
+          continue;
+        }
+        if (!isCompleteArgs(acc.argsBuffer)) {
+          droppedGhostCount += 1;
+          continue;
+        }
+        // 漏发兜底：args 已完整但因前置时序未走 emit
+        acc.startEmitted = true;
+        yield buildToolCallEvent(acc);
+      }
+      if (droppedGhostCount > 0 && process.env.NODE_ENV !== 'production') {
+        console.info(
+          `${logPrefix} dropped ${droppedGhostCount} ghost tool_call(s) (incomplete args)`,
+        );
+      }
+
+      // 6b) 尝试从最终输出中提取 schema 化的 final-report 块
       const { json: structured, markdown } = extractSubagentReport(runState.aggregatedFinalText);
       const resultText = runState.aggregatedFinalText.length > 0 ? markdown : null;
       yield {
@@ -328,11 +381,12 @@ export class SubagentExecutor {
         taskId,
         result: resultText,
         structured: structured ?? null,
+        accumulatedSources: sourcesAccumulator.snapshot(),
       };
       console.info(
         `${logPrefix} completed (messages=${runState.aiMessageCount}, structured=${
           structured ? 'yes' : 'no'
-        })`,
+        }, sources=${sourcesAccumulator.size()})`,
       );
     } catch (err: any) {
       const aborted = internalController.signal.aborted || parentSignal?.aborted;
@@ -397,5 +451,116 @@ function safeJsonStringify(v: unknown): string {
     return JSON.stringify(v);
   } catch {
     return '';
+  }
+}
+
+/**
+ * 把 tool_call.args 序列化成字符串（与 OpenAI 协议对齐）：
+ * - 字符串：原样返回
+ * - 对象/数组：JSON.stringify
+ * - 其它：空串
+ */
+function stringifyToolArgs(args: unknown): string {
+  if (typeof args === 'string') return args;
+  if (args && typeof args === 'object') return safeJsonStringify(args);
+  return '';
+}
+
+/**
+ * 判定 argsBuffer 是否「完整可用」：
+ * - 空串 / `'{}'` / 空对象 / 仅空白 → 不完整
+ * - 可被 JSON.parse 成非空对象 / 非空字符串 → 完整
+ */
+function isCompleteArgs(buffer: string): boolean {
+  if (!buffer) return false;
+  const trimmed = buffer.trim();
+  if (trimmed.length === 0 || trimmed === '{}' || trimmed === '[]') return false;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed === null || parsed === undefined) return false;
+    if (typeof parsed === 'object') return Object.keys(parsed).length > 0;
+    if (typeof parsed === 'string') return parsed.length > 0;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 项目内的 web 搜索工具命名集合（与前端 timeline 解析口径保持一致） */
+const SEARCH_WEB_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'search_web_tool',
+  'web_search',
+  'tavily_search',
+]);
+
+function isSearchWebToolName(name: string | undefined): boolean {
+  return !!name && SEARCH_WEB_TOOL_NAMES.has(name);
+}
+
+/**
+ * 累积 subagent 内部 web 搜索工具的来源列表，用于 task_completed 兜底回填。
+ *
+ * 解析口径：
+ * - search_web_tool 输出形如 `结果 N: 标题: xxx 来源: <URL> 内容: ... ---`
+ * - 字符串结果 / 对象结果 / 数组结果均尝试解析；按 url 去重，限制 50 条。
+ */
+class SearchSourcesAccumulator {
+  private readonly map = new Map<string, { title: string; url: string }>();
+  private static readonly LIMIT = 50;
+  private static readonly TEXT_PATTERN = /标题:\s*([^\n]+?)\s*\n\s*来源:\s*(https?:\/\/[^\s]+)/g;
+
+  ingest(raw: unknown): void {
+    if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
+    if (typeof raw === 'string') {
+      this.ingestString(raw);
+      return;
+    }
+    if (Array.isArray(raw)) {
+      for (const item of raw) this.ingestObject(item);
+      return;
+    }
+    if (raw && typeof raw === 'object') {
+      const obj = raw as { results?: unknown };
+      if (Array.isArray(obj.results)) {
+        for (const item of obj.results) this.ingestObject(item);
+      } else {
+        this.ingestObject(raw);
+      }
+    }
+  }
+
+  private ingestString(text: string): void {
+    let match: RegExpExecArray | null;
+    SearchSourcesAccumulator.TEXT_PATTERN.lastIndex = 0;
+    while ((match = SearchSourcesAccumulator.TEXT_PATTERN.exec(text)) !== null) {
+      this.add(match[1].trim(), match[2].trim());
+      if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
+    }
+  }
+
+  private ingestObject(item: unknown): void {
+    if (!item || typeof item !== 'object') return;
+    const obj = item as { title?: unknown; url?: unknown; sourceUrl?: unknown; link?: unknown };
+    const url =
+      (typeof obj.url === 'string' && obj.url) ||
+      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
+      (typeof obj.link === 'string' && obj.link) ||
+      '';
+    const title = (typeof obj.title === 'string' && obj.title) || url;
+    if (!url || !title) return;
+    this.add(title, url);
+  }
+
+  private add(title: string, url: string): void {
+    if (this.map.has(url)) return;
+    this.map.set(url, { title, url });
+  }
+
+  size(): number {
+    return this.map.size;
+  }
+
+  snapshot(): Array<{ title: string; url: string }> {
+    return [...this.map.values()];
   }
 }

@@ -93,7 +93,7 @@ function toWriterPayload(
         type: 'task_completed',
         task_id: publicTaskId,
         result: ev.result,
-        structured: ev.structured ?? null,
+        structured: mergeStructuredWithSources(ev.structured, ev.accumulatedSources),
       };
     case 'failed':
       return { type: 'task_failed', task_id: publicTaskId, error: ev.error };
@@ -247,3 +247,37 @@ export const taskTool = tool(
     schema: TaskInputSchema,
   },
 );
+
+/**
+ * 把 executor 累积的 web_search 来源合并进 structured 的 sources 字段。
+ *
+ * 合并语义：
+ * - structured 为 null → 当 accumulatedSources 非空时构造一个最小可用 structured
+ *   `{ summary, keyFindings, sources }`，让前端紫色摘要块至少能展示「来源」。
+ * - structured 已有非空 sources → 不修改，模型给的更可信。
+ * - structured.sources 为空 → 用 accumulatedSources 兜底填充。
+ *
+ * 不会改变协议字段名，仅增量填充内容。
+ */
+function mergeStructuredWithSources(
+  structured: unknown,
+  accumulated: ReadonlyArray<{ title: string; url: string }> | undefined,
+): unknown {
+  const acc = Array.isArray(accumulated) ? accumulated : [];
+
+  if (structured && typeof structured === 'object') {
+    const obj = structured as { sources?: unknown; summary?: unknown; keyFindings?: unknown };
+    const existing = Array.isArray(obj.sources) ? (obj.sources as Array<{ url?: unknown }>) : [];
+    if (existing.length > 0 || acc.length === 0) return structured;
+    return { ...obj, sources: acc };
+  }
+
+  if (acc.length === 0) return structured ?? null;
+
+  // structured 缺失但有累积来源：构造最小报告，summary/keyFindings 给占位
+  return {
+    summary: '（模型未输出结构化总结，以下为本次调研中收集到的来源）',
+    keyFindings: [{ point: `已采集 ${acc.length} 条参考来源`, sourceIndexes: [] }],
+    sources: acc,
+  };
+}
