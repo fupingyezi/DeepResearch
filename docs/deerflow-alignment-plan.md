@@ -78,8 +78,8 @@ mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assem
 ### P2 — 完成度 / 一致性
 
 - **#4 buffer 无上限**：`ThreadChannel.buffer` 无裁剪，长线程内存膨胀（`CLAUDE.md` 已知限制 #3）。
-- **#5 memory 永不启用**：`resolveRuntimeOptions` 忽略 `metadata`，`memoryEnabled` 恒取 `baseOptions`（默认 false），`memoryMiddleware` 与 `buildLeadAgentSystemPrompt` **实际从未触发**。
-- **#6 中间件占位**：`summarization/todo/title/uploads/thread-data/view-image` 为空实现，未接入装配链。
+- ~~**#5 memory 永不启用**~~（已落地）：`_service.ts` 注入 `baseOptions.memoryEnabled: true` 默认开启；`resolveRuntimeOptions` 接通 `metadata.memoryEnabled` 单次请求覆盖（仅 `typeof === 'boolean'` 才生效）；`route.ts` 透传 `body.configuration.memoryEnabled`。
+- **#6 中间件占位**：`title/uploads/thread-data/view-image` 仍为空实现（`summarization`/`todo` 已接 LangChain 现成实现，未默认启用）。
 - **#7 Subagent 需核对**：`executor.ts` 已具超时/取消/终态一次/`inherit`/父子共享 checkpoint/`recursionLimit`；`subagent-limit-middleware.ts` 已具并发(默认3)+总量(默认8)双闸+LRU；`general-purpose.ts` 已 `disabledTools:['task']`+`model:'inherit'`。需对照 deer-flow 做差距校验与补强，**而非重写**。
 - **#8 Prompt 缺澄清系统**：缺 deer-flow 的 CLARIFY→PLAN→ACT、skills_section、working_directory、统一 citations 段。
 

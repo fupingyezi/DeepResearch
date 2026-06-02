@@ -238,11 +238,16 @@ idle → running → idle（成功）
 
 **重要例外：** `memoryEnabled=true` 时**不缓存**（每轮 prompt 含最新 memory，必须每次重建）。
 
-#### 运行期选项解析（三级优先级）
+#### 运行期选项解析（两级优先级）
 
-1. 本次请求 `metadata` 中的开关（最高优先）
-2. 构造时传入的 `baseOptions`
-3. 默认值（false / 'lead'）
+`resolveRuntimeOptions(metadata)` 计算本轮 stream 的 `RuntimeRunOptions`：
+
+1. `metadata` 中显式传入的开关（最高优先；仅 `memoryEnabled` 走运行期覆盖）
+2. 构造时传入的 `baseOptions`（`_service.ts` 默认 `memoryEnabled: true`、`agentName: 'lead'`）
+
+> 仅 `memoryEnabled` 支持运行期覆盖，且必须严格 `typeof === 'boolean'` 才生效——
+> `metadata.memoryEnabled === undefined` 不会被解释为 false。`agentName` /
+> `userId` / `availableSkills` 暂不开放单次请求覆盖。
 
 并发安全：选项解析结果是局部变量，不修改 `this.baseOptions`。
 

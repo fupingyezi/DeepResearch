@@ -97,12 +97,23 @@ export class DeerFlowClient {
   }
 
   /**
-   * 计算本轮 stream 的运行期开关：以 baseOptions 为底。
+   * 计算本轮 stream 的运行期开关：以 baseOptions 为底，metadata 显式传值时覆盖。
+   *
+   * 优先级（仅 memoryEnabled 走两级；其它键暂不开放运行期覆盖）：
+   *   1. metadata.memoryEnabled (boolean) — 本次请求显式覆盖
+   *   2. baseOptions.memoryEnabled        — 服务级默认（_service.ts 注入 true）
+   *
+   * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
+   * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
+   * 否则 `metadata.memoryEnabled = undefined` 也会被解释为 false。
    */
-  private resolveRuntimeOptions(_metadata?: Record<string, any>): RuntimeRunOptions {
+  private resolveRuntimeOptions(metadata?: Record<string, any>): RuntimeRunOptions {
     const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
+    const metadataMemory = metadata?.memoryEnabled;
+    const memoryEnabled =
+      typeof metadataMemory === 'boolean' ? metadataMemory : !!this.baseOptions.memoryEnabled;
     return {
-      memoryEnabled: !!this.baseOptions.memoryEnabled,
+      memoryEnabled,
       agentName: this.baseOptions.agentName ?? 'lead',
       userId,
       availableSkills: this.baseOptions.availableSkills,
