@@ -8,8 +8,6 @@ export enum AgentEventType {
   TOOL_CALL_START = 'tool_call_start',
   /** 工具调用结果 */
   TOOL_CALL_RESULT = 'tool_call_result',
-  /** 状态变更 */
-  STATE_UPDATE = 'state_update',
   /** 人工中断 */
   HUMAN_INTERRUPT = 'human_interrupt',
   /** 人工恢复 */
@@ -85,20 +83,6 @@ export interface ToolCallResultPayload {
   success: boolean;
   /** 错误信息（失败时） */
   errorMessage?: string;
-}
-
-/** 状态变更 payload */
-export interface StateUpdatePayload {
-  /** 状态变更的子类型，用于前端精确分发 */
-  stateType:
-    | 'simple_analysis'
-    | 'tasks_initial'
-    | 'task_update'
-    | 'report'
-    | 'research_target'
-    | 'custom';
-  /** 状态数据 */
-  data: any;
 }
 
 /** 人工中断 payload */
@@ -306,12 +290,6 @@ export interface ToolCallResultEvent extends BaseAgentEvent {
   payload: ToolCallResultPayload;
 }
 
-/** 状态变更事件 */
-export interface StateUpdateEvent extends BaseAgentEvent {
-  eventType: AgentEventType.STATE_UPDATE;
-  payload: StateUpdatePayload;
-}
-
 /** 人工中断事件 */
 export interface HumanInterruptEvent extends BaseAgentEvent {
   eventType: AgentEventType.HUMAN_INTERRUPT;
@@ -418,7 +396,6 @@ export type AgentEvent =
   | LlmCompleteEvent
   | ToolCallStartEvent
   | ToolCallResultEvent
-  | StateUpdateEvent
   | HumanInterruptEvent
   | HumanResumeEvent
   | ErrorEvent

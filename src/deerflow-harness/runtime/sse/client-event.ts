@@ -23,8 +23,6 @@ export enum ClientAgentEventType {
   TOOL_CALL = 'tool_call',
   /** 工具调用结果 */
   TOOL_RESULT = 'tool_result',
-  /** 状态变更（DeepResearch 等场景） */
-  STATE_UPDATE = 'state_update',
   /** 任务进度更新（折叠所有 task_* 内部事件） */
   TASK_PROGRESS = 'task_progress',
   /** 人工中断（等待决策） */
@@ -89,18 +87,6 @@ export interface ToolResultPayload {
   result: any;
   success: boolean;
   errorMessage?: string;
-}
-
-export interface StateUpdatePayload {
-  /** 状态子类型，供前端按需分发 */
-  stateType:
-    | 'simple_analysis'
-    | 'tasks_initial'
-    | 'task_update'
-    | 'report'
-    | 'research_target'
-    | 'custom';
-  data: any;
 }
 
 /**
@@ -186,11 +172,6 @@ export interface ToolResultEvent extends BaseClientAgentEvent {
   payload: ToolResultPayload;
 }
 
-export interface StateUpdateEvent extends BaseClientAgentEvent {
-  eventType: ClientAgentEventType.STATE_UPDATE;
-  payload: StateUpdatePayload;
-}
-
 export interface TaskProgressEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.TASK_PROGRESS;
   payload: TaskProgressPayload;
@@ -222,7 +203,6 @@ export type ClientAgentEvent =
   | StreamChunkEvent
   | ToolCallEvent
   | ToolResultEvent
-  | StateUpdateEvent
   | TaskProgressEvent
   | HumanInterruptEvent
   | ErrorEvent

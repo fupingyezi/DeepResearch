@@ -7,7 +7,7 @@
  * - LIFECYCLE{stage:'start'} → START；LIFECYCLE{stage:'done'} → END
  * - LLM_STREAM → STREAM_CHUNK
  * - TOOL_CALL_START → TOOL_CALL；TOOL_CALL_RESULT → TOOL_RESULT
- * - STATE_UPDATE / HUMAN_INTERRUPT / ERROR → 同名透传
+ * - HUMAN_INTERRUPT / ERROR → 同名透传
  * - TASK_STARTED|RUNNING|COMPLETED|FAILED|CANCELLED|TIMED_OUT
  *     → 全部折叠为 TASK_PROGRESS（status 字段区分）
  * - LLM_COMPLETE / HUMAN_RESUME / NODE_ENTER / NODE_EXIT /
@@ -60,12 +60,6 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         result: event.payload.result,
         success: event.payload.success,
         errorMessage: event.payload.errorMessage,
-      });
-
-    case AgentEventType.STATE_UPDATE:
-      return createClientAgentEvent(ClientAgentEventType.STATE_UPDATE, agentId, {
-        stateType: event.payload.stateType,
-        data: event.payload.data,
       });
 
     case AgentEventType.HUMAN_INTERRUPT:

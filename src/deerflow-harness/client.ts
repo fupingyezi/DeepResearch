@@ -9,7 +9,6 @@ import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
-import type { StateUpdatePayload } from './types/agent-event';
 import {
   toClientAgentEvent,
   type ClientAgentEventStream,
@@ -47,13 +46,6 @@ function looksLikeFinalReportStart(text: string): boolean {
   const head = text.replace(/^[\s\u3000]+/, '');
   return /^#{1,3}\s/.test(head) || /^>\s*\*\*/.test(head);
 }
-
-/**
- * 共享 AsyncLocalStorage：与 runtime/context.ts 中的 als 是同一对象。
- * 这里通过 import 拿到 getContext，再原地写 RuntimeContext 的字段，
- * 把当前 modelConfig 注入给 task-tool 在 'inherit' 模式下读取
- * （als store 是引用类型，子调用链共享同一对象）。
- */
 
 /**
  * DeerFlowClient
@@ -311,18 +303,8 @@ export class DeerFlowClient {
       const toolCallsById = new Map<string, ToolCallAcc>();
       const debug = process.env.NODE_ENV !== 'production';
 
-      // ── 调试开关说明 ──
-      // debugAi / aiLogPrefix / fullAiText / fullAiReasoning / debugLog
-      // 已在 try 之外声明，确保 finally 块在异常路径下也能安全访问。
-      // 用法：环境变量 DEERFLOW_DEBUG=1 或 DEERFLOW_DEBUG_AI=1。
-      // 输出三档：
-      //   1) chunk 增量（messages 模式，AI content + tool_call_chunks）
-      //   2) step 完整 AIMessage（updates 模式，含完整 content + tool_calls）
-      //   3) tool 消息 / custom payload / interrupt
-      // 流结束时打印整段累积文本，便于回看完整回复。
-
       // ── Content classification state ──
-      // deerflow 2.0 原则：含 tool_calls 的 AI message 的 content 是
+      // 原则：含 tool_calls 的 AI message 的 content 是
       // "思考/规划"（归入 reasoning），不含 tool_calls 的 content 是
       // "最终答案"（归入正文）。
       let stepHasToolCalls = false;
@@ -623,34 +605,6 @@ export class DeerFlowClient {
             if (ev) yield ev;
             return;
           }
-          case 'state_update': {
-            // 工具通过 LangGraph custom writer 推送的研究流程状态（DeepResearch）。
-            // 不在白名单内的 stateType 一律降级为 'custom'，避免污染前端分发逻辑。
-            const ALLOWED_STATE_TYPES: readonly StateUpdatePayload['stateType'][] = [
-              'simple_analysis',
-              'tasks_initial',
-              'task_update',
-              'report',
-              'research_target',
-              'custom',
-            ];
-            const rawStateType: unknown = raw.state_type ?? raw.stateType;
-            const stateType: StateUpdatePayload['stateType'] =
-              typeof rawStateType === 'string' &&
-              (ALLOWED_STATE_TYPES as readonly string[]).includes(rawStateType)
-                ? (rawStateType as StateUpdatePayload['stateType'])
-                : 'custom';
-            const ev = emit(
-              createAgentEvent<AgentEvent>(
-                AgentEventType.STATE_UPDATE,
-                agentId,
-                { stateType, data: raw.data },
-                meta,
-              ),
-            );
-            if (ev) yield ev;
-            return;
-          }
           default:
             if (debug) console.log('[custom payload ignored]', raw);
             return;
@@ -713,24 +667,6 @@ export class DeerFlowClient {
 
         for (const nodeName of Object.keys(payload)) {
           const msgs = payload[nodeName]?.messages;
-
-          if (debug) {
-            const summary = Array.isArray(msgs)
-              ? msgs
-                  .map((m: any) => {
-                    const tt = m?._getType?.() ?? '?';
-                    if (tt === 'ai') {
-                      const tcs = (m?.tool_calls ?? []).map((tc: any) => `${tc.name}#${tc.id}`);
-                      return `ai(tool_calls=[${tcs.join(',')}])`;
-                    }
-                    if (tt === 'tool')
-                      return `tool(id=${m?.tool_call_id},status=${m?.status ?? 'ok'})`;
-                    return tt;
-                  })
-                  .join(', ')
-              : '(no messages)';
-            console.log(`[node update] ${nodeName} → ${summary}`);
-          }
 
           if (!Array.isArray(msgs)) continue;
           for (const msg of msgs) {

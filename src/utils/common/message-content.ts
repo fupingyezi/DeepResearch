@@ -16,12 +16,14 @@ export function extractMessageContentText(content: unknown): string {
   if (Array.isArray(content)) {
     const pieces: string[] = [];
     let pending: string[] = [];
+
     const flush = () => {
       if (pending.length > 0) {
         pieces.push(pending.join(''));
         pending = [];
       }
     };
+
     for (const block of content) {
       if (typeof block === 'string') {
         pending.push(block);
