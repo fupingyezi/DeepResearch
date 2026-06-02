@@ -21,12 +21,6 @@
  *
  * Response：
  *   text/event-stream，载荷为 ClientAgentEvent。
- *
- * 消息持久化（前端不再写 DB；本路由统一处理）：
- *   - undefined（普通发送）：写 user message + END 时写 assistant message
- *   - recall：定位最近 assistant，截断 → 重生 assistant；保留原 user
- *   - reEditCall：定位最近一对 user+assistant，全部截断 → 写新 user → 重生 assistant
- *   - resume：不写 DB（保留原行为）
  */
 
 import { NextRequest } from 'next/server';
@@ -50,11 +44,9 @@ import {
   type ChatSessionRecord,
   type SavedFileMetadata,
 } from '../../conversations/_service';
-import { AssistantPartsCollector } from './_parts-collector';
+import { AssistantPartsCollector } from '@/utils/chat/assistant-parts-collector';
 
-// ============================================================================
 // 协议类型
-// ============================================================================
 
 type TextBlock = { type: 'text'; text: string };
 type FileBlock = { type: 'file'; fileId: string };
@@ -72,9 +64,7 @@ interface ChatStreamBody {
   operation?: 'resume' | 'recall' | 'reEditCall';
 }
 
-// ============================================================================
 // 工具
-// ============================================================================
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
@@ -156,9 +146,13 @@ function contentsToUserParts(
   return parts;
 }
 
-// ============================================================================
 // 路由实现
-// ============================================================================
+
+function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() <= b.getTime() ? a : b;
+}
 
 export async function POST(request: NextRequest) {
   const user_id = pickUserId(request);
@@ -388,10 +382,4 @@ export async function POST(request: NextRequest) {
       'X-Thread-Id': resolvedThreadId,
     },
   });
-}
-
-function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  return a.getTime() <= b.getTime() ? a : b;
 }

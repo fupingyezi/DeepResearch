@@ -267,7 +267,7 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 
 **文件：** `src/deerflow-harness/types/agent-event.ts`
 
-框架内部使用，包含 20+ 个枚举值（`LIFECYCLE`、`NODE_ENTER`、`NODE_EXIT`、`LLM_STREAM`、`LLM_COMPLETE`、`TOOL_CALL_START`、`TOOL_CALL_RESULT`、`STATE_UPDATE`、`HUMAN_INTERRUPT`、`TASK_STARTED`、`TASK_RUNNING`、`TASK_COMPLETED`、`TASK_FAILED`、`TASK_CANCELLED`、`TASK_TIMED_OUT`、`ERROR` 等）。
+框架内部使用，包含 20+ 个枚举值（`LIFECYCLE`、`NODE_ENTER`、`NODE_EXIT`、`LLM_STREAM`、`LLM_COMPLETE`、`TOOL_CALL_START`、`TOOL_CALL_RESULT`、`HUMAN_INTERRUPT`、`TASK_STARTED`、`TASK_RUNNING`、`TASK_COMPLETED`、`TASK_FAILED`、`TASK_CANCELLED`、`TASK_TIMED_OUT`、`ERROR` 等）。
 
 #### 客户端事件（ClientAgentEvent）
 
@@ -281,7 +281,6 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 | `stream_chunk`    | `{ text, reasoning? }`                          | LLM 增量文本                |
 | `tool_call`       | `{ toolCallId, toolName, arguments? }`          | 工具调用开始                |
 | `tool_result`     | `{ toolCallId, toolName, result, success }`     | 工具调用结果                |
-| `state_update`    | `{ stateType, data }`                           | DeepResearch 状态变更       |
 | `task_progress`   | `{ taskId, status, message?, result?, error? }` | 折叠 6 种 task\_\* 内部事件 |
 | `human_interrupt` | `{ question, details }`                         | 等待人工决策                |
 | `error`           | `{ errorCode, errorMessage, recoverable }`      | 执行错误                    |
@@ -290,12 +289,6 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 
 **过滤边界：** `src/deerflow-harness/runtime/sse/to-client-event.ts`  
 内部事件 → 客户端事件的映射在此完成；不在白名单内的内部事件在此被 drop，不会泄露给前端。
-
-`StateUpdatePayload.stateType` 枚举：
-
-```typescript
-'simple_analysis' | 'tasks_initial' | 'task_update' | 'report' | 'research_target' | 'custom';
-```
 
 ---
 
@@ -556,26 +549,6 @@ CREATE TABLE runs (
 
 所有 setter 均为幂等（条件更新），最小化 re-render。
 
-#### deepResearchProcessStore
-
-管理 DeepResearch 全流程状态（使用 Immer 做不可变更新）：
-
-- 进程状态：`'notCall' → 'initial' → 'processing' → 'end' | 'interrupt'`
-- `tasks[]`：研究任务列表（支持 `updateTasks()` 按 id 进行增量 upsert）
-- `searchResults[]`：任务搜索结果
-- `report: string`：最终报告
-- `interruptRequest`：中断请求信息
-
-`STATE_UPDATE` 事件的 `stateType` 与 store 操作对应关系：
-
-| stateType         | 触发动作        |
-| ----------------- | --------------- |
-| `tasks_initial`   | 初始化任务列表  |
-| `task_update`     | upsert 单个任务 |
-| `report`          | 设置报告内容    |
-| `simple_analysis` | 更新分析结果    |
-| `research_target` | 设置研究目标    |
-
 #### chatSelectStore
 
 管理 Agent 模式选择：
@@ -605,8 +578,6 @@ useAgentEvent() hook / useAgentEventListener()
     ↓
 组件更新（ChatMessage、DeepResearch 面板等）
 ```
-
-DeepResearch 模式下通过 `chat-with-deep-research.ts` 发起请求，并监听 `STATE_UPDATE` 和 `TASK_PROGRESS` 事件驱动 `deepResearchProcessStore` 更新。
 
 ---
 
@@ -670,14 +641,6 @@ MW_TRACE=1 pnpm dev
 
 ```
 [agent] tools bound to LLM (3): search_web, task, ask_clarification
-```
-
-### 查看 node 更新（调试流）
-
-非 production 环境下，`DeerFlowClient.stream()` 会自动打印每个 LangGraph node update：
-
-```
-[node update] agent → ai(tool_calls=[search_web#call_xxx])
 ```
 
 ### 手动测试 API

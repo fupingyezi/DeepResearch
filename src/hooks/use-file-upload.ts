@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import apiClient from '@/utils/request/api';
@@ -6,24 +8,34 @@ import { formatFileSize, getFileIcon } from '@/utils/files/file-info-handler';
 import { useFileUploadStore } from '@/store';
 
 export interface UseFileUploadOptions {
-  maxFileSizeMB?: number; // 默认 10 MB
+  /** 单文件大小上限（MB），默认 10 */
+  maxFileSizeMB?: number;
 }
 
 const DEFAULT_MAX_FILE_SIZE_MB = 10;
+
+/**
+ * 支持的文件 MIME 白名单。文件名兜底通过 .md / .txt 后缀匹配。
+ */
 const SUPPORTED_TYPES = [
   'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/markdown',
   'text/plain',
   'text/x-markdown',
 ];
 
+/**
+ * useFileUpload
+ *
+ * 处理文件选择 → 上传 → 解析 → 进度状态维护 → 删除整链路。
+ * 同时把成功上传的文件元信息推入 useFileUploadStore，供下游消费。
+ */
 const useFileUpload = (options: UseFileUploadOptions = {}) => {
   const { maxFileSizeMB = DEFAULT_MAX_FILE_SIZE_MB } = options;
   const [localUploadedFiles, setLocalUploadedFiles] = useState<UploadedFile[]>([]);
   const { addUploadedFile, removeUploadedFile } = useFileUploadStore();
 
-  // 校验单个文件
   const validateFile = (file: File): boolean => {
     const isTypeSupported = SUPPORTED_TYPES.includes(file.type) || /\.(md|txt)$/i.test(file.name);
     if (!isTypeSupported) {
@@ -40,7 +52,6 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
     return true;
   };
 
-  // 解析并上传单个文件
   const parseFile = async (fileId: string, file: File) => {
     setLocalUploadedFiles((prev) =>
       prev.map((f) => (f.id === fileId ? { ...f, parsedStatus: 'parsing' } : f)),
@@ -72,15 +83,16 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
         content: result.content,
         error: result.error,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Parse failed:', error);
+      const errMessage = error instanceof Error ? error.message : '解析失败';
       setLocalUploadedFiles((prev) =>
         prev.map((f) =>
           f.id === fileId
             ? {
                 ...f,
                 parsedStatus: 'failed',
-                error: error.message || '解析失败',
+                error: errMessage,
               }
             : f,
         ),
@@ -88,13 +100,11 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
     }
   };
 
-  // 处理文件选择
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
     const validFiles: { id: string; file: File }[] = [];
 
-    // 先校验并生成 pending 状态
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!validateFile(file)) continue;
@@ -112,13 +122,11 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
       ]);
     }
 
-    // 逐个上传
     for (const { id, file } of validFiles) {
       await parseFile(id, file);
     }
   };
 
-  // 删除文件
   const removeFile = async (id: string) => {
     setLocalUploadedFiles((prev) => prev.filter((f) => f.id !== id));
     removeUploadedFile(id);
@@ -140,7 +148,7 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
     handleFiles,
     removeFile,
     clearFiles: () => setLocalUploadedFiles([]),
-    getFileIcon, // 方便外部使用图标
+    getFileIcon,
   };
 };
 

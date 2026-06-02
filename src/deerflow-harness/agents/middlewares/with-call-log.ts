@@ -13,7 +13,9 @@ import type { AgentMiddleware } from 'langchain';
  * 2. 仅装饰真实存在的 hook —— 占位中间件没有任何 hook，不会产出噪声。
  * 3. wrapModelCall / wrapToolCall 的 handler 也会被包一层（before-handler / after-handler），
  *    便于看清"进入了哪几层 wrap、handler 真正耗时在哪一层"。
- * 4. 通过 env `MW_TRACE` 关闭（设为 "0"/"false"），默认开启。
+ * 4. 通过 env `MW_TRACE` 启用（设为 "1"/"true"），默认关闭。
+ *    AI 输出快时一次回答会触发数十~上百条 hook enter/exit 日志，
+ *    默认关闭避免控制台被刷屏；排查时再显式打开。
  * 5. 不改变任何运行时契约：返回值、抛出异常、引用透明性都与原 hook 一致。
  *
  * 大对象不会被序列化进日志，避免 token / 性能开销；只打 hook 名 + 耗时 + 错误摘要。
@@ -33,8 +35,8 @@ export interface WithCallLogOptions {
   logger?: Pick<Console, 'info' | 'error'>;
   /**
    * 是否启用。默认读取 env MW_TRACE：
-   *  - 未设置 / "1" / "true" → 启用
-   *  - "0" / "false"          → 关闭，直接返回原中间件
+   *  - "1" / "true"          → 启用
+   *  - 未设置 / "0" / "false" → 关闭，直接返回原中间件
    */
   enabled?: boolean;
   /** 每条日志的前缀，默认 "[mw:<name>]" */
@@ -43,9 +45,9 @@ export interface WithCallLogOptions {
 
 function isTraceEnabledByEnv(): boolean {
   const v = process.env.MW_TRACE;
-  if (v == null) return true;
+  if (v == null) return false;
   const s = v.trim().toLowerCase();
-  return !(s === '0' || s === 'false' || s === 'off' || s === 'no');
+  return s === '1' || s === 'true' || s === 'on' || s === 'yes';
 }
 
 /** 计时器：返回毫秒级耗时。 */

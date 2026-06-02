@@ -1,91 +1,102 @@
 # mini-DeepResearch
 
-一个基于 **Next.js + LangGraph** 实现的多智能体深度研究助手。
-参考 DeerFlow 2.0 架构，前端提供 DeerFlow 风格的浅色精致 UI（聊天 + 思考时间线 + Artifact 浮窗产物面板），后端通过自研 `deerflow-harness` 框架编排 Planner / Researcher / Reporter / Coder 等子智能体协同完成复杂研究任务。
+一个基于 **Next.js 14 + LangChain / LangGraph 1.x** 构建的多智能体深度研究助手。
+
+参考 **deer-flow 2.0** 的单一 lead-agent 形态：lead-agent 永远具备 subagent 能力（`task` 工具 + general-purpose subagent），由模型自主判断"简单直接答 / 复杂分解为并行 subagent"，不再依赖前端档位切换。前端提供聊天 + 思考时间线 + Artifact 浮窗产物面板的精致 UI。
 
 ## ✨ 主要特性
 
-- 🤖 **多智能体协同（DeerFlow Harness）**：Planner 拆解任务 → Researcher 并发检索 → Reporter 汇总报告 → Coder 处理结构化数据，全流程通过 LangGraph + checkpoint 持久化。
-- 🧠 **可视化思考时间线**：聊天气泡内实时展示 reasoning / tool_call / subagent_task 折叠卡片，支持思考过程、工具入参、搜索结果、子任务摘要分级查看。
-- 📄 **Artifact 浮窗产物面板**：研究报告自动收进右侧浮窗卡片（DeerFlow 风格的"分隔区+悬浮卡片"层次），气泡内仅保留入口与任务总结，避免长报告淹没对话。
-- 🔍 **多模式对话**：basic 普通聊天 / search 联网搜索 / deep_research 深度研究，统一走 `/api/chat/v2`。
-- 📁 **多格式文件上传**：PDF、Word、图片等，自动入 MinIO 并参与上下文。
+- 🤖 **单一 lead-agent，自主决策**：lead-agent 内置 `task("general-purpose", ...)` 能力，由模型自行判断是否拆解任务并调度 subagent 并行检索/汇总，无需前端切换"普通 / 联网 / 深度研究"模式。
+- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按 `agentName + userId` 分文件持久化到 `.memory/`。
+- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 9 种 `ClientAgentEvent`。
+- 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父子 subagent 共用 thread checkpoint）；Redis 缓存；MinIO 存上传文件。
+- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 7 层中间件（Qwen 工具调用恢复、ToolError、Memory、SubagentLimit、LoopDetection、Clarification 等），支持 `@Next` / `@Prev` 装饰器自定义插入锚点。
+- 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
+- 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
-- 🎨 **浅色精致 UI**：青绿主色 + 卡片化布局 + 细滚动条 + 渐变按钮，整体观感对齐 DeerFlow 2.0。
-- 💾 **会话持久化**：PostgreSQL 存对话与 LangGraph checkpoint，Redis 做缓存与状态。
 
 ## 🛠️ 技术栈
 
-### 前端
-- **Next.js 14**（App Router）+ **React 18** + **TypeScript**
-- **Tailwind CSS v4**（`@theme inline` token 主题）
-- **Ant Design** + **Lucide / @ant-design/icons**
-- **Zustand**（轻量状态管理，按 store 分片）
-- **react-markdown** + **remark-gfm/math** + **rehype-katex** + **react-syntax-highlighter**
-
-### Agent / AI
-- **LangChain 1.x** + **LangGraph 1.x**（多智能体编排 + checkpoint）
-- **@langchain/langgraph-checkpoint-postgres**（PostgreSQL checkpoint）
-- **@langchain/openai**（OpenAI 兼容协议，支持 OpenAI / 千问 / 星火等）
-- **Tavily**（联网搜索）
-- 自研 **deerflow-harness**：Planner / Researcher / Reporter / Coder 子智能体框架
-
-### 存储
-- **PostgreSQL**：会话、消息、checkpoint
-- **Redis**：缓存与会话状态
-- **MinIO**：上传文件对象存储
+| 层级       | 技术                                                                              |
+| ---------- | --------------------------------------------------------------------------------- |
+| 前端       | Next.js 14（App Router + Turbopack）、React 18、TypeScript、Ant Design 5、Zustand |
+| 样式       | Tailwind CSS v4（`@theme inline` token）、`@tailwindcss/typography`               |
+| Markdown   | react-markdown + remark-gfm/math + rehype-katex + react-syntax-highlighter        |
+| Agent / AI | LangChain 1.x、LangGraph 1.x、`@langchain/langgraph-checkpoint-postgres`          |
+| 模型       | `@langchain/openai`（OpenAI 兼容协议，支持 OpenAI / Qwen / Spark / DeepSeek 等）  |
+| 检索       | Tavily（`@tavily/core`）                                                          |
+| 存储       | PostgreSQL、Redis、MinIO                                                          |
 
 ## 📁 项目结构
 
 ```
-├── src/
-│   ├── app/                       # Next.js App Router
-│   │   ├── api/
-│   │   │   ├── chat/v2/           # 统一聊天入口（basic / search / deep_research）
-│   │   │   ├── conversations/     # 会话/消息/历史 API
-│   │   │   └── files/             # 文件上传 / 删除 API
-│   │   ├── globals.css            # 全局样式 + 浅色主题 token + prose/滚动条微调
-│   │   ├── layout.tsx             # 根布局（Sider + 主体）
-│   │   └── page.tsx               # 主页（聊天区 + Artifact 浮窗面板）
-│   │
-│   ├── components/                # UI 组件（小写-横线命名）
-│   │   ├── chat-window/           # 聊天容器、消息列表、气泡、思考时间线、输入框
-│   │   ├── markdown/              # CustomMarkdown（prose 排版 + 代码块 + 数学公式）
-│   │   ├── message-tool-bar/      # 消息悬浮工具条（复制/编辑/下载）
-│   │   ├── model-selector/        # 模型切换
-│   │   ├── files/                 # 文件上传/预览
-│   │   ├── process/               # ArtifactPanel 浮窗产物面板
-│   │   └── sider/                 # 左侧会话侧边栏
-│   │
-│   ├── deerflow-harness/          # ⭐ 多智能体编排核心
-│   │   ├── agents/                # Planner / Researcher / Reporter / Coder 等
-│   │   ├── subagents/             # 子代理调度与上下文隔离
-│   │   ├── runtime/               # 运行时（事件流、状态机、中断恢复）
-│   │   ├── tools/                 # 工具定义（搜索、抓取、代码执行等）
-│   │   ├── persistence/           # checkpoint 持久化
-│   │   ├── models/                # 模型适配
-│   │   ├── mcp/                   # MCP 协议接入
-│   │   ├── sandbox/ skills/ config/
-│   │   ├── types/                 # 共享类型（subagent / event / artifact）
-│   │   ├── client.ts              # Harness 入口
-│   │   └── index.ts
-│   │
-│   ├── runtime/                   # 前端运行时（事件解析、流式状态机）
-│   ├── store/                     # Zustand 切片（会话、消息、文件、模型、Artifact 面板）
-│   ├── lib/                       # 基础设施（db / cache / storage / llm / stream）
-│   ├── types/                     # 全局类型
-│   ├── utils/
-│   │   ├── chat/                  # 流处理、最终消息提取、消息归一化
-│   │   ├── files/                 # 文件解析
-│   │   ├── hooks/                 # 自定义 React hooks
-│   │   └── request/               # API 请求封装
-│   └── config/                    # 应用配置
+src/
+├── app/                                # Next.js App Router
+│   ├── api/
+│   │   ├── v3/chat/[threadId]/         # ⭐ 主聊天入口（SSE 流）
+│   │   ├── threads/                    # 线程 CRUD / runs 列表
+│   │   └── files/                      # 文件上传 / 删除
+│   ├── globals.css                     # 全局样式 + 主题 token
+│   ├── layout.tsx                      # 根布局（Sider + 主体）
+│   └── page.tsx                        # 主页（聊天 + Artifact 浮窗）
 │
-├── public/                        # 静态资源（svg 图标）
-├── docker-compose.yaml            # PostgreSQL + Redis + MinIO 一键启动
-├── next.config.js / eslint.config.mjs / postcss.config.mjs
-├── package.json
-└── tsconfig.json
+├── components/                         # UI 组件（kebab-case）
+│   ├── chat-window/                    # 聊天容器、消息列表、气泡、思考时间线、输入框
+│   ├── markdown/                       # CustomMarkdown
+│   ├── message-tool-bar/               # 复制 / 编辑 / 下载
+│   ├── model-selector/                 # 模型切换
+│   ├── files/                          # 文件上传 / 预览
+│   ├── process/                        # Artifact 浮窗产物面板
+│   └── sider/                          # 左侧会话侧边栏
+│
+├── deerflow-harness/                   # ⭐ 多智能体编排核心
+│   ├── client.ts                       # DeerFlowClient：Agent 缓存 + LangGraph 流式调用
+│   ├── agents/                         # Agent 工厂、中间件、记忆、特性装配
+│   │   ├── factory.ts                  # createBaseAgent + assembleFromFeatures
+│   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
+│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ FileMemoryStorage
+│   ├── subagents/                      # SubagentExecutor、注册表、general-purpose 内置
+│   ├── runtime/                        # ThreadService、StreamBridge、SSE、Checkpointer
+│   │   ├── service.ts                  # ThreadService（fire-and-forget 提交 + 状态收敛）
+│   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（缓冲回放）
+│   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
+│   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
+│   │   └── context.ts                  # AsyncLocalStorage 上下文传播
+│   ├── persistence/                    # ThreadMetaStore + RunStore（PostgreSQL）
+│   ├── tools/                          # 内置工具（task、search_web 等）
+│   ├── models/                         # 模型预设（MODEL_PRESETS）
+│   ├── mcp/ sandbox/ skills/ config/   # 待扩展能力
+│   └── types/                          # AgentEvent 等共享类型
+│
+├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
+│   ├── client/                         # sse-frame-parser、event-bus
+│   ├── context/                        # AgentEventContext + hooks
+│   └── protocol/                       # ClientAgentEvent re-export（前后端共享协议）
+│
+├── store/                              # Zustand 切片
+│   ├── conversation-store.ts           # 会话 / 消息 / 流式状态
+│   ├── deep-research-process-store.ts  # 时间线 / 任务进度
+│   ├── file-upload-store.ts            # 文件上传
+│   └── modelStore.ts                   # 模型选择
+│
+├── lib/                                # 基础设施
+│   ├── db/                             # PostgreSQL 连接池
+│   ├── cache/                          # Redis 客户端
+│   ├── storage/                        # MinIO 客户端
+│   └── file-parser.ts                  # PDF / Word 解析
+│
+├── hooks/                              # 自定义 React hooks
+├── utils/
+│   ├── chat/                           # 流处理、parts collector / reducer、最终消息提取
+│   ├── common/                         # message-content 等通用工具
+│   ├── files/                          # 文件相关工具
+│   └── request/                        # API 请求封装
+├── types/                              # 全局类型
+└── config/                             # 应用配置
+
+docker-compose.yaml                     # PostgreSQL + Redis + MinIO 一键启动
+CLAUDE.md                               # 架构与协作指引（详细版）
+project.md                              # AI 协作代码规范
 ```
 
 ## 🚀 快速开始
@@ -94,7 +105,7 @@
 
 - **Node.js 18+**
 - **pnpm**（推荐）
-- **Docker & Docker Compose**（启动 PostgreSQL / Redis / MinIO）
+- **Docker & Docker Compose**
 
 ### 安装依赖
 
@@ -107,16 +118,16 @@ pnpm install
 在项目根目录创建 `.env`：
 
 ```env
-# === 模型 API（任选其一或多个）===
-# OpenAI
+# === 模型 API（OpenAI 兼容协议，任选其一或多个）===
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_API_BASE=https://api.openai.com/v1
 
-# 阿里千问（OpenAI 兼容）
+# 阿里千问（DashScope）
 OPENAI_QWEN_API_KEY=your-qwen-api-key
 OPENAI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+OPENAI_MODEL_NAME=qwen3-235b-a22b   # 默认模型
 
-# 讯飞星火（OpenAI 兼容）
+# 讯飞星火
 OPENAI_SPARK_API_KEY=your-spark-api-key
 OPENAI_SPARK_BASE_URL=https://spark-api-open.xf-yun.com/v1
 
@@ -127,8 +138,6 @@ TAVILY_API_KEY=your-tavily-api-key
 DATABASE_URL=postgresql://yezi:fupingyezi123@localhost:5432/mini-DeepResearch
 
 # === Redis ===
-REDIS_HOST=localhost
-REDIS_PORT=6379
 REDIS_URL=redis://localhost:6379
 
 # === MinIO ===
@@ -140,7 +149,7 @@ MINIO_SECRET_KEY=fupingyezi123
 MINIO_BUCKET=chat-files
 ```
 
-> 注意：`.env` 与 `docker-compose.yaml` 中的账密、端口需保持一致。如需切换默认模型，请到 `src/deerflow-harness/models` 与 `src/lib/llm` 对应处调整。
+> `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设位于 `src/deerflow-harness/models`，可通过请求 `metadata.modelKey` 切换。
 
 ### 启动基础设施
 
@@ -148,7 +157,7 @@ MINIO_BUCKET=chat-files
 docker-compose up -d
 ```
 
-会启动 PostgreSQL / Redis / MinIO 三个服务。
+会启动 PostgreSQL（5432）/ Redis（6379）/ MinIO（9000 数据端口、9001 控制台）。
 
 ### 启动开发服务器
 
@@ -165,34 +174,105 @@ pnpm build
 pnpm start
 ```
 
+## 🔌 主要 API
+
+| 路由                           | 方法       | 说明                                                             |
+| ------------------------------ | ---------- | ---------------------------------------------------------------- |
+| `/api/v3/chat/[threadId]`      | POST       | ⭐ 主聊天入口，SSE 流。响应头 `X-Run-Id` 立即可读，无需等待 body |
+| `/api/threads`                 | POST/GET   | 创建线程；分页列出（`?limit=&offset=&status=`）                  |
+| `/api/threads/[threadId]`      | GET/DELETE | 获取详情（可附带 checkpoint）/ 删除                              |
+| `/api/threads/[threadId]/runs` | GET        | 列出线程下的 run                                                 |
+| `/api/files/upload`            | POST       | multipart 上传，存 MinIO 并解析内容                              |
+| `/api/files/delete`            | DELETE     | 从 MinIO 删除                                                    |
+
+**主聊天请求体：**
+
+```typescript
+interface ChatBody {
+  input: string; // 必填
+  agentType?: string; // 默认 'lead'
+  displayName?: string; // 线程显示名
+  metadata?: {
+    modelKey?: string; // 切换 MODEL_PRESETS 中的模型
+    sessionId?: string;
+    hasFiles?: boolean;
+    uploadedFiles?: unknown[];
+    [k: string]: unknown;
+  };
+}
+```
+
+**SSE 客户端事件白名单（9 种）：**
+
+`start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `human_interrupt` / `error` / `end` / `heartbeat`
+
+协议定义：`src/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/runtime/protocol/client-event.ts` re-export 复用。
+
+## 🧩 架构要点
+
+```
+前端（React/Next.js + Zustand + EventBus）
+        │ HTTP + SSE
+        ▼
+API Routes（/api/v3/chat/[threadId] 等）
+        │
+        ▼
+ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
+   │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用）
+   │ │      └── createBaseAgent + 中间件管线（最多 7 层）
+   │ │             └── 工具：task / search_web / ...
+   │ │                       └── SubagentExecutor（父子共用 checkpoint）
+   │ ├── Checkpointer（PostgreSQL）
+   │ └── Stores（threads / runs）
+        │
+        ▼
+StreamBridge（进程内 EventEmitter 总线）
+        └── ThreadChannel（buffer + 晚订阅回放）→ SSE → 前端
+```
+
+详细设计见 [`CLAUDE.md`](./CLAUDE.md)，包含：
+
+- ThreadService 状态机与不变量（`try / catch / finally` 三段式收敛）
+- Tool Call Chunk 缓冲机制（OpenAI 流式分片按 index 拼接）
+- 中间件组装顺序与 `RuntimeFeatures` 开关
+- Memory LLM 更新流程（含显式 `callbacks: []` 切断回调链的关键约束）
+- ThreadMetaStore / RunStore 的 PG schema
+
 ## 📖 使用指南
 
-### 基础聊天 / 联网搜索 / 深度研究
+### 对话
 
-- 顶部模型选择器切换模型；输入框右侧的工具按钮切换 **basic / search / deep_research** 模式。
-- 深度研究模式会触发 Planner → Researcher → Reporter 全流程，气泡内可实时看到子任务规划与每一步检索的搜索结果。
-- 研究产出的完整报告自动收进右侧 **Artifact 浮窗面板**，气泡内只保留入口卡片 + 任务总结，点击入口即可查看完整 Markdown 报告。
+直接在输入框发送消息即可。lead-agent 会自主判断：
+
+- **简单问题** → 直接回答，可能不调用任何工具
+- **需要联网** → 自动调用 `search_web`
+- **复杂研究** → 通过 `task("general-purpose", ...)` 启动一个或多个 subagent 并行检索，最终汇总报告
+
+研究产出的完整报告自动收进右侧 **Artifact 浮窗面板**，气泡内仅保留入口卡片。
 
 ### 思考时间线
 
-每条 AI 回复内嵌一个折叠时间线卡片：
+每条 AI 回复内嵌折叠时间线：
 
 - 🟡 **思考**（reasoning）—— 模型规划文本
-- 🔵 **工具调用**（tool_call）—— 入参 / 错误 / 结果，搜索结果列表化展示
-- 🟣 **子任务**（subagent_task）—— 子代理描述、步骤数、结构化摘要
+- 🔵 **工具调用**（tool_call / tool_result）—— 入参 / 错误 / 结果，搜索结果列表化
+- 🟣 **任务进度**（task_progress）—— subagent 执行的 6 种状态：started / running / completed / failed / cancelled / timed_out
 
-所有项默认折叠，可逐项展开排查；JSON 与搜索结果自带最大高度与细滚动条，不会撑破气泡。
+JSON 与搜索结果带最大高度与细滚动条，不会撑破气泡。
 
 ### 文件上传
 
-输入框左侧的回形针图标支持上传 PDF、Word、图片等，文件解析后参与本轮对话上下文。
+输入框左侧回形针图标支持上传 PDF、Word、图片，文件解析后参与本轮对话上下文。
 
-## 🎨 UI 设计要点（DeerFlow 2.0 风格）
+### 长期记忆
 
-- **浅色基调** + **青绿主色**（teal-500/600）+ 灰阶层次。
-- **三栏弹性布局**：左侧固定 220px session 栏 / 中间限宽 880px 居中聊天区 / 右侧 440~680px 浮窗 Artifact 面板。
-- **浮窗卡片**：Artifact 面板外层是浅灰底+左分隔线的"分隔区"，内层是白底圆角双层阴影的"卡片"，与 DeerFlow 2.0 一致的层次感。
-- **细节**：自定义 `scrollbar-slim` 滚动条、prose 长串 break-words 兜底、代码块限宽、聚焦态青绿描边。
+记忆按 `agentName + userId` 分文件存储到 `.memory/`，包含：
+
+- `user.workContext / personalContext / topOfMind`
+- `history.recentMonths / earlierContext / longTermBackground`
+- `facts[]`：带 `category` / `confidence` / `source` 的事实条目
+
+每轮对话由 `MemoryUpdater` 通过 LLM 提取并增量更新（含 JSON 修复、上传内容清洗、置信度过滤、casefold 去重）。
 
 ## 🛠️ 开发流程
 
@@ -206,7 +286,42 @@ pnpm format:check
 
 # 构建
 pnpm build
+
+# 启用中间件调用日志（[mw] 前缀，覆盖整条管线 + task / qwen-recovery / loop-detection）
+MW_TRACE=1 pnpm dev
+
+# 打印完整 AI 输出（text + reasoning），用于排查模型输出截断 / 工具调用 chunk 问题
+DEERFLOW_DEBUG=1 pnpm dev
+# 或仅开 AI 输出日志
+DEERFLOW_DEBUG_AI=1 pnpm dev
+
+# 记忆系统调试日志（MemoryUpdater 的 LLM 调用、JSON 修复、增量更新落盘）
+MEMORY_DEBUG=1 pnpm dev
 ```
+
+其它运行期可调环境变量：
+
+- `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认无上限）
+- `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
+
+## 🧭 协作规范
+
+代码风格、注释规范、命名约定、禁用项等详见 [`project.md`](./project.md)。要点：
+
+- 持续高速迭代中，暂不维护任何兼容层，注释里出现 `legacy` / `deprecated` / `兼容` / `旧版` 等字眼必须连同代码一起删除
+- `as unknown as T` 必须有解释性注释
+- 业务缩写必须改全名（`tc → toolCall`、`cfg → config`、`msg → message` 等）
+- 文件名一律 kebab-case
+- 不可破坏的契约：SSE `ClientAgentEvent` 协议、API 路由、PG schema、Zustand store 字段、LangGraph runtime 配置 key
+
+## ⚠️ 已知限制
+
+1. `resume()` 尚未实现，调用直接抛异常（interrupt/resume 工作流待完成）
+2. StreamBridge 为进程内总线，多实例水平扩展需替换为 Redis pub/sub
+3. ThreadChannel buffer 无上限，超长运行的线程可能积累大量事件
+4. 单次请求只能使用一个模型
+5. `x-user-id` 仅用于数据过滤，无真正鉴权机制
+6. 项目目前无单元测试
 
 ## 📝 License
 

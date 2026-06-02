@@ -217,13 +217,15 @@ export const qwenToolCallRecoveryMiddleware = createMiddleware({
       const structured = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       const rawList = (msg.additional_kwargs?.tool_calls ?? []) as RawToolCall[];
 
-      console.log('[QwenRecovery] model out', {
-        contentLen: typeof msg.content === 'string' ? msg.content.length : -1,
-        structuredCount: structured.length,
-        rawCount: Array.isArray(rawList) ? rawList.length : 0,
-        rawSample: Array.isArray(rawList) ? rawList[0] : undefined,
-        addKwKeys: msg.additional_kwargs ? Object.keys(msg.additional_kwargs) : [],
-      });
+      if (process.env.MW_TRACE === '1' || process.env.MW_TRACE === 'true') {
+        console.log('[QwenRecovery] model out', {
+          contentLen: typeof msg.content === 'string' ? msg.content.length : -1,
+          structuredCount: structured.length,
+          rawCount: Array.isArray(rawList) ? rawList.length : 0,
+          rawSample: Array.isArray(rawList) ? rawList[0] : undefined,
+          addKwKeys: msg.additional_kwargs ? Object.keys(msg.additional_kwargs) : [],
+        });
+      }
 
       if (structured.length === 0 && Array.isArray(rawList) && rawList.length > 0) {
         const recovered: NormalizedToolCall[] = rawList

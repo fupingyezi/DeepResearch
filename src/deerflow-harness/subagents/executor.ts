@@ -88,20 +88,20 @@ class ToolCallTracker {
    */
   upsertFromFinal(toolCalls: NonNullable<RawMessageChunk['tool_calls']>): ToolCallAcc[] {
     const out: ToolCallAcc[] = [];
-    for (const tc of toolCalls) {
-      if (!tc?.id) continue;
-      let acc = this.accsByToolCallId.get(tc.id);
+    for (const toolCall of toolCalls) {
+      if (!toolCall?.id) continue;
+      let acc = this.accsByToolCallId.get(toolCall.id);
       if (!acc) {
         acc = {
-          toolCallId: tc.id,
-          toolName: tc.name ?? '',
-          argsBuffer: stringifyToolArgs(tc.args),
+          toolCallId: toolCall.id,
+          toolName: toolCall.name ?? '',
+          argsBuffer: stringifyToolArgs(toolCall.args),
           startEmitted: false,
         };
-        this.accsByToolCallId.set(tc.id, acc);
+        this.accsByToolCallId.set(toolCall.id, acc);
       } else {
-        if (!acc.toolName && tc.name) acc.toolName = tc.name;
-        const finalArgs = stringifyToolArgs(tc.args);
+        if (!acc.toolName && toolCall.name) acc.toolName = toolCall.name;
+        const finalArgs = stringifyToolArgs(toolCall.args);
         if (finalArgs.length > 0) acc.argsBuffer = finalArgs;
       }
       out.push(acc);
@@ -132,6 +132,178 @@ class ToolCallTracker {
     if (!isCompleteArgs(acc.argsBuffer)) return false;
     acc.startEmitted = true;
     return true;
+  }
+}
+
+/**
+ * 序列化 LangChain message chunk 为体积可控的 plain object。
+ *
+ * 历史版本会把整个 message（含原始 tool_call_chunks、additional_kwargs）
+ * 全部 dump，导致单帧体积 100KB+，前端 SSE 解析卡顿、表现像"已完成还在转"。
+ * 新版只保留前端真正需要的：text + tool_calls 摘要。
+ */
+function slimSerializeMessage(message: unknown): Record<string, unknown> {
+  if (!message || typeof message !== 'object')
+    return { type: 'unknown', text: String(message ?? '') };
+  const messageObj = message as {
+    content?: unknown;
+    tool_calls?: unknown;
+    _getType?: () => string;
+    type?: unknown;
+  };
+  const content = messageObj.content;
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((c) => {
+              if (typeof c === 'string') return c;
+              if (c && typeof c === 'object') {
+                const t = (c as { text?: unknown }).text;
+                return typeof t === 'string' ? t : '';
+              }
+              return '';
+            })
+            .join('')
+        : '';
+  const toolCallsRaw = messageObj.tool_calls;
+  const toolCalls = Array.isArray(toolCallsRaw)
+    ? toolCallsRaw.map((toolCall) => {
+        const tcObj = toolCall as { id?: unknown; name?: unknown; args?: unknown };
+        return {
+          id: tcObj?.id,
+          name: tcObj?.name,
+          argKeys:
+            tcObj?.args && typeof tcObj.args === 'object'
+              ? Object.keys(tcObj.args as Record<string, unknown>).slice(0, 8)
+              : undefined,
+        };
+      })
+    : undefined;
+  return {
+    type: messageObj?._getType?.() ?? messageObj.type ?? 'ai',
+    text,
+    toolCalls,
+  };
+}
+
+function safeJsonStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 把 tool_call.args 序列化成字符串（与 OpenAI 协议对齐）：
+ * - 字符串：原样返回
+ * - 对象/数组：JSON.stringify
+ * - 其它：空串
+ */
+function stringifyToolArgs(args: unknown): string {
+  if (typeof args === 'string') return args;
+  if (args && typeof args === 'object') return safeJsonStringify(args);
+  return '';
+}
+
+/**
+ * 判定 argsBuffer 是否「完整可用」：
+ * - 空串 / `'{}'` / 空对象 / 仅空白 → 不完整
+ * - 可被 JSON.parse 成非空对象 / 非空字符串 → 完整
+ */
+function isCompleteArgs(buffer: string): boolean {
+  if (!buffer) return false;
+  const trimmed = buffer.trim();
+  if (trimmed.length === 0 || trimmed === '{}' || trimmed === '[]') return false;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed === null || parsed === undefined) return false;
+    if (typeof parsed === 'object') return Object.keys(parsed).length > 0;
+    if (typeof parsed === 'string') return parsed.length > 0;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 项目内的 web 搜索工具命名集合（与前端 timeline 解析口径保持一致） */
+const SEARCH_WEB_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'search_web_tool',
+  'web_search',
+  'tavily_search',
+]);
+
+function isSearchWebToolName(name: string | undefined): boolean {
+  return !!name && SEARCH_WEB_TOOL_NAMES.has(name);
+}
+
+/**
+ * 累积 subagent 内部 web 搜索工具的来源列表，用于 task_completed 兜底回填。
+ *
+ * 解析口径：
+ * - search_web_tool 输出形如 `结果 N: 标题: xxx 来源: <URL> 内容: ... ---`
+ * - 字符串结果 / 对象结果 / 数组结果均尝试解析；按 url 去重，限制 50 条。
+ */
+class SearchSourcesAccumulator {
+  private readonly map = new Map<string, { title: string; url: string }>();
+  private static readonly LIMIT = 50;
+  private static readonly TEXT_PATTERN = /标题:\s*([^\n]+?)\s*\n\s*来源:\s*(https?:\/\/[^\s]+)/g;
+
+  ingest(raw: unknown): void {
+    if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
+    if (typeof raw === 'string') {
+      this.ingestString(raw);
+      return;
+    }
+    if (Array.isArray(raw)) {
+      for (const item of raw) this.ingestObject(item);
+      return;
+    }
+    if (raw && typeof raw === 'object') {
+      const obj = raw as { results?: unknown };
+      if (Array.isArray(obj.results)) {
+        for (const item of obj.results) this.ingestObject(item);
+      } else {
+        this.ingestObject(raw);
+      }
+    }
+  }
+
+  private ingestString(text: string): void {
+    let match: RegExpExecArray | null;
+    SearchSourcesAccumulator.TEXT_PATTERN.lastIndex = 0;
+    while ((match = SearchSourcesAccumulator.TEXT_PATTERN.exec(text)) !== null) {
+      this.add(match[1].trim(), match[2].trim());
+      if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
+    }
+  }
+
+  private ingestObject(item: unknown): void {
+    if (!item || typeof item !== 'object') return;
+    const obj = item as { title?: unknown; url?: unknown; sourceUrl?: unknown; link?: unknown };
+    const url =
+      (typeof obj.url === 'string' && obj.url) ||
+      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
+      (typeof obj.link === 'string' && obj.link) ||
+      '';
+    const title = (typeof obj.title === 'string' && obj.title) || url;
+    if (!url || !title) return;
+    this.add(title, url);
+  }
+
+  private add(title: string, url: string): void {
+    if (this.map.has(url)) return;
+    this.map.set(url, { title, url });
+  }
+
+  size(): number {
+    return this.map.size;
+  }
+
+  snapshot(): Array<{ title: string; url: string }> {
+    return [...this.map.values()];
   }
 }
 
@@ -229,7 +401,14 @@ export class SubagentExecutor {
       if (ctxThreadId) {
         streamOpts.configurable = { thread_id: ctxThreadId };
       }
-      const stream = await agent.stream(input as any, streamOpts);
+      // input 形状由 LangGraph ReAct agent 自身的 state schema 决定，但当前 typing
+      // 返回的是 ThreadStateAnnotation 联合（带 sandbox/threadData/uploads 等可选字段）。
+      // 子图入参实际只需要 `messages`，其它字段由 reducer 默认初始化，因此用单层
+      // 结构性 cast 跨过 schema 联合类型 —— 符合 project.md §2.2 外部边界例外。
+      const stream = await agent.stream(
+        input as unknown as Parameters<typeof agent.stream>[0],
+        streamOpts,
+      );
 
       // 跨 chunk 状态
       const tracker = new ToolCallTracker();
@@ -413,154 +592,5 @@ export class SubagentExecutor {
       clearTimeout(timer);
       parentSignal?.removeEventListener('abort', onParentAbort);
     }
-  }
-}
-
-/**
- * 序列化 LangChain message chunk 为体积可控的 plain object。
- *
- * 历史版本会把整个 message（含原始 tool_call_chunks、additional_kwargs）
- * 全部 dump，导致单帧体积 100KB+，前端 SSE 解析卡顿、表现像"已完成还在转"。
- * 新版只保留前端真正需要的：text + tool_calls 摘要。
- */
-function slimSerializeMessage(msg: any): Record<string, any> {
-  if (!msg || typeof msg !== 'object') return { type: 'unknown', text: String(msg ?? '') };
-  const text =
-    typeof msg.content === 'string'
-      ? msg.content
-      : Array.isArray(msg.content)
-        ? msg.content.map((c: any) => (typeof c === 'string' ? c : (c?.text ?? ''))).join('')
-        : '';
-  const toolCalls = Array.isArray(msg.tool_calls)
-    ? msg.tool_calls.map((tc: any) => ({
-        id: tc?.id,
-        name: tc?.name,
-        argKeys:
-          tc?.args && typeof tc.args === 'object' ? Object.keys(tc.args).slice(0, 8) : undefined,
-      }))
-    : undefined;
-  return {
-    type: msg?._getType?.() ?? msg.type ?? 'ai',
-    text,
-    toolCalls,
-  };
-}
-
-function safeJsonStringify(v: unknown): string {
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return '';
-  }
-}
-
-/**
- * 把 tool_call.args 序列化成字符串（与 OpenAI 协议对齐）：
- * - 字符串：原样返回
- * - 对象/数组：JSON.stringify
- * - 其它：空串
- */
-function stringifyToolArgs(args: unknown): string {
-  if (typeof args === 'string') return args;
-  if (args && typeof args === 'object') return safeJsonStringify(args);
-  return '';
-}
-
-/**
- * 判定 argsBuffer 是否「完整可用」：
- * - 空串 / `'{}'` / 空对象 / 仅空白 → 不完整
- * - 可被 JSON.parse 成非空对象 / 非空字符串 → 完整
- */
-function isCompleteArgs(buffer: string): boolean {
-  if (!buffer) return false;
-  const trimmed = buffer.trim();
-  if (trimmed.length === 0 || trimmed === '{}' || trimmed === '[]') return false;
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed === null || parsed === undefined) return false;
-    if (typeof parsed === 'object') return Object.keys(parsed).length > 0;
-    if (typeof parsed === 'string') return parsed.length > 0;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 项目内的 web 搜索工具命名集合（与前端 timeline 解析口径保持一致） */
-const SEARCH_WEB_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'search_web_tool',
-  'web_search',
-  'tavily_search',
-]);
-
-function isSearchWebToolName(name: string | undefined): boolean {
-  return !!name && SEARCH_WEB_TOOL_NAMES.has(name);
-}
-
-/**
- * 累积 subagent 内部 web 搜索工具的来源列表，用于 task_completed 兜底回填。
- *
- * 解析口径：
- * - search_web_tool 输出形如 `结果 N: 标题: xxx 来源: <URL> 内容: ... ---`
- * - 字符串结果 / 对象结果 / 数组结果均尝试解析；按 url 去重，限制 50 条。
- */
-class SearchSourcesAccumulator {
-  private readonly map = new Map<string, { title: string; url: string }>();
-  private static readonly LIMIT = 50;
-  private static readonly TEXT_PATTERN = /标题:\s*([^\n]+?)\s*\n\s*来源:\s*(https?:\/\/[^\s]+)/g;
-
-  ingest(raw: unknown): void {
-    if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
-    if (typeof raw === 'string') {
-      this.ingestString(raw);
-      return;
-    }
-    if (Array.isArray(raw)) {
-      for (const item of raw) this.ingestObject(item);
-      return;
-    }
-    if (raw && typeof raw === 'object') {
-      const obj = raw as { results?: unknown };
-      if (Array.isArray(obj.results)) {
-        for (const item of obj.results) this.ingestObject(item);
-      } else {
-        this.ingestObject(raw);
-      }
-    }
-  }
-
-  private ingestString(text: string): void {
-    let match: RegExpExecArray | null;
-    SearchSourcesAccumulator.TEXT_PATTERN.lastIndex = 0;
-    while ((match = SearchSourcesAccumulator.TEXT_PATTERN.exec(text)) !== null) {
-      this.add(match[1].trim(), match[2].trim());
-      if (this.map.size >= SearchSourcesAccumulator.LIMIT) return;
-    }
-  }
-
-  private ingestObject(item: unknown): void {
-    if (!item || typeof item !== 'object') return;
-    const obj = item as { title?: unknown; url?: unknown; sourceUrl?: unknown; link?: unknown };
-    const url =
-      (typeof obj.url === 'string' && obj.url) ||
-      (typeof obj.sourceUrl === 'string' && obj.sourceUrl) ||
-      (typeof obj.link === 'string' && obj.link) ||
-      '';
-    const title = (typeof obj.title === 'string' && obj.title) || url;
-    if (!url || !title) return;
-    this.add(title, url);
-  }
-
-  private add(title: string, url: string): void {
-    if (this.map.has(url)) return;
-    this.map.set(url, { title, url });
-  }
-
-  size(): number {
-    return this.map.size;
-  }
-
-  snapshot(): Array<{ title: string; url: string }> {
-    return [...this.map.values()];
   }
 }

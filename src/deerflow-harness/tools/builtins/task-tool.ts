@@ -142,7 +142,7 @@ export const taskTool = tool(
     disabled.add('task');
     const tools = inherited.filter((t) => !disabled.has(t.name ?? ''));
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.MW_TRACE === '1' || process.env.MW_TRACE === 'true') {
       console.log(
         `[taskTool] subagent="${config.name}" tools=[${tools
           .map((t) => t.name ?? '?')

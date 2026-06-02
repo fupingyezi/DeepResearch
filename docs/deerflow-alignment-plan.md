@@ -67,8 +67,10 @@ mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assem
 
 ### P1 — 链路断裂 / 半成品
 
-**#2 `state_update` 不转发**
+**~~#2 `state_update` 不转发~~**（已废弃 — 该链路整体移除）
 `client.ts` 的 `handleCustomPayload` 仅处理 `task_*`，对 custom writer 推送的 `state_update` 走 `default` 丢弃（line 511-513）。而 `to-client-event.ts` 的 `STATE_UPDATE` 映射、前端 `applyStateUpdate`、`deep-research-process-store` 均已就绪——**链路只在后端被截断**。
+
+> 决议：经 2026-06 评估，DeepResearch 进度面板（`deepResearchProcessStore`）已下线，`state_update` 通道不再有消费方。链路两端代码（前端 reducer 分支、协议类型/枚举、客户端事件映射、`handleCustomPayload` 'state_update' case）已全部删除。本条不再实施，方案 #2 同步作废。
 
 **#3 interrupt/resume 闭环缺失**
 `client.ts` 的 `stream()` 全程不检测 LangGraph interrupt、从不发 `HUMAN_INTERRUPT`；`ThreadService.resume()` 占位直接抛异常。但前端 `stream-chat-handler.ts` 已实现 `HUMAN_INTERRUPT` 处理与 `operation==='resume'` 分支（`resumeDecision`），`ClarificationMiddleware` 始终启用——**闭环只差后端**。
@@ -96,9 +98,9 @@ mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assem
 
 收益：单次执行（约减半 token/LLM 调用）、断线可回放、行为一致。
 
-### 方案 #2：打通 `state_update`（修复 P1）
+### ~~方案 #2：打通 `state_update`（修复 P1）~~（已废弃）
 
-在 `client.ts` 的 `handleCustomPayload` 增加 `case 'state_update'`：映射为内部 `AgentEvent.STATE_UPDATE`（payload `{ stateType, data }`），经既有 `to-client-event.ts` 透传为客户端 `STATE_UPDATE`。不改协议字段（`project.md` §6 允许增分支）。
+参见上文 P1 #2 决议：链路两端已删除，方案不再实施。
 
 ### 方案 #3：interrupt/resume 闭环（修复 P1）
 

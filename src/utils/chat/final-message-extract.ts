@@ -6,12 +6,6 @@
  *  2) 把符合「研究报告」结构的 markdown 段（H1 标题 + ≥2 个 H2 章节）整段提升为 artifact part。
  *  3) 命中片段一律从原文本块中 strip 掉，避免与 artifact / task_summary 重复展示。
  *
- * 设计参考 deer-flow：最终回答即纯 markdown 报告，**不再使用** `<final_report>` 包装标签。
- *
- * 扫描范围：text part 与 reasoning part。后者必要——lead-agent 在调用并行 task 工具
- * 的 step 中，content 会被分类为 reasoning（参见 client.ts handleAiChunk 的
- * stepHasToolCalls 分支）。
- *
  * task_summary 抽取顺序（多重兜底）：
  *  1) 优先从 text/reasoning 文本中匹配 `<task_summary>...</task_summary>`
  *  2) 若未命中且 artifact 已抽出，则在 artifact markdown 内再扫一次
@@ -19,14 +13,12 @@
  *  3) 仍未命中且本轮存在 ≥1 个 subagent_task part（多 agent 工作流），
  *     从 subagent_task part 派生总结：标题「完成 N 个子任务」+ 每行
  *     `- {description}：{structured.summary | result 首句}`
- *
- * 一致性：前端 stream-chat-handler（END）与后端 _parts-collector（finalize）
- * 调用同一函数，保证实时流式与刷新重载两端结果一致。
  */
 
 import { v4 as uuidv4 } from 'uuid';
 
 import type { MessagePart } from '@/types';
+import { firstSentence } from '@/utils/common';
 
 const TASK_SUMMARY_TAG = /<task_summary>([\s\S]*?)<\/task_summary>/;
 /** 未闭合兜底：模型把 `<task_summary>` 写出但流被截断。 */
@@ -254,12 +246,4 @@ function pickTaskSummaryLine(content: SubagentTaskPart['content']): string {
   }
 
   return '（无产出）';
-}
-
-/** 取首句（中英标点都识别），并截断到 80 字以内防止单行过长 */
-function firstSentence(text: string): string {
-  const stripped = text.replace(/\s+/g, ' ').trim();
-  const match = stripped.match(/^(.+?[。！？!?\.])/);
-  const head = match ? match[1] : stripped;
-  return head.length > 80 ? `${head.slice(0, 80)}…` : head;
 }

@@ -1,8 +1,11 @@
+'use client';
+
 import Image from 'next/image';
-import React, { useState } from 'react';
+import React from 'react';
 import { Tooltip, Popover } from 'antd';
 
 import { MessageToolType, SupportDownloadFileType, MessageToolBarProps } from '@/types';
+import { useDisclosure } from '@/hooks';
 
 const OperatorToTextMap = (op: MessageToolType | SupportDownloadFileType) => {
   switch (op) {
@@ -32,11 +35,11 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
   handleDownloadFiles,
   className,
 }) => {
-  const [isPopoverOpen, setIsPopoverOpen] = useState<boolean>(false);
+  const { isOpen: isPopoverOpen, open: openPopover, close: closePopover } = useDisclosure(false);
 
   const handleToolOperator = (tool: MessageToolType) => {
     if (handleToolAction) {
-      if (tool === 'download' && isPopoverOpen === false) setIsPopoverOpen(true);
+      if (tool === 'download' && !isPopoverOpen) openPopover();
       handleToolAction(tool);
       return;
     }
@@ -45,7 +48,7 @@ const MessageToolBar: React.FC<MessageToolBarProps> = ({
   const handleDownloadFilesOperator = (fileType: SupportDownloadFileType) => {
     if (handleDownloadFiles) {
       handleDownloadFiles(fileType);
-      setIsPopoverOpen(false);
+      closePopover();
       return;
     }
   };

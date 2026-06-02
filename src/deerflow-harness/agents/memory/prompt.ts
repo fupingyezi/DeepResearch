@@ -240,31 +240,21 @@ export function formatMemoryForInjection(
 
 // formatConversationForUpdate
 
+import { extractMessageContentText } from '@/utils/common';
+
 const UPLOAD_BLOCK_RE = /<uploaded_files>[\s\S]*?<\/uploaded_files>\n*/gi;
 
-function getMessageRole(msg: any): string {
-  if (typeof msg?._getType === 'function') return msg._getType();
-  return typeof msg?.type === 'string' ? msg.type : 'unknown';
+function getMessageRole(message: { _getType?: () => string; type?: unknown }): string {
+  if (typeof message?._getType === 'function') return message._getType();
+  return typeof message?.type === 'string' ? message.type : 'unknown';
 }
 
-function extractText(content: any): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const parts: string[] = [];
-    for (const p of content) {
-      if (typeof p === 'string') parts.push(p);
-      else if (p && typeof p === 'object' && typeof p.text === 'string') parts.push(p.text);
-    }
-    return parts.length > 0 ? parts.join(' ') : String(content);
-  }
-  return content == null ? '' : String(content);
-}
-
-export function formatConversationForUpdate(messages: any[]): string {
+export function formatConversationForUpdate(messages: unknown[]): string {
   const lines: string[] = [];
-  for (const msg of messages) {
-    const role = getMessageRole(msg);
-    let content = extractText(msg?.content);
+  for (const message of messages) {
+    const messageObj = message as { _getType?: () => string; type?: unknown; content?: unknown };
+    const role = getMessageRole(messageObj);
+    let content = extractMessageContentText(messageObj?.content);
 
     if (role === 'human') {
       content = content.replace(UPLOAD_BLOCK_RE, '').trim();

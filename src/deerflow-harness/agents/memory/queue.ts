@@ -12,6 +12,16 @@
 import { getMemoryConfig } from './config';
 import { MemoryUpdater } from './updater';
 
+/**
+ * memory 子系统的诊断日志开关。
+ * 默认关闭；排查时设 `MEMORY_DEBUG=1` 打开 queue / storage 的入队、写盘等过程日志。
+ * 错误（console.error / console.warn）始终保留。
+ */
+const memoryDebug = (): boolean => {
+  const v = process.env.MEMORY_DEBUG;
+  return v === '1' || v === 'true';
+};
+
 export interface ConversationContext {
   threadId: string;
   messages: any[];
@@ -37,25 +47,29 @@ export class MemoryUpdateQueue {
   private processing = false;
 
   add(args: AddArgs): void {
-    const cfg = getMemoryConfig();
-    if (!cfg.enabled) return;
+    const config = getMemoryConfig();
+    if (!config.enabled) return;
 
     this.enqueue(args);
     this.resetTimer();
-    console.log(
-      `[memory/queue] update queued for thread ${args.threadId}, queue size: ${this.queue.length}`,
-    );
+    if (memoryDebug()) {
+      console.log(
+        `[memory/queue] update queued for thread ${args.threadId}, queue size: ${this.queue.length}`,
+      );
+    }
   }
 
   addNowait(args: AddArgs): void {
-    const cfg = getMemoryConfig();
-    if (!cfg.enabled) return;
+    const config = getMemoryConfig();
+    if (!config.enabled) return;
 
     this.enqueue(args);
     this.scheduleTimer(0);
-    console.log(
-      `[memory/queue] update queued for immediate processing on thread ${args.threadId}, queue size: ${this.queue.length}`,
-    );
+    if (memoryDebug()) {
+      console.log(
+        `[memory/queue] update queued for immediate processing on thread ${args.threadId}, queue size: ${this.queue.length}`,
+      );
+    }
   }
 
   private enqueue(args: AddArgs): void {
@@ -80,8 +94,8 @@ export class MemoryUpdateQueue {
   }
 
   private resetTimer(): void {
-    const cfg = getMemoryConfig();
-    this.scheduleTimer(cfg.debounceSeconds * 1000);
+    const config = getMemoryConfig();
+    this.scheduleTimer(config.debounceSeconds * 1000);
   }
 
   private scheduleTimer(delayMs: number): void {
@@ -113,7 +127,9 @@ export class MemoryUpdateQueue {
       for (let i = 0; i < contexts.length; i++) {
         const ctx = contexts[i];
         try {
-          console.log(`[memory/queue] updating memory for thread ${ctx.threadId}`);
+          if (memoryDebug()) {
+            console.log(`[memory/queue] updating memory for thread ${ctx.threadId}`);
+          }
           const ok = await updater.updateMemory(ctx.messages, {
             threadId: ctx.threadId,
             agentName: ctx.agentName,
@@ -122,7 +138,9 @@ export class MemoryUpdateQueue {
             reinforcementDetected: ctx.reinforcementDetected,
           });
           if (ok) {
-            console.log(`[memory/queue] memory updated for thread ${ctx.threadId}`);
+            if (memoryDebug()) {
+              console.log(`[memory/queue] memory updated for thread ${ctx.threadId}`);
+            }
           } else {
             console.warn(`[memory/queue] memory update skipped/failed for thread ${ctx.threadId}`);
           }
