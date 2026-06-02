@@ -15,7 +15,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [selectDownloadId, setSelectDownLoadId] = useState<string>('');
 
-  const { onWheel } = useAutoScrollToBottom({
+  const { onScroll, onWheel, onTouchMove } = useAutoScrollToBottom({
     containerRef: messagesContainerRef,
     enabled: shouldAutoScroll,
     setEnabled: setShouldAutoScroll,
@@ -42,6 +42,8 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
       className={`space-y-4 ${className || ''} scrollbar-hide h-full overflow-y-scroll`}
       ref={messagesContainerRef}
       onWheel={onWheel}
+      onScroll={onScroll}
+      onTouchMove={onTouchMove}
     >
       {messages.map((message, index) => (
         <ChatMessageBubble
