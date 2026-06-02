@@ -174,13 +174,17 @@ export class DeerFlowClient {
 
     if (cacheable) this.agentCache.set(key, agent);
 
-    const builtinNames = effectiveTools.map((t) => (t as { name?: string }).name ?? '?').join(', ');
-    console.log(
-      `[DeerFlowClient] Agent created/rebuilt (name=${opts.agentName}, ` +
-        `memoryEnabled=${opts.memoryEnabled}, ` +
-        `caller-tools=[${builtinNames}], ` +
-        `explicitTools=${this.hasExplicitTools})`,
-    );
+    if (process.env.MW_TRACE === '1' || process.env.MW_TRACE === 'true') {
+      const builtinNames = effectiveTools
+        .map((t) => (t as { name?: string }).name ?? '?')
+        .join(', ');
+      console.log(
+        `[DeerFlowClient] Agent created/rebuilt (name=${opts.agentName}, ` +
+          `memoryEnabled=${opts.memoryEnabled}, ` +
+          `caller-tools=[${builtinNames}], ` +
+          `explicitTools=${this.hasExplicitTools})`,
+      );
+    }
     return agent;
   }
 

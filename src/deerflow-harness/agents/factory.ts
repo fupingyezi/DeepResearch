@@ -75,18 +75,20 @@ export function createBaseAgent(opts: CreateAgentOptions) {
     }
   }
 
-  // 统一为所有中间件包一层调用日志（受 env MW_TRACE 控制，默认开启）。
+  // 统一为所有中间件包一层调用日志（受 env MW_TRACE 控制，默认关闭）。
   const wrapped = withCallLogAll(effectiveMiddlewares);
-  console.log(
-    `[mw] decorated ${wrapped.length} middleware(s): ${wrapped
-      .map((m) => (m as { name?: string }).name ?? '?')
-      .join(', ')}`,
-  );
-  console.log(
-    `[agent] tools bound to LLM (${effectiveTools.length}): ${effectiveTools
-      .map((t) => (t as { name?: string }).name ?? '?')
-      .join(', ')}`,
-  );
+  if (process.env.MW_TRACE === '1' || process.env.MW_TRACE === 'true') {
+    console.log(
+      `[mw] decorated ${wrapped.length} middleware(s): ${wrapped
+        .map((m) => (m as { name?: string }).name ?? '?')
+        .join(', ')}`,
+    );
+    console.log(
+      `[agent] tools bound to LLM (${effectiveTools.length}): ${effectiveTools
+        .map((t) => (t as { name?: string }).name ?? '?')
+        .join(', ')}`,
+    );
+  }
 
   return createAgent({
     model,

@@ -4,7 +4,7 @@
  * 关键特性：
  * - mtime cache（key=`{userId}::{agentName}`，None 用空串）。
  * - 原子写：写入临时文件后 `rename`。
- * - JSON 损坏 / IO 失败时回退到空 schema（与 Python 一致）。
+ * - JSON 损坏 / IO 失败时回退到空 schema。
  */
 
 import * as fs from 'node:fs/promises';
@@ -157,7 +157,9 @@ export class FileMemoryStorage implements MemoryStorage {
 
       const mtime = await this.statMtime(filePath);
       this.cache.set(key, { data: toWrite, mtimeMs: mtime });
-      console.log(`[memory/storage] Memory saved to ${filePath}`);
+      if (process.env.MEMORY_DEBUG === '1' || process.env.MEMORY_DEBUG === 'true') {
+        console.log(`[memory/storage] Memory saved to ${filePath}`);
+      }
       return true;
     } catch (e) {
       console.error('[memory/storage] Failed to save memory file:', e);
