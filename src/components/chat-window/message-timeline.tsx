@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import {
   CheckCircleOutlined,
   LoadingOutlined,
@@ -19,34 +18,15 @@ import CustomMarkdown from '../markdown/custom-markdown';
 import { HumanDecision } from '../process/human-decision';
 
 import type { MessageTimelineProps, TimelineStepPart } from '@/types';
+import { hasMeaningfulArgs } from '@/utils/common';
+import { useDisclosure } from '@/hooks';
 
 type ReasoningStep = Extract<TimelineStepPart, { type: 'reasoning' }>;
 type ToolCallStep = Extract<TimelineStepPart, { type: 'tool_call' }>;
 type SubagentTaskStep = Extract<TimelineStepPart, { type: 'subagent_task' }>;
 type SubagentToolItem = NonNullable<SubagentTaskStep['content']['children']>[number];
 
-const ReasoningBubble: React.FC<{ step: ReasoningStep }> = ({ step }) => {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="min-w-0 border-l-2 border-amber-200 py-1.5 pl-3">
-      <div
-        className="flex cursor-pointer items-center gap-2 text-gray-600 select-none"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <CaretRightOutlined
-          className={`text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
-        />
-        <BulbOutlined className="text-amber-500" />
-        <span className="text-sm font-medium">思考</span>
-      </div>
-      {open && (
-        <div className="mt-1 ml-5 min-w-0 overflow-hidden text-sm leading-relaxed break-words text-gray-600">
-          <CustomMarkdown content={step.content.text} />
-        </div>
-      )}
-    </div>
-  );
-};
+type ToolCallStatus = 'running' | 'done' | 'failed';
 
 /** 不同工具的标签/图标 */
 function getToolMeta(name: string, args: unknown): { label: string; icon: React.ReactNode } {
@@ -133,48 +113,64 @@ function hasMeaningfulSubagentToolCall(item: SubagentToolItem): boolean {
   return hasMeaningfulArgs(item.args);
 }
 
-/** args 是否非空（非 undefined / 非空字符串 / 非 `{}` / 非空对象）。 */
-function hasMeaningfulArgs(args: unknown): boolean {
-  if (args === undefined || args === null) return false;
-  if (typeof args === 'string') {
-    const trimmed = args.trim();
-    return trimmed.length > 0 && trimmed !== '{}';
-  }
-  if (Array.isArray(args)) return args.length > 0;
-  if (typeof args === 'object') return Object.keys(args).length > 0;
-  return true;
+/** tool_call status → 状态图标，sizeClass 控制文本尺寸（小卡片用 text-xs） */
+function renderStatusIcon(status: ToolCallStatus | undefined, sizeClass = ''): React.ReactNode {
+  if (status === 'failed') return <CloseCircleOutlined className={`${sizeClass} text-red-500`} />;
+  if (status === 'done') return <CheckCircleOutlined className={`${sizeClass} text-green-500`} />;
+  return <LoadingOutlined className={`${sizeClass} text-blue-500`} />;
 }
+
+/** 把 args 对象安全格式化为缩进 JSON；失败时回退到 String() */
+function safeStringifyArgs(args: unknown): string {
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+const ReasoningBubble: React.FC<{ step: ReasoningStep }> = ({ step }) => {
+  const { isOpen, toggle } = useDisclosure(true);
+  return (
+    <div className="min-w-0 border-l-2 border-amber-200 py-1.5 pl-3">
+      <div
+        className="flex cursor-pointer items-center gap-2 text-gray-600 select-none"
+        onClick={toggle}
+      >
+        <CaretRightOutlined
+          className={`text-xs text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+        />
+        <BulbOutlined className="text-amber-500" />
+        <span className="text-sm font-medium">思考</span>
+      </div>
+      {isOpen && (
+        <div className="mt-1 ml-5 min-w-0 overflow-hidden text-sm leading-relaxed break-words text-gray-600">
+          <CustomMarkdown content={step.content.text} />
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
   const c = step.content;
-  const [open, setOpen] = useState(false);
+  const { isOpen, toggle } = useDisclosure(false);
   const { label, icon } = getToolMeta(c.name, c.args);
-  const isFailed = c.status === 'failed';
-  const isDone = c.status === 'done';
-
-  const renderStatus = () => {
-    if (isFailed) return <CloseCircleOutlined className="text-red-500" />;
-    if (isDone) return <CheckCircleOutlined className="text-green-500" />;
-    return <LoadingOutlined className="text-blue-500" />;
-  };
 
   const searchResults = extractSearchResults(c.name, c.result);
 
   return (
     <div className="min-w-0 border-l-2 border-sky-200 py-1.5 pl-3">
-      <div
-        className="flex min-w-0 cursor-pointer items-center gap-2 select-none"
-        onClick={() => setOpen((v) => !v)}
-      >
+      <div className="flex min-w-0 cursor-pointer items-center gap-2 select-none" onClick={toggle}>
         <CaretRightOutlined
-          className={`shrink-0 text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-xs text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
         />
         <span className="shrink-0">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{label}</span>
-        <span className="shrink-0">{renderStatus()}</span>
+        <span className="shrink-0">{renderStatusIcon(c.status)}</span>
       </div>
 
-      {open && (
+      {isOpen && (
         <div className="mt-2 ml-5 min-w-0 space-y-1.5 text-xs">
           {searchResults && searchResults.length > 0 && (
             <ul className="list-none space-y-1 rounded-lg border border-gray-100 bg-gray-50 p-2">
@@ -200,27 +196,13 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
           )}
           {!searchResults && c.args !== undefined && (
             <pre className="scrollbar-slim max-h-48 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
-              {(() => {
-                try {
-                  return JSON.stringify(c.args, null, 2);
-                } catch {
-                  return String(c.args);
-                }
-              })()}
+              {safeStringifyArgs(c.args)}
             </pre>
           )}
           {c.errorMessage && <div className="break-words text-red-500">错误：{c.errorMessage}</div>}
           {!searchResults && c.result !== undefined && (
             <pre className="scrollbar-slim max-h-60 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
-              {typeof c.result === 'string'
-                ? c.result
-                : (() => {
-                    try {
-                      return JSON.stringify(c.result, null, 2);
-                    } catch {
-                      return String(c.result);
-                    }
-                  })()}
+              {typeof c.result === 'string' ? c.result : safeStringifyArgs(c.result)}
             </pre>
           )}
         </div>
@@ -231,20 +213,20 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
 
 /** 子任务内的思考/规划文本，可折叠 */
 const ReasoningBlock: React.FC<{ text: string }> = ({ text }) => {
-  const [open, setOpen] = useState(false);
+  const { isOpen, toggle } = useDisclosure(false);
   return (
     <div className="min-w-0 border-l-2 border-amber-200 py-0.5 pl-2">
       <div
         className="flex min-w-0 cursor-pointer items-center gap-1.5 text-gray-500 select-none"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <CaretRightOutlined
-          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
         />
         <BulbOutlined className="text-xs text-amber-400" />
         <span className="text-xs font-medium">思考过程</span>
       </div>
-      {open && (
+      {isOpen && (
         <div className="mt-1 ml-4 min-w-0 overflow-hidden text-xs leading-relaxed break-words text-gray-500">
           <CustomMarkdown content={text} />
         </div>
@@ -259,16 +241,11 @@ const SubagentTaskBubble: React.FC<{
 }> = ({ step, index }) => {
   const c = step.content;
   // 子任务默认展开，让用户能看到内部研究过程；终态后用户可手动折叠
-  const [open, setOpen] = useState(true);
+  const { isOpen, toggle } = useDisclosure(true);
   const status = (c.status ?? '').toLowerCase();
   const isFailed = ['failed', 'cancelled', 'timed_out'].includes(status);
   const isDone = status === 'completed';
-
-  const renderStatus = () => {
-    if (isFailed) return <CloseCircleOutlined className="text-red-500" />;
-    if (isDone) return <CheckCircleOutlined className="text-green-500" />;
-    return <LoadingOutlined className="text-blue-500" />;
-  };
+  const taskStatus: ToolCallStatus = isFailed ? 'failed' : isDone ? 'done' : 'running';
 
   const children = (c.children ?? []).filter(hasMeaningfulSubagentToolCall);
   const hasChildren = children.length > 0;
@@ -276,12 +253,9 @@ const SubagentTaskBubble: React.FC<{
 
   return (
     <div className="min-w-0 border-l-2 border-purple-200 py-1.5 pl-3">
-      <div
-        className="flex min-w-0 cursor-pointer items-center gap-2 select-none"
-        onClick={() => setOpen((v) => !v)}
-      >
+      <div className="flex min-w-0 cursor-pointer items-center gap-2 select-none" onClick={toggle}>
         <CaretRightOutlined
-          className={`shrink-0 text-xs text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-xs text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
         />
         <ApartmentOutlined className="shrink-0 text-purple-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700">
@@ -292,10 +266,10 @@ const SubagentTaskBubble: React.FC<{
             {children.length} 步
           </span>
         )}
-        <span className="shrink-0">{renderStatus()}</span>
+        <span className="shrink-0">{renderStatusIcon(taskStatus)}</span>
       </div>
 
-      {open && (
+      {isOpen && (
         <div className="mt-2 ml-5 min-w-0 space-y-2">
           {/* 思考/规划文本（可折叠） */}
           {c.reasoning && <ReasoningBlock text={c.reasoning} />}
@@ -368,17 +342,10 @@ const SubagentTaskBubble: React.FC<{
 const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => {
   // ghost 兜底：args 与 result 都为空的「幽灵调用」直接不渲染，
   // 防止 timeline 里出现可展开但内容空白的工具行。
-  if (!hasMeaningfulSubagentToolCall(item)) return null;
-  const [open, setOpen] = useState(false);
+  const isMeaningful = hasMeaningfulSubagentToolCall(item);
+  const { isOpen, toggle } = useDisclosure(false);
+  if (!isMeaningful) return null;
   const { label, icon } = getToolMeta(item.name, item.args);
-  const isFailed = item.status === 'failed';
-  const isDone = item.status === 'done';
-
-  const renderStatus = () => {
-    if (isFailed) return <CloseCircleOutlined className="text-xs text-red-500" />;
-    if (isDone) return <CheckCircleOutlined className="text-xs text-green-500" />;
-    return <LoadingOutlined className="text-xs text-blue-500" />;
-  };
 
   const searchResults = extractSearchResults(item.name, item.result);
 
@@ -386,16 +353,16 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
     <div className="min-w-0 border-l-2 border-gray-100 py-0.5 pl-2">
       <div
         className="flex min-w-0 cursor-pointer items-center gap-1.5 select-none"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <CaretRightOutlined
-          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 text-[10px] text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
         />
         <span className="shrink-0">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-gray-600">{label}</span>
-        <span className="shrink-0">{renderStatus()}</span>
+        <span className="shrink-0">{renderStatusIcon(item.status, 'text-xs')}</span>
       </div>
-      {open && (
+      {isOpen && (
         <div className="mt-1 ml-4 min-w-0 space-y-1 text-xs">
           {searchResults && searchResults.length > 0 && (
             <ul className="list-none space-y-0.5 rounded-lg border border-gray-100 bg-gray-50 p-1.5">
@@ -418,13 +385,7 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
           )}
           {hasMeaningfulArgs(item.args) && (
             <pre className="scrollbar-slim max-h-24 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-[12px] break-words whitespace-pre-wrap text-gray-600">
-              {(() => {
-                try {
-                  return JSON.stringify(item.args, null, 2);
-                } catch {
-                  return String(item.args);
-                }
-              })()}
+              {safeStringifyArgs(item.args)}
             </pre>
           )}
           {item.errorMessage && (

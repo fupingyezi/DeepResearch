@@ -1,25 +1,25 @@
 'use client';
 
-import { useState } from 'react';
 import Image from 'next/image';
+
 import SiderContent from './sider-content';
 
+import { useDisclosure } from '@/hooks';
+
 const Sider = () => {
-  const [isExpand, setIsExpand] = useState<boolean>(true);
-  const [isHovering, setIsHovering] = useState<boolean>(false);
+  const { isOpen: isExpand, toggle: toggleExpand } = useDisclosure(true);
+  const { isOpen: isHovering, toggle: toggleHovering, close: closeHovering } = useDisclosure(false);
 
   const changeIsHovering = () => {
     if (isExpand) return;
-    setIsHovering(!isHovering);
+    toggleHovering();
   };
 
   const handleClickExpand = () => {
     if (!isExpand) {
-      setIsExpand(true);
-      setIsHovering(false);
-    } else {
-      setIsExpand(false);
+      closeHovering();
     }
+    toggleExpand();
   };
 
   return (

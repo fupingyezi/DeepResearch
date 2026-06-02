@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { getClient, query } from '@/lib';
 import type { ChatMessageType, MessagePart, fileMetadataType } from '@/types';
+import { toIso } from '@/utils/common';
 
 export interface ChatSessionRecord {
   id: string;
@@ -33,12 +34,6 @@ export interface CreateChatSessionInput {
   seq_id?: number;
   created_at?: string | number;
   updated_at?: string | number;
-}
-
-function toIso(timestamp: string | number | undefined): string {
-  if (typeof timestamp === 'number') return new Date(timestamp).toISOString();
-  if (typeof timestamp === 'string' && timestamp.length > 0) return timestamp;
-  return new Date().toISOString();
 }
 
 function rowToSessionRecord(row: Record<string, unknown>): ChatSessionRecord {
@@ -82,9 +77,7 @@ export async function createChatSessionRecord(
   return rowToSessionRecord(res.rows[0]);
 }
 
-// ============================================================================
 // chat_message 持久化（parts 模型）
-// ============================================================================
 
 export interface SavedFileMetadata {
   fileId: string;
@@ -256,9 +249,7 @@ export async function getLatestMessageByRole(
   };
 }
 
-// ============================================================================
 // history 加载
-// ============================================================================
 
 /**
  * 把 file_metadata 行映射到前端 fileMetadataType。
@@ -323,10 +314,8 @@ export async function loadSessionHistory(sessionId: string): Promise<ChatMessage
   return messages;
 }
 
-// ============================================================================
 // 文件 id → 元信息批量解析（v3/chat 路由把 message.contents 中的 file/image
 // block 解析为完整元信息后落库）
-// ============================================================================
 
 export async function resolveFilesByIds(fileIds: string[]): Promise<SavedFileMetadata[]> {
   if (!Array.isArray(fileIds) || fileIds.length === 0) return [];

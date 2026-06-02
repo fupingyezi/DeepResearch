@@ -13,6 +13,7 @@ import type {
   ThreadMetaStore,
   ThreadStatus,
 } from './types';
+import { toIso } from '@/utils/common';
 
 const ALLOWED_STATUS = new Set<ThreadStatus>(['idle', 'running', 'error', 'interrupted']);
 
@@ -36,8 +37,6 @@ class ThreadMetaAccessError extends Error {
     this.name = 'ThreadMetaAccessError';
   }
 }
-
-const toIso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : String(v));
 
 const rowToMeta = (r: ThreadMetaRow): ThreadMeta => ({
   thread_id: r.thread_id,

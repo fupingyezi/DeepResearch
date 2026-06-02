@@ -17,6 +17,7 @@
 ## 🛠️ 技术栈
 
 ### 前端
+
 - **Next.js 14**（App Router）+ **React 18** + **TypeScript**
 - **Tailwind CSS v4**（`@theme inline` token 主题）
 - **Ant Design** + **Lucide / @ant-design/icons**
@@ -24,6 +25,7 @@
 - **react-markdown** + **remark-gfm/math** + **rehype-katex** + **react-syntax-highlighter**
 
 ### Agent / AI
+
 - **LangChain 1.x** + **LangGraph 1.x**（多智能体编排 + checkpoint）
 - **@langchain/langgraph-checkpoint-postgres**（PostgreSQL checkpoint）
 - **@langchain/openai**（OpenAI 兼容协议，支持 OpenAI / 千问 / 星火等）
@@ -31,6 +33,7 @@
 - 自研 **deerflow-harness**：Planner / Researcher / Reporter / Coder 子智能体框架
 
 ### 存储
+
 - **PostgreSQL**：会话、消息、checkpoint
 - **Redis**：缓存与会话状态
 - **MinIO**：上传文件对象存储

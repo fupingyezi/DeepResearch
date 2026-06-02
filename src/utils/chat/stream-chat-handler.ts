@@ -11,6 +11,13 @@ import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 import { extractFinalMessageParts } from './final-message-extract';
+import {
+  parseJsonSafe,
+  hasMeaningfulArgs,
+  isObjectWithKey,
+  createRafFlusher,
+  type RafFlusher,
+} from '@/utils/common';
 
 export interface StreamChatConfig {
   operation?: 'resume' | 'recall' | 'reEditCall';
@@ -23,7 +30,6 @@ export interface StreamChatConfig {
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
-  // 全局 store 注入
   setIsChating: (loading: boolean) => void;
   setShouldAutoScroll: (scroll: boolean) => void;
   addChatSession: (session: ChatSessionType) => void;
@@ -34,7 +40,6 @@ export interface StreamChatConfig {
   /** 模型预设标识（映射成 configuration.model.value 等运行配置） */
   model?: ModelPresetName;
 
-  // 自定义 hook
   onStreamComplete?: (data: Record<string, unknown>) => void;
   onStreamError?: (error: unknown) => void;
 }
@@ -42,6 +47,45 @@ export interface StreamChatConfig {
 type ToolCallPart = Extract<MessagePart, { type: 'tool_call' }>;
 type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
 type ArtifactPart = Extract<MessagePart, { type: 'artifact' }>;
+
+/**
+ * 深拷贝单个 MessagePart（用于把 class 内部 parts 写回 store 时切断引用，
+ * 避免 React 因为同 ref 不重渲染）。
+ */
+function clonePart(part: MessagePart): MessagePart {
+  switch (part.type) {
+    case 'subagent_task':
+      return {
+        ...part,
+        content: {
+          ...part.content,
+          children: part.content.children
+            ? part.content.children.map((c) => ({ ...c }))
+            : undefined,
+        },
+      };
+    case 'text':
+    case 'reasoning':
+      return { ...part, content: { ...part.content } };
+    case 'tool_call':
+      return { ...part, content: { ...part.content } };
+    case 'tool_result':
+      return { ...part, content: { ...part.content } };
+    case 'file':
+      return { ...part, content: { ...part.content } };
+    case 'image':
+      return { ...part, content: { ...part.content } };
+    case 'artifact':
+      return { ...part, content: { ...part.content } };
+    case 'task_summary':
+      return { ...part, content: { ...part.content } };
+    default: {
+      const _never: never = part;
+      void _never;
+      return part;
+    }
+  }
+}
 
 /**
  * StreamChatHandler
@@ -63,8 +107,12 @@ export class StreamChatHandler {
   private partIndexByTaskId = new Map<string, number>();
   private interrupt: ChatMessageType['interrupt'] = null;
 
+  /** rAF 合帧调度器（class 与 hook 不互通，使用纯工厂函数） */
+  private flusher: RafFlusher;
+
   constructor(config: StreamChatConfig) {
     this.config = config;
+    this.flusher = createRafFlusher(() => this.commitFlush());
   }
 
   async execute(): Promise<void> {
@@ -215,10 +263,10 @@ export class StreamChatHandler {
       this.interrupt = null;
       this.assistantMessageId = String(last?.id ?? uuidv4());
     }
-    this.initialUpdateMessages = this.config.currentMessages.map((msg, idx) =>
-      idx === len - 1 && msg.role === 'assistant'
-        ? { ...msg, parts: this.parts.map((p) => clonePart(p)), interrupt: null }
-        : msg,
+    this.initialUpdateMessages = this.config.currentMessages.map((message, idx) =>
+      idx === len - 1 && message.role === 'assistant'
+        ? { ...message, parts: this.parts.map((p) => clonePart(p)), interrupt: null }
+        : message,
     );
   }
 
@@ -420,7 +468,6 @@ export class StreamChatHandler {
     const { tempSessionId, realSessionId, realUserId, tempAssistantId, realAssistantId } = params;
     if (!realSessionId && !realUserId && !realAssistantId) return;
 
-    // 反向找到最后一条 user 消息的下标（仅当需要替换 user id 时）
     let lastUserIdx = -1;
     if (realUserId) {
       for (let i = this.initialUpdateMessages.length - 1; i >= 0; i--) {
@@ -432,15 +479,15 @@ export class StreamChatHandler {
     }
 
     let mutated = false;
-    const updated = this.initialUpdateMessages.map((msg, idx) => {
+    const updated = this.initialUpdateMessages.map((message, idx) => {
       const patch: Partial<ChatMessageType> = {};
-      if (realSessionId && msg.sessionId === tempSessionId) patch.sessionId = realSessionId;
+      if (realSessionId && message.sessionId === tempSessionId) patch.sessionId = realSessionId;
       if (realUserId && idx === lastUserIdx) patch.id = realUserId;
-      if (realAssistantId && msg.role === 'assistant' && msg.id === tempAssistantId)
+      if (realAssistantId && message.role === 'assistant' && message.id === tempAssistantId)
         patch.id = realAssistantId;
-      if (Object.keys(patch).length === 0) return msg;
+      if (Object.keys(patch).length === 0) return message;
       mutated = true;
-      return { ...msg, ...patch };
+      return { ...message, ...patch };
     });
 
     if (mutated) {
@@ -461,13 +508,7 @@ export class StreamChatHandler {
   }
 
   // parts 维护
-  //
   // 合并策略：在 parts 数组中**自尾部反向**寻找最近的同类型 part。
-  // 必须穿过 subagent_task / tool_call / tool_result 等"穿插事件"，因为
-  // lead-agent 在等待并行 task 工具时，会有 TASK_PROGRESS 反复 upsert 同一个
-  // subagent_task part（不改变其在数组中的位置），与 lead 自身的 reasoning chunk
-  // 交替到达。如果只看最末一个 part 的类型，会把每个 reasoning chunk 都当成
-  // 新 part 创建，导致 UI 出现"一字一块"的折叠条。
   private appendOrMergeTextPart(text: string): void {
     const idx = this.findMergeTarget('text');
     if (idx >= 0) {
@@ -517,9 +558,7 @@ export class StreamChatHandler {
   }
 
   /**
-   * 自尾向前找可合并的同类型 part 下标；穿过 subagent_task / tool_call /
-   * tool_result（这些 part 会持续被 upsert 但不代表"流式文本段已结束"）；
-   * 一旦遇到另一个文本类 part（text/reasoning 中的另一种）则视为段落边界。
+   * 自尾向前找可合并的同类型 part 下标
    */
   private findMergeTarget(target: 'text' | 'reasoning'): number {
     const other = target === 'text' ? 'reasoning' : 'text';
@@ -680,8 +719,7 @@ export class StreamChatHandler {
 
     if (incomingStatus === 'tool_call') {
       const args = parseJsonSafe(payload.arguments);
-      // ghost 防御：args 为空且无 result → 跳过入 children；
-      // 与后端 _parts-collector / 前端 timeline 同口径，避免 UI 出现空白工具行。
+      // args 为空且无 result → 跳过入 children；
       if (!hasMeaningfulArgs(args)) return;
       const existIdx = children.findIndex((c) => c.toolCallId === toolCallId);
       const item: SubagentToolCall = {
@@ -735,7 +773,7 @@ export class StreamChatHandler {
         const text =
           typeof data === 'string'
             ? data
-            : isObjectWithStringKey(data, 'simpleAnalysis')
+            : isObjectWithKey(data, 'simpleAnalysis')
               ? data.simpleAnalysis
               : '';
         if (text) this.appendOrMergeReasoningPart(text);
@@ -744,17 +782,15 @@ export class StreamChatHandler {
       case 'tasks_initial': {
         if (Array.isArray(data)) {
           for (const task of data) {
-            const taskId = isObjectWithStringKey(task, 'taskId')
+            const taskId = isObjectWithKey(task, 'taskId')
               ? task.taskId
-              : isObjectWithStringKey(task, 'id')
+              : isObjectWithKey(task, 'id')
                 ? task.id
                 : '';
             this.upsertSubagentTaskPart({
               taskId,
-              description: isObjectWithStringKey(task, 'description')
-                ? task.description
-                : undefined,
-              status: isObjectWithStringKey(task, 'status') ? task.status : 'pending',
+              description: isObjectWithKey(task, 'description') ? task.description : undefined,
+              status: isObjectWithKey(task, 'status') ? task.status : 'pending',
             });
           }
         }
@@ -766,13 +802,9 @@ export class StreamChatHandler {
       }
       case 'report': {
         const content =
-          typeof data === 'string'
-            ? data
-            : isObjectWithStringKey(data, 'report')
-              ? data.report
-              : '';
+          typeof data === 'string' ? data : isObjectWithKey(data, 'report') ? data.report : '';
         const title =
-          isObjectWithStringKey(data, 'title') && data.title.length > 0 ? data.title : '研究报告';
+          isObjectWithKey(data, 'title') && data.title.length > 0 ? data.title : '研究报告';
         if (typeof content === 'string' && content.length > 0) {
           this.pushArtifactPart(title, content);
         }
@@ -795,52 +827,22 @@ export class StreamChatHandler {
   }
 
   // flush（rAF 合帧）
-  private rafHandle: number | null = null;
-  private pendingFlush = false;
-
   private flushMessage(): void {
-    this.pendingFlush = true;
-    if (this.rafHandle !== null) return;
-
-    const schedule =
-      typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-        ? window.requestAnimationFrame.bind(window)
-        : (cb: FrameRequestCallback): number => {
-            const id = setTimeout(() => cb(performance.now()), 16);
-            return Number(id);
-          };
-
-    this.rafHandle = schedule(() => {
-      this.rafHandle = null;
-      if (!this.pendingFlush) return;
-      this.pendingFlush = false;
-      this.commitFlush();
-    });
+    this.flusher.schedule();
   }
 
   private flushMessageSync(): void {
-    if (this.rafHandle !== null) {
-      const cancel =
-        typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function'
-          ? window.cancelAnimationFrame.bind(window)
-          : (id: number): void => {
-              clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
-            };
-      cancel(this.rafHandle);
-      this.rafHandle = null;
-    }
-    this.pendingFlush = false;
-    this.commitFlush();
+    this.flusher.flushSync();
   }
 
   private commitFlush(): void {
     const target = this.assistantMessageId;
     let mutated = false;
-    const updateMessages = this.initialUpdateMessages.map((msg) => {
-      if (msg.id !== target) return msg;
+    const updateMessages = this.initialUpdateMessages.map((message) => {
+      if (message.id !== target) return message;
       mutated = true;
       return {
-        ...msg,
+        ...message,
         parts: this.parts.map((p) => clonePart(p)),
         interrupt: this.interrupt,
       };
@@ -890,73 +892,4 @@ export class StreamChatHandler {
       this.abortController.abort();
     }
   }
-}
-
-// ──────────────────────────────────────────────────────
-// helpers
-// ──────────────────────────────────────────────────────
-
-function clonePart(part: MessagePart): MessagePart {
-  switch (part.type) {
-    case 'subagent_task':
-      return {
-        ...part,
-        content: {
-          ...part.content,
-          children: part.content.children
-            ? part.content.children.map((c) => ({ ...c }))
-            : undefined,
-        },
-      };
-    case 'text':
-    case 'reasoning':
-      return { ...part, content: { ...part.content } };
-    case 'tool_call':
-      return { ...part, content: { ...part.content } };
-    case 'tool_result':
-      return { ...part, content: { ...part.content } };
-    case 'file':
-      return { ...part, content: { ...part.content } };
-    case 'image':
-      return { ...part, content: { ...part.content } };
-    case 'artifact':
-      return { ...part, content: { ...part.content } };
-    case 'task_summary':
-      return { ...part, content: { ...part.content } };
-    default: {
-      const _never: never = part;
-      void _never;
-      return part;
-    }
-  }
-}
-
-function parseJsonSafe(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-/** args 是否非空（与后端 collector / 前端 timeline 同口径） */
-function hasMeaningfulArgs(args: unknown): boolean {
-  if (args === undefined || args === null) return false;
-  if (typeof args === 'string') {
-    const trimmed = args.trim();
-    return trimmed.length > 0 && trimmed !== '{}';
-  }
-  if (Array.isArray(args)) return args.length > 0;
-  if (typeof args === 'object') return Object.keys(args).length > 0;
-  return true;
-}
-
-function isObjectWithStringKey<K extends string>(data: unknown, key: K): data is Record<K, string> {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    key in (data as Record<string, unknown>) &&
-    typeof (data as Record<string, unknown>)[key] === 'string'
-  );
 }

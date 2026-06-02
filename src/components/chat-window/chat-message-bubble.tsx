@@ -6,7 +6,7 @@ import MessageToolBar from '../message-tool-bar/message-tool-bar';
 import MessageTimeline from './message-timeline';
 
 import { useMemo, useState } from 'react';
-import { useCopy } from '@/utils/hooks';
+import { useCopy } from '@/hooks';
 import { useConversationStore, useArtifactPanelStore } from '@/store';
 import {
   ChatMessageBubbleProps,
@@ -370,7 +370,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   return (
     <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
       <div
-        className="flex min-w-0 max-w-[85%] flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
+        className="flex max-w-[85%] min-w-0 flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >

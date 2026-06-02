@@ -52,9 +52,7 @@ import {
 } from '../../conversations/_service';
 import { AssistantPartsCollector } from './_parts-collector';
 
-// ============================================================================
 // 协议类型
-// ============================================================================
 
 type TextBlock = { type: 'text'; text: string };
 type FileBlock = { type: 'file'; fileId: string };
@@ -72,9 +70,7 @@ interface ChatStreamBody {
   operation?: 'resume' | 'recall' | 'reEditCall';
 }
 
-// ============================================================================
 // 工具
-// ============================================================================
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
@@ -156,9 +152,13 @@ function contentsToUserParts(
   return parts;
 }
 
-// ============================================================================
 // 路由实现
-// ============================================================================
+
+function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() <= b.getTime() ? a : b;
+}
 
 export async function POST(request: NextRequest) {
   const user_id = pickUserId(request);
@@ -388,10 +388,4 @@ export async function POST(request: NextRequest) {
       'X-Thread-Id': resolvedThreadId,
     },
   });
-}
-
-function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  return a.getTime() <= b.getTime() ? a : b;
 }

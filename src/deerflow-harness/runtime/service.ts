@@ -133,6 +133,22 @@ interface CheckpointerWithDeleteThread {
   deleteThread?: (threadId: string) => Promise<void>;
 }
 
+async function getTupleSafe(
+  checkpointer: BaseCheckpointSaver,
+  thread_id: string,
+  checkpoint_id?: string,
+): Promise<unknown> {
+  const config = buildThreadConfig(thread_id, checkpoint_id);
+  const fn = checkpointer.getTuple;
+  if (typeof fn !== 'function') return null;
+  try {
+    return await fn.call(checkpointer, config);
+  } catch (e) {
+    console.warn(`${LOG} getTuple failed:`, (e as Error)?.message);
+    return null;
+  }
+}
+
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   const { client, checkpointer, threads, runs, createClientForModel } = deps;
 
@@ -306,20 +322,4 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       });
     },
   };
-}
-
-async function getTupleSafe(
-  checkpointer: BaseCheckpointSaver,
-  thread_id: string,
-  checkpoint_id?: string,
-): Promise<any> {
-  const config = buildThreadConfig(thread_id, checkpoint_id);
-  const fn = checkpointer.getTuple;
-  if (typeof fn !== 'function') return null;
-  try {
-    return await fn.call(checkpointer, config);
-  } catch (e) {
-    console.warn(`${LOG} getTuple failed:`, (e as Error)?.message);
-    return null;
-  }
 }

@@ -9,7 +9,7 @@ import CopyButton from './copy-button';
 
 const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
   return (
-    <div className="prose prose-zinc max-w-none min-w-0 break-words prose-headings:scroll-mt-4 prose-headings:font-semibold prose-headings:text-gray-900 prose-h1:text-[26px] prose-h1:leading-snug prose-h1:mb-4 prose-h2:text-[20px] prose-h2:mt-8 prose-h2:mb-3 prose-h2:border-b prose-h2:border-gray-100 prose-h2:pb-2 prose-h3:text-[17px] prose-p:text-[15px] prose-p:leading-7 prose-p:text-gray-700 prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline prose-strong:text-gray-900 prose-li:text-[15px] prose-li:text-gray-700 prose-blockquote:border-l-teal-400 prose-blockquote:bg-teal-50/40 prose-blockquote:py-1 prose-blockquote:text-gray-600 prose-blockquote:not-italic prose-table:text-sm prose-th:bg-gray-50 prose-img:rounded-xl prose-img:shadow-sm">
+    <div className="prose prose-zinc prose-headings:scroll-mt-4 prose-headings:font-semibold prose-headings:text-gray-900 prose-h1:text-[26px] prose-h1:leading-snug prose-h1:mb-4 prose-h2:text-[20px] prose-h2:mt-8 prose-h2:mb-3 prose-h2:border-b prose-h2:border-gray-100 prose-h2:pb-2 prose-h3:text-[17px] prose-p:text-[15px] prose-p:leading-7 prose-p:text-gray-700 prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline prose-strong:text-gray-900 prose-li:text-[15px] prose-li:text-gray-700 prose-blockquote:border-l-teal-400 prose-blockquote:bg-teal-50/40 prose-blockquote:py-1 prose-blockquote:text-gray-600 prose-blockquote:not-italic prose-table:text-sm prose-th:bg-gray-50 prose-img:rounded-xl prose-img:shadow-sm max-w-none min-w-0 break-words">
       <Markdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}

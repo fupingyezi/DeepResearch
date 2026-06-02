@@ -27,6 +27,7 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import type { MessagePart } from '@/types';
+import { firstSentence } from '@/utils/common';
 
 const TASK_SUMMARY_TAG = /<task_summary>([\s\S]*?)<\/task_summary>/;
 /** 未闭合兜底：模型把 `<task_summary>` 写出但流被截断。 */
@@ -254,12 +255,4 @@ function pickTaskSummaryLine(content: SubagentTaskPart['content']): string {
   }
 
   return '（无产出）';
-}
-
-/** 取首句（中英标点都识别），并截断到 80 字以内防止单行过长 */
-function firstSentence(text: string): string {
-  const stripped = text.replace(/\s+/g, ' ').trim();
-  const match = stripped.match(/^(.+?[。！？!?\.])/);
-  const head = match ? match[1] : stripped;
-  return head.length > 80 ? `${head.slice(0, 80)}…` : head;
 }

@@ -1,10 +1,12 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
-import { useFileUpload } from '@/utils/hooks';
+import React, { useState, useRef } from 'react';
 import Image from 'next/image';
+
 import FileItem from '../files/file-items';
+import ModelSelector from '../model-selector/model-selector';
+
 import { ChatInputProps } from '@/types';
 import { useConversationStore } from '@/store';
-import ModelSelector from '../model-selector/model-selector';
+import { useFileUpload, useTextareaAutoHeight } from '@/hooks';
 
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
@@ -22,13 +24,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const isComposingRef = useRef(false);
   const { localUploadedFiles, handleFiles, removeFile, clearFiles, getFileIcon } = useFileUpload();
 
-  // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内，
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 100) + 'px';
-  }, [inputValue]);
+  // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内
+  useTextareaAutoHeight(textareaRef, inputValue, 100);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

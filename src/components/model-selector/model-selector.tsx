@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useModelStore } from '@/store';
 import { MODEL_PRESETS, ModelPresetName, getAvailablePresets } from '@/config/models';
+import { useDisclosure } from '@/hooks';
 
 interface ModelSelectorProps {
   className?: string;
@@ -11,27 +12,25 @@ interface ModelSelectorProps {
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({ className = '', showLabel = true }) => {
   const { model, setModel } = useModelStore();
-  const [isOpen, setIsOpen] = useState(false);
+  const { isOpen, toggle, close } = useDisclosure(false);
   const presets = getAvailablePresets();
   const currentPreset = MODEL_PRESETS[model];
 
   const handleSelectModel = (next: ModelPresetName) => {
     setModel(next);
-    setIsOpen(false);
+    close();
   };
-
-  const isActive = isOpen;
 
   return (
     <div className={`relative ${className}`}>
       {/* 触发按钮：与"联网搜索/深度研究"胶囊样式保持一致 */}
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggle}
         className="flex h-8 w-30 items-center justify-center rounded-2xl border-2 border-[#f3f3f3] px-3 hover:cursor-pointer hover:bg-[#e7e7e7]"
         style={{
-          backgroundColor: isActive ? '#eceaff' : '',
-          color: isActive ? '#4433ff' : '',
+          backgroundColor: isOpen ? '#eceaff' : '',
+          color: isOpen ? '#4433ff' : '',
         }}
       >
         <span className="flex items-center gap-1 truncate">

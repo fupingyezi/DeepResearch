@@ -55,9 +55,9 @@ export class FileMemoryStorage implements MemoryStorage {
         validateAgentName(agentName);
         return userAgentMemoryFile(userId, agentName);
       }
-      const cfg = getMemoryConfig();
-      if (cfg.storagePath && path.isAbsolute(cfg.storagePath)) {
-        return cfg.storagePath;
+      const config = getMemoryConfig();
+      if (config.storagePath && path.isAbsolute(config.storagePath)) {
+        return config.storagePath;
       }
       return userMemoryFile(userId);
     }
@@ -68,11 +68,11 @@ export class FileMemoryStorage implements MemoryStorage {
       return agentMemoryFile(agentName);
     }
 
-    const cfg = getMemoryConfig();
-    if (cfg.storagePath) {
-      return path.isAbsolute(cfg.storagePath)
-        ? cfg.storagePath
-        : path.join(getBaseDir(), cfg.storagePath);
+    const config = getMemoryConfig();
+    if (config.storagePath) {
+      return path.isAbsolute(config.storagePath)
+        ? config.storagePath
+        : path.join(getBaseDir(), config.storagePath);
     }
     return memoryFile();
   }

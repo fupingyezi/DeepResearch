@@ -38,6 +38,7 @@ import type {
 import { ClientAgentEventType as Et } from '@deerflow-harness/runtime/sse/client-event';
 import type { ChatMessageType, MessagePart, SubagentToolCall } from '@/types';
 import { extractFinalMessageParts } from '@/utils/chat/final-message-extract';
+import { parseJsonSafe, hasMeaningfulArgs, isObjectWithKey } from '@/utils/common';
 
 type ToolCallPart = Extract<MessagePart, { type: 'tool_call' }>;
 type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
@@ -108,10 +109,6 @@ export class AssistantPartsCollector {
     const parts = extractFinalMessageParts(this.parts, fallbackTitle);
     return { parts, interrupt: this.interrupt };
   }
-
-  // ────────────────────────────────────────────────────────
-  // 内部 part 维护
-  // ────────────────────────────────────────────────────────
 
   private appendOrMergeText(text: string): void {
     const idx = this.findMergeTarget('text');
@@ -224,7 +221,6 @@ export class AssistantPartsCollector {
     const taskId = payload.taskId ?? '';
     const status = payload.status ?? 'running';
 
-    // tool_call / tool_result 子事件挂到 part.content.children
     if (status === 'tool_call' || status === 'tool_result') {
       this.applySubagentToolEvent(taskId, payload, status);
       return;
@@ -358,7 +354,7 @@ export class AssistantPartsCollector {
         const text =
           typeof data === 'string'
             ? data
-            : isObjectWithKey<string>(data, 'simpleAnalysis')
+            : isObjectWithKey(data, 'simpleAnalysis')
               ? data.simpleAnalysis
               : '';
         if (text) this.appendOrMergeReasoning(text);
@@ -367,15 +363,13 @@ export class AssistantPartsCollector {
       case 'tasks_initial': {
         if (Array.isArray(data)) {
           for (const task of data) {
-            const tid = isObjectWithKey<string>(task, 'taskId')
+            const tid = isObjectWithKey(task, 'taskId')
               ? task.taskId
-              : isObjectWithKey<string>(task, 'id')
+              : isObjectWithKey(task, 'id')
                 ? task.id
                 : '';
-            const desc = isObjectWithKey<string>(task, 'description')
-              ? task.description
-              : undefined;
-            const status = isObjectWithKey<string>(task, 'status') ? task.status : 'pending';
+            const desc = isObjectWithKey(task, 'description') ? task.description : undefined;
+            const status = isObjectWithKey(task, 'status') ? task.status : 'pending';
             this.upsertSubagentTask({
               taskId: tid,
               description: desc,
@@ -391,13 +385,9 @@ export class AssistantPartsCollector {
       }
       case 'report': {
         const content =
-          typeof data === 'string'
-            ? data
-            : isObjectWithKey<string>(data, 'report')
-              ? data.report
-              : '';
+          typeof data === 'string' ? data : isObjectWithKey(data, 'report') ? data.report : '';
         const title =
-          isObjectWithKey<string>(data, 'title') && data.title.length > 0 ? data.title : '研究报告';
+          isObjectWithKey(data, 'title') && data.title.length > 0 ? data.title : '研究报告';
         if (typeof content === 'string' && content.length > 0) {
           this.parts.push({
             partId: uuidv4(),
@@ -414,36 +404,6 @@ export class AssistantPartsCollector {
         break;
     }
   }
-}
-
-function parseJsonSafe(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-/** args 是否非空（与前端 timeline 同口径，避免落库出现 ghost 子调用记录） */
-function hasMeaningfulArgs(args: unknown): boolean {
-  if (args === undefined || args === null) return false;
-  if (typeof args === 'string') {
-    const trimmed = args.trim();
-    return trimmed.length > 0 && trimmed !== '{}';
-  }
-  if (Array.isArray(args)) return args.length > 0;
-  if (typeof args === 'object') return Object.keys(args).length > 0;
-  return true;
-}
-
-function isObjectWithKey<V>(data: unknown, key: string): data is Record<string, V> {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    key in data &&
-    typeof (data as Record<string, unknown>)[key] === 'string'
-  );
 }
 
 // 防止未使用导入警告（ClientAgentEventType type re-export）

@@ -1,7 +1,15 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import { message as antdMessage } from 'antd';
 import copy from 'copy-to-clipboard';
 
+/**
+ * useCopy
+ *
+ * 复制文本到剪贴板，并通过 antd message 反馈复制成功；
+ * 内部 isCopied 在 500ms 后自动复位。
+ */
 const useCopy = (successMessage = 'Copy success!') => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
@@ -18,7 +26,7 @@ const useCopy = (successMessage = 'Copy success!') => {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [isCopied]);
+  }, [isCopied, successMessage]);
 
   return { copyToClipboard, isCopied };
 };

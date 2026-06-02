@@ -4,6 +4,7 @@
 
 import { query } from '@/lib/db';
 import type { Run, RunCreateInput, RunListOptions, RunStatus, RunStore } from './types';
+import { toIso } from '@/utils/common';
 
 const ALLOWED_STATUS = new Set<RunStatus>([
   'pending',
@@ -24,8 +25,6 @@ interface RunRow {
   created_at: Date | string;
   updated_at: Date | string;
 }
-
-const toIso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : String(v));
 
 const rowToRun = (r: RunRow): Run => ({
   run_id: r.run_id,

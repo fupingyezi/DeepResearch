@@ -37,8 +37,8 @@ export class MemoryUpdateQueue {
   private processing = false;
 
   add(args: AddArgs): void {
-    const cfg = getMemoryConfig();
-    if (!cfg.enabled) return;
+    const config = getMemoryConfig();
+    if (!config.enabled) return;
 
     this.enqueue(args);
     this.resetTimer();
@@ -48,8 +48,8 @@ export class MemoryUpdateQueue {
   }
 
   addNowait(args: AddArgs): void {
-    const cfg = getMemoryConfig();
-    if (!cfg.enabled) return;
+    const config = getMemoryConfig();
+    if (!config.enabled) return;
 
     this.enqueue(args);
     this.scheduleTimer(0);
@@ -80,8 +80,8 @@ export class MemoryUpdateQueue {
   }
 
   private resetTimer(): void {
-    const cfg = getMemoryConfig();
-    this.scheduleTimer(cfg.debounceSeconds * 1000);
+    const config = getMemoryConfig();
+    this.scheduleTimer(config.debounceSeconds * 1000);
   }
 
   private scheduleTimer(delayMs: number): void {

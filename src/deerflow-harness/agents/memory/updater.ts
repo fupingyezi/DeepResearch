@@ -20,6 +20,7 @@ import { getMemoryConfig } from './config';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
 import { createEmptyMemory, Fact, FactCategory, MemoryData, utcNowIsoZ } from './types';
+import { extractMessageContentText } from '@/utils/common';
 
 // Model factory injection
 export type MemoryModelFactory = (modelName: string | null | undefined) => BaseChatModel;
@@ -197,7 +198,7 @@ function factContentKey(content: any): string | null {
 }
 
 function applyUpdates(current: MemoryData, update: any, threadId: string | null): MemoryData {
-  const cfg = getMemoryConfig();
+  const config = getMemoryConfig();
   const now = utcNowIsoZ();
   const out: MemoryData = JSON.parse(JSON.stringify(current));
 
@@ -238,7 +239,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
   const newFacts: any[] = Array.isArray(update?.newFacts) ? update.newFacts : [];
   for (const f of newFacts) {
     const conf = typeof f?.confidence === 'number' ? f.confidence : 0.5;
-    if (conf < cfg.factConfidenceThreshold) continue;
+    if (conf < config.factConfidenceThreshold) continue;
     const raw = f?.content;
     if (typeof raw !== 'string') continue;
     const norm = raw.trim();
@@ -262,11 +263,11 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
   }
 
   // enforce max_facts
-  if (out.facts.length > cfg.maxFacts) {
+  if (out.facts.length > config.maxFacts) {
     out.facts = out.facts
       .slice()
       .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-      .slice(0, cfg.maxFacts);
+      .slice(0, config.maxFacts);
   }
 
   return out;
@@ -293,32 +294,6 @@ function buildCorrectionHint(correction: boolean, reinforcement: boolean): strin
     );
   }
   return parts.join('\n');
-}
-
-function extractText(content: any): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const pieces: string[] = [];
-    let pending: string[] = [];
-    const flush = () => {
-      if (pending.length > 0) {
-        pieces.push(pending.join(''));
-        pending = [];
-      }
-    };
-    for (const block of content) {
-      if (typeof block === 'string') {
-        pending.push(block);
-      } else if (block && typeof block === 'object') {
-        flush();
-        const text = (block as { text?: unknown }).text;
-        if (typeof text === 'string') pieces.push(text);
-      }
-    }
-    flush();
-    return pieces.join('\n');
-  }
-  return content == null ? '' : String(content);
 }
 
 /**
@@ -375,13 +350,13 @@ export class MemoryUpdater {
   private getModel(): BaseChatModel | null {
     const factory = getMemoryModelFactory();
     if (!factory) return null;
-    const cfg = getMemoryConfig();
-    return factory(this.modelName ?? cfg.modelName);
+    const config = getMemoryConfig();
+    return factory(this.modelName ?? config.modelName);
   }
 
   async updateMemory(messages: any[], opts: UpdateMemoryOptions = {}): Promise<boolean> {
-    const cfg = getMemoryConfig();
-    if (!cfg.enabled) return false;
+    const config = getMemoryConfig();
+    if (!config.enabled) return false;
     if (!Array.isArray(messages) || messages.length === 0) return false;
 
     try {
@@ -420,7 +395,7 @@ export class MemoryUpdater {
         tags: ['memory-updater'],
       });
       const responseContent = (response as { content?: unknown }).content;
-      let text = extractText(responseContent).trim();
+      let text = extractMessageContentText(responseContent).trim();
       if (text.startsWith('```')) {
         const lines = text.split('\n');
         text = (lines[lines.length - 1] === '```' ? lines.slice(1, -1) : lines.slice(1)).join('\n');

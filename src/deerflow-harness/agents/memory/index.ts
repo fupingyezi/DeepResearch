@@ -88,13 +88,13 @@ export interface BuildMemoryContextOptions {
  */
 export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): Promise<string> {
   try {
-    const cfg = _gmc();
-    if (!cfg.enabled || !cfg.injectionEnabled) return '';
+    const config = _gmc();
+    if (!config.enabled || !config.injectionEnabled) return '';
     const data = await _gms().load({
       agentName: opts.agentName ?? null,
       userId: opts.userId ?? null,
     });
-    const text = _fmt(data, cfg.maxInjectionTokens);
+    const text = _fmt(data, config.maxInjectionTokens);
     if (!text.trim()) return '';
     return `<memory>\n${text}\n</memory>\n`;
   } catch (e) {

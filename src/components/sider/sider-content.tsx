@@ -13,7 +13,19 @@ import React from 'react';
 import { ChatSessionType } from '@/types';
 import apiClient from '@/utils/request/api';
 import { useConversationStore } from '@/store';
-import { UUIDTypes, v4 as uuidv4 } from 'uuid';
+import { UUIDTypes } from 'uuid';
+import { formatYmd } from '@/utils/common';
+import { useOutsideClick } from '@/hooks';
+
+interface SessionBubbleProps {
+  chatSession: ChatSessionType;
+  isShowDate: boolean;
+  selectedSession: ChatSessionType | null;
+  isModalOpen: boolean;
+  setSelectedSession: (selectedSession: ChatSessionType) => void;
+  setIsModalOpen: (isModalOpen: boolean) => void;
+  setSelectedModal: (selectedModal: 'edit' | 'delete') => void;
+}
 
 async function getConversationSessions() {
   try {
@@ -25,15 +37,7 @@ async function getConversationSessions() {
   }
 }
 
-const SessionBubble: React.FC<{
-  chatSession: ChatSessionType;
-  isShowDate: boolean;
-  selectedSession: ChatSessionType | null;
-  isModalOpen: boolean;
-  setSelectedSession: (selectedSession: ChatSessionType) => void;
-  setIsModalOpen: (isModalOpen: boolean) => void;
-  setSelectedModal: (selectedModal: 'edit' | 'delete') => void;
-}> = React.memo(
+const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
   ({
     chatSession,
     isShowDate = false,
@@ -46,8 +50,7 @@ const SessionBubble: React.FC<{
     const [isHover, setIsHover] = useState<boolean>(false);
 
     const { currentSessionId, setCurrentSessionId, setCurrentMessages } = useConversationStore();
-    const date = new Date(chatSession.updated_at);
-    const showDate = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+    const showDate = formatYmd(chatSession.updated_at);
 
     const handleSelectSession = async (sessionId: UUIDTypes) => {
       setCurrentSessionId(sessionId);
@@ -134,6 +137,8 @@ const SessionBubble: React.FC<{
   },
 );
 
+SessionBubble.displayName = 'SessionBubble';
+
 const SiderContent = () => {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [selectedModal, setSelectedModal] = useState<'edit' | 'delete'>('edit');
@@ -149,14 +154,8 @@ const SiderContent = () => {
   } = useConversationStore();
 
   const checkDifferentDay = (session: ChatSessionType, index: number) => {
-    const date = new Date(session.updated_at);
-    const showDate = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-    let lastDate;
-    if (index > 0) {
-      const date = new Date(chatSessions[index - 1].updated_at);
-      lastDate = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-    }
-
+    const showDate = formatYmd(session.updated_at);
+    const lastDate = index > 0 ? formatYmd(chatSessions[index - 1].updated_at) : undefined;
     return index === 0 || showDate !== lastDate;
   };
 
@@ -175,7 +174,7 @@ const SiderContent = () => {
         setSelectedSession(chatSession);
       }
     },
-    [setSelectedSession],
+    [selectedSession?.id],
   );
 
   // 编辑session操作确定
@@ -217,22 +216,13 @@ const SiderContent = () => {
     };
 
     fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // session编辑popover监听
-  useEffect(() => {
-    if (!selectedSession || isModalOpen) return;
-
-    const handleClick = () => {
-      setSelectedSession(null);
-    };
-
-    document.addEventListener('click', handleClick);
-
-    return () => {
-      document.removeEventListener('click', handleClick);
-    };
-  }, [selectedSession, isModalOpen]);
+  // session 编辑 popover 监听：仅在 selected 且 modal 关闭时挂监听
+  useOutsideClick(!!selectedSession && !isModalOpen, () => {
+    setSelectedSession(null);
+  });
 
   useEffect(() => {
     if (selectedSession) {

@@ -67,11 +67,52 @@ function applyHistoryRules(
 }
 
 /** 顺序应用所有规则的 sanitizeOutput，直接 mutate 模型刚返回的 AIMessage。 */
-function applyOutputRules(result: any, rules: readonly IntegrityRule[], ctx: RuleContext): void {
-  const msg: any = result?.message ?? result;
-  if (!msg || !AIMessage.isInstance(msg)) return;
+function applyOutputRules(
+  result: unknown,
+  rules: readonly IntegrityRule[],
+  ctx: RuleContext,
+): void {
+  const candidate =
+    result && typeof result === 'object' && 'message' in result
+      ? (result as { message: unknown }).message
+      : result;
+  if (!candidate || !AIMessage.isInstance(candidate)) return;
   for (const rule of rules) {
-    if (rule.sanitizeOutput) rule.sanitizeOutput(msg, ctx);
+    if (rule.sanitizeOutput) rule.sanitizeOutput(candidate, ctx);
+  }
+}
+
+/**
+ * 严格紧邻校验：每条 AIMessage 的 tool_calls[i].id 都必须在它之后的连续
+ * ToolMessage 序列中按相同顺序找到匹配。任一偏差只 console.error，不抛异常 ——
+ * 真正交给 OpenAI 的请求格式问题应在规则链里修复，本函数仅作为问题暴露层。
+ */
+function assertToolCallIntegrity(messages: BaseMessage[]): void {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!AIMessage.isInstance(m)) continue;
+    const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+    const ids = calls.map((toolCall) => toolCall?.id).filter((id): id is string => !!id);
+    if (ids.length === 0) continue;
+
+    const expected = new Set(ids);
+    let j = i + 1;
+    const matched = new Set<string>();
+    while (j < messages.length && messages[j] instanceof ToolMessage) {
+      const toolMessage = messages[j] as ToolMessage;
+      if (toolMessage.tool_call_id && expected.has(toolMessage.tool_call_id)) {
+        matched.add(toolMessage.tool_call_id);
+      }
+      j += 1;
+    }
+    if (matched.size !== expected.size) {
+      const missing = ids.filter((id) => !matched.has(id));
+      console.error(
+        `[ToolCallIntegrity] post-sanitize check failed at message #${i}: ` +
+          `${missing.length}/${ids.length} tool_call_id(s) without matching ` +
+          `ToolMessage immediately after AIMessage; missing=[${missing.join(', ')}]`,
+      );
+    }
   }
 }
 
@@ -120,40 +161,6 @@ export function createToolCallIntegrityMiddleware(options: ToolCallIntegrityOpti
 
 /** 默认实例：装配链直接使用即可。 */
 export const toolCallIntegrityMiddleware = createToolCallIntegrityMiddleware();
-
-/**
- * 严格紧邻校验：每条 AIMessage 的 tool_calls[i].id 都必须在它之后的连续
- * ToolMessage 序列中按相同顺序找到匹配。任一偏差只 console.error，不抛异常 ——
- * 真正交给 OpenAI 的请求格式问题应在规则链里修复，本函数仅作为问题暴露层。
- */
-function assertToolCallIntegrity(messages: BaseMessage[]): void {
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (!AIMessage.isInstance(m)) continue;
-    const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
-    const ids = calls.map((tc) => tc?.id).filter((id): id is string => !!id);
-    if (ids.length === 0) continue;
-
-    const expected = new Set(ids);
-    let j = i + 1;
-    const matched = new Set<string>();
-    while (j < messages.length && messages[j] instanceof ToolMessage) {
-      const tm = messages[j] as ToolMessage;
-      if (tm.tool_call_id && expected.has(tm.tool_call_id)) {
-        matched.add(tm.tool_call_id);
-      }
-      j += 1;
-    }
-    if (matched.size !== expected.size) {
-      const missing = ids.filter((id) => !matched.has(id));
-      console.error(
-        `[ToolCallIntegrity] post-sanitize check failed at message #${i}: ` +
-          `${missing.length}/${ids.length} tool_call_id(s) without matching ` +
-          `ToolMessage immediately after AIMessage; missing=[${missing.join(', ')}]`,
-      );
-    }
-  }
-}
 
 export type { IntegrityRule, RuleContext } from './types';
 export { DEFAULT_INTEGRITY_RULES } from './rules';
