@@ -13,7 +13,9 @@ import { Modal } from 'antd';
 import { useState } from 'react';
 
 import { AccountSettingsPage } from './account-settings-page';
+import { MemorySettingsPage } from './memory-settings-page';
 import { PlaceholderPage } from './placeholder-page';
+import { ToolsSettingsPage } from './tools-settings-page';
 
 type TabKey = 'account' | 'appearance' | 'notification' | 'memory' | 'tools' | 'skills' | 'about';
 
@@ -73,7 +75,15 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         <div className="flex-1 overflow-y-auto p-8">
-          {active === 'account' ? <AccountSettingsPage /> : <PlaceholderPage title={activeLabel} />}
+          {active === 'account' ? (
+            <AccountSettingsPage />
+          ) : active === 'memory' ? (
+            <MemorySettingsPage />
+          ) : active === 'tools' ? (
+            <ToolsSettingsPage />
+          ) : (
+            <PlaceholderPage title={activeLabel} />
+          )}
         </div>
       </div>
     </Modal>
