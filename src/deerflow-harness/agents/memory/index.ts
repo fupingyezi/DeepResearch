@@ -1,5 +1,5 @@
 /**
- * Memory subsystem 公共门面 —— 与 Python `agents/memory/__init__.py` 对齐。
+ * Memory subsystem 公共门面
  *
  * 上层（lead-agent prompt builder / memoryMiddleware / HTTP API）应仅依赖本文件。
  */
@@ -89,7 +89,10 @@ export interface BuildMemoryContextOptions {
 export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): Promise<string> {
   try {
     const config = _gmc();
-    if (!config.enabled || !config.injectionEnabled) return '';
+    if (!config.enabled || !config.injectionEnabled) {
+      console.warn('[memory] early return: config disabled');
+      return '';
+    }
     const data = await _gms().load({
       agentName: opts.agentName ?? null,
       userId: opts.userId ?? null,

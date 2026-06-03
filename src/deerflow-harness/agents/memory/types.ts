@@ -1,5 +1,5 @@
 /**
- * Memory data schema —— 与 Python 端 `agents/memory/storage.py::create_empty_memory` 完全对齐。
+ * Memory data schema
  *
  * 文件以 JSON 形式落盘。所有时间戳为 ISO-8601 + `Z` 后缀（UTC）。
  */
@@ -54,7 +54,7 @@ export interface MemoryData {
   facts: Fact[];
 }
 
-/** 当前 UTC ISO-8601（带 Z 后缀），与 Python `utc_now_iso_z` 对齐。 */
+/** 当前 UTC ISO-8601（带 Z 后缀） */
 export function utcNowIsoZ(): string {
   // toISOString() 已经是 ISO + Z 后缀。
   return new Date().toISOString();
@@ -80,7 +80,7 @@ export function createEmptyMemory(): MemoryData {
   };
 }
 
-/** Agent 名校验，避免路径穿越；与 Python AGENT_NAME_PATTERN 一致。 */
+/** Agent 名校验，避免路径穿越 */
 export const AGENT_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 export function validateAgentName(agentName: string): void {

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = await getMemoryData(null, user.id);
+    const data = await getMemoryData('lead', user.id);
     return NextResponse.json({ message: 'Get memory success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory] get error:', error);
@@ -30,7 +30,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const data = await clearMemoryData(null, user.id);
+    const data = await clearMemoryData('lead', user.id);
     return NextResponse.json({ message: 'Clear memory success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory] clear error:', error);

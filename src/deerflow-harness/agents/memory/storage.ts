@@ -91,7 +91,7 @@ export class FileMemoryStorage implements MemoryStorage {
     try {
       raw = await fs.readFile(filePath, 'utf-8');
     } catch (e: any) {
-      // 文件不存在视为空 memory；其余 IO 错误同样回退（与 Python 行为一致）。
+      // 文件不存在视为空 memory；其余 IO 错误同样回退
       if (e?.code !== 'ENOENT') {
         console.warn('[memory/storage] Failed to read memory file:', e);
       }

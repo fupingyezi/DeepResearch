@@ -1,6 +1,6 @@
 /**
  * RuntimeContext —— 通过 AsyncLocalStorage 在 lead-agent / sub-agent 调用链上
- * 透传 thread / run / user 等运行时信息（等价 Python `contextvars.ContextVar`）。
+ * 透传 thread / run / user 等运行时信息。
  *
  * 字段说明：
  * - `currentModelConfig`：lead-agent 当前轮次使用的 ModelConfig。

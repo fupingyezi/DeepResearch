@@ -1,10 +1,9 @@
 /**
- * Memory updater —— 对齐 Python `agents/memory/updater.py`。
+ * Memory updater
  *
  * 流程：
  *   load current memory → 拼 prompt → LLM ainvoke → 解析 JSON → applyUpdates → save
  *
- * 与 Python 对齐的关键不变量：
  * - max_facts 限制（按 confidence 倒排截断）
  * - factConfidenceThreshold 过滤
  * - 同 content 去重（casefold trim）
@@ -36,7 +35,7 @@ export function getMemoryModelFactory(): MemoryModelFactory | null {
   return _modelFactory;
 }
 
-// Manual fact CRUD（对齐 Python create/update/delete_memory_fact）
+// Manual fact CRUD
 
 export async function getMemoryData(
   agentName: string | null = null,
@@ -162,7 +161,7 @@ export async function updateMemoryFact(
   return updated;
 }
 
-// Strip upload mentions（对齐 Python `_strip_upload_mentions_from_memory`）
+// Strip upload mentions
 
 const UPLOAD_SENTENCE_RE =
   /[^.!?]*\b(?:upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
@@ -372,7 +371,7 @@ export class MemoryUpdater {
         Boolean(opts.reinforcementDetected),
       );
 
-      // 与 Python 对齐：用占位符直接 replace，避免 JS 模板字符串语义冲突
+      // 用占位符直接 replace，避免 JS 模板字符串语义冲突
       const prompt = MEMORY_UPDATE_PROMPT.replace(
         '{current_memory}',
         JSON.stringify(current, null, 2),
@@ -387,14 +386,14 @@ export class MemoryUpdater {
       }
 
       // 关键：显式 callbacks: [] 切断与外层（HTTP SSE）的 callback handler 链。
-      // 否则该 LLM 调用会把 token 推到主请求那条已关闭的 ReadableStream，
+      // 防止LLM 调用把 token 推到主请求那条已关闭的 ReadableStream，
       // 触发 `ERR_INVALID_STATE: Controller is already closed`。
       const response = await model.invoke(prompt, {
         runName: 'memory_agent',
         callbacks: [],
         tags: ['memory-updater'],
       });
-      const responseContent = (response as { content?: unknown }).content;
+      const responseContent = response.content;
       let text = extractMessageContentText(responseContent).trim();
       if (text.startsWith('```')) {
         const lines = text.split('\n');
