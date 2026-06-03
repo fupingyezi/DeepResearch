@@ -83,6 +83,14 @@ export {
 } from './agents/memory';
 
 export {
+  setTitleModelFactory,
+  getTitleModelFactory,
+  type TitleModelFactory,
+  consumeTitleUpdate,
+  type TitleUpdatePayload,
+} from './agents/middlewares';
+
+export {
   createSseStream,
   toClientAgentEvent,
   createClientAgentEvent,

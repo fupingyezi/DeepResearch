@@ -43,7 +43,14 @@ export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 export { summarizationMiddleware, createSummarizationMiddleware } from './summarization-middleware';
 export type { SummarizationOptions } from './summarization-middleware';
 export { todoMiddleware } from './todo-middleware';
-export { titleMiddleware } from './title-middleware';
+export {
+  titleMiddleware,
+  setTitleModelFactory,
+  getTitleModelFactory,
+} from './title-middleware/title-middleware';
+export type { TitleModelFactory } from './title-middleware/title-middleware';
+export { publishTitleUpdate, consumeTitleUpdate } from './title-middleware/title-bus';
+export type { TitleUpdatePayload } from './title-middleware/title-bus';
 export { memoryMiddleware } from './memory-middleware';
 export { viewImageMiddleware } from './view-image-middleware';
 export {
@@ -64,7 +71,7 @@ import { guardrailMiddleware } from './guardrail-middleware';
 import { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 import { summarizationMiddleware } from './summarization-middleware';
 import { todoMiddleware } from './todo-middleware';
-import { titleMiddleware } from './title-middleware';
+import { titleMiddleware } from './title-middleware/title-middleware';
 import { memoryMiddleware } from './memory-middleware';
 import { viewImageMiddleware } from './view-image-middleware';
 // 引用模块级单例仅用于位序文档常量 ORDERED_MIDDLEWARES。

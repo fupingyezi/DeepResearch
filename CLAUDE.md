@@ -134,7 +134,7 @@ Agent 缓存         Postgres / 内存  ThreadMeta
 ┌──────────────────────────────────────────────┐
 │       Agent 执行流水线（LangGraph ReAct）      │
 │  createBaseAgent() → assembleFromFeatures()   │
-│  中间件链（最多 7 层，按 RuntimeFeatures 组装） │
+│  中间件链（按 ORDERED_MIDDLEWARES 位序，由 RuntimeFeatures 组装） │
 │  工具：searchWebTool / taskTool / ...         │
 └──────────────────────────────────────────────┘
      │
@@ -350,15 +350,22 @@ StreamBridge（单例 streamBridge）
 
 #### 中间件组装规则（`assembleFromFeatures`）
 
-| 顺序 | 中间件                           | 触发条件                                                                     |
-| ---- | -------------------------------- | ---------------------------------------------------------------------------- |
-| 1    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置 |
-| 2    | `DanglingToolCallMiddleware`     | 始终启用                                                                     |
-| 3    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                     |
-| 4    | `MemoryMiddleware`               | `features.memory=true` 或自定义中间件                                        |
-| 5    | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）             |
-| 6    | `LoopDetectionMiddleware`        | 始终启用                                                                     |
-| 7    | `ClarificationMiddleware`        | 始终启用，且始终最后                                                         |
+按 `ORDERED_MIDDLEWARES` 位序装配（位序留白处为暂未挂的占位 sandbox/guardrail）：
+
+| 位序 | 中间件                           | 触发条件                                                                                                        |
+| ---- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| —    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置                                    |
+| 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                |
+| 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）       |
+| 3    | `DanglingToolCallMiddleware`     | 始终启用                                                                                                        |
+| 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                        |
+| 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware()` 实例（不允许 true）                                |
+| 7    | `TodoMiddleware`                 | `features.todo=true`（默认关闭，开启后注入 `write_todos` 工具 + ThreadState.todos）                             |
+| 8    | `TitleMiddleware`                | `features.autoTitle=true`（服务级默认 true）；afterAgent 用固定小模型异步生成标题，落 chat_session/threads_meta |
+| 9    | `MemoryMiddleware`               | `features.memory=true`（服务级默认 true）                                                                       |
+| 10   | `ViewImageMiddleware`            | `features.vision=true`（默认关闭；当前为占位 + 启用警告，等视觉模型适配再做）                                   |
+| 11   | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）                                                |
+| 12   | `LoopDetectionMiddleware`        | 始终启用                                                                                                        |
 
 同时，`taskTool` 始终注入到 `extraTools`。
 
@@ -370,10 +377,12 @@ type FeatureToggle<M> = false | true | M; // false=禁用 / true=默认实现 / 
 interface RuntimeFeatures {
   sandbox?: FeatureToggle;
   memory?: FeatureToggle;
-  summarization?: FeatureToggle; // 不允许 true
-  subagent?: FeatureToggle;
-  vision?: FeatureToggle;
+  summarization?: FeatureToggle; // 不允许 true（须传 createSummarizationMiddleware 实例）
+  todo?: FeatureToggle;
+  vision?: FeatureToggle; // viewImageMiddleware（当前为占位）
   autoTitle?: FeatureToggle;
+  threadData?: FeatureToggle; // 装载 file_metadata 到 state.uploadedFiles
+  uploads?: FeatureToggle; // 注入 uploadedFiles 到 prompt（SystemMessage）
   guardrail?: FeatureToggle; // 不允许 true
   qwenToolCallRecovery?: FeatureToggle;
 }

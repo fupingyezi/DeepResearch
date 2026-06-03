@@ -31,6 +31,7 @@ import {
   ClientAgentEventType,
   createClientAgentEvent,
   createSseStream,
+  consumeTitleUpdate,
   type ClientAgentEvent,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
@@ -362,6 +363,15 @@ export async function POST(request: NextRequest) {
     try {
       for await (const ev of inner) {
         if (collector) collector.onEvent(ev);
+        if (ev.eventType === ClientAgentEventType.END) {
+          // 过滤 StreamBridge 内部发出的 system END（仅用于唤醒挂起订阅者）
+          if (ev.agentId === 'system') continue;
+          const titleUpdate = consumeTitleUpdate(resolvedThreadId);
+          if (titleUpdate) {
+            yield createClientAgentEvent(ClientAgentEventType.END, ev.agentId, { titleUpdate });
+            continue;
+          }
+        }
         yield ev;
       }
     } finally {

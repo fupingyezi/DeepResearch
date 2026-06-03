@@ -15,9 +15,27 @@ export interface ViewedImageData {
   mimeType: string;
 }
 
+/**
+ * 上传文件在 ThreadState 中的运行期表示（由 ThreadDataMiddleware 装载）。
+ *
+ * 与 chat_message.parts/file_metadata 表的差异：
+ * - file_metadata 是「持久化」事实，记录 message ↔ file 关系；
+ * - UploadedFile 是「运行期」上下文，扁平包含文件元信息 + 解析后的 content
+ *   全文（来自 file_content.content 列），供 UploadsMiddleware 注入 prompt。
+ *
+ * 字段保留可选 + 索引签名
+ */
 export interface UploadedFile {
-  // 与 Python 的 list[dict] 对齐，按需补字段
-  [key: string]: any;
+  fileId?: string;
+  filename?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  minioKey?: string;
+  /** 解析后的全文（file_content.content）；可能为 null（解析失败 / 未解析）。 */
+  content?: string | null;
+  /** ISO8601 上传时间。 */
+  uploadedAt?: string;
+  [key: string]: unknown;
 }
 
 /** Reducer for artifacts list - 合并并去重 */

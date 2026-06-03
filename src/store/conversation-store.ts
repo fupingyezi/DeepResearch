@@ -43,9 +43,21 @@ const useConversationStore = create<ConversationState>((set) => ({
       chatSessions: chatSessions,
     })),
   addChatSession: (chatSession) =>
-    set((state) => ({
-      chatSessions: [chatSession, ...state.chatSessions],
-    })),
+    set((state) => {
+      let hasSession = false;
+      for (let i = 0; i < state.chatSessions.length; i++) {
+        if (state.chatSessions[i].id === chatSession.id) {
+          hasSession = true;
+          break;
+        }
+      }
+      if (!hasSession) {
+        return {
+          chatSessions: [chatSession, ...state.chatSessions],
+        };
+      }
+      return {};
+    }),
   updateChatSession: (chatSession, op) =>
     set((state) => {
       if (!chatSession) return {};

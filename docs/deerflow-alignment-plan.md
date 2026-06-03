@@ -39,19 +39,24 @@ mini-DeepResearch 与 DeerFlow 2.0 的**整体形态已经一致**：二者都�
 DeerFlow 2.0（`backend/packages/harness/deerflow/agents/middlewares`，16 个，均真实现并装配）：
 `clarification` · `dangling_tool_call` · `deferred_tool_filter` · `llm_error_handling` · `loop_detection` · `memory` · `sandbox_audit` · `subagent_limit` · `summarization` · `thread_data` · `title` · `todo` · `token_usage` · `tool_error_handling` · `uploads` · `view_image`
 
-mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assembleFromFeatures` 装配的仅 7 个：
+mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assembleFromFeatures` 装配的中间件（按 `ORDERED_MIDDLEWARES` 位序）：
 
-| 顺序 | 中间件                            | 启用条件                                                  | 对应 deer-flow         |
+| 位序 | 中间件                            | 启用条件                                                  | 对应 deer-flow         |
 | ---- | --------------------------------- | --------------------------------------------------------- | ---------------------- |
-| 1    | `qwenToolCallRecoveryMiddleware`  | `qwenToolCallRecovery===true` 或 `provider==='qwen'` 自动 | mini 特有（Qwen 适配） |
-| 2    | `toolCallIntegrityMiddleware`     | 始终                                                      | `dangling_tool_call`   |
-| 3    | `toolErrorHandlingMiddleware`     | 始终                                                      | `tool_error_handling`  |
-| 4    | `memoryMiddleware`                | `features.memory===true`                                  | `memory`               |
-| 5    | `createSubagentLimitMiddleware()` | 始终（每请求新建实例）                                    | `subagent_limit`       |
-| 6    | `loopDetectionMiddleware`         | 始终                                                      | `loop_detection`       |
-| 7    | `clarificationMiddleware`         | 始终，且最后                                              | `clarification`        |
+| —    | `qwenToolCallRecoveryMiddleware`  | `qwenToolCallRecovery===true` 或 `provider==='qwen'` 自动 | mini 特有（Qwen 适配） |
+| 0    | `threadDataMiddleware`            | `features.threadData===true`（服务级默认 true）           | `thread_data`          |
+| 1    | `uploadsMiddleware`               | `features.uploads===true`（服务级默认 true）              | `uploads`              |
+| 3    | `toolCallIntegrityMiddleware`     | 始终                                                      | `dangling_tool_call`   |
+| 5    | `toolErrorHandlingMiddleware`     | 始终                                                      | `tool_error_handling`  |
+| 6    | `summarizationMiddleware`         | `features.summarization` = 实例（不允许 true）            | `summarization`        |
+| 7    | `todoMiddleware`                  | `features.todo===true`                                    | `todo`                 |
+| 8    | `titleMiddleware`                 | `features.autoTitle===true`（服务级默认 true）            | `title`                |
+| 9    | `memoryMiddleware`                | `features.memory===true`（服务级默认 true）               | `memory`               |
+| 10   | `viewImageMiddleware`             | `features.vision===true`（默认 false；当前为占位）        | `view_image`           |
+| 11   | `createSubagentLimitMiddleware()` | 始终（每请求新建实例）                                    | `subagent_limit`       |
+| 12   | `loopDetectionMiddleware`         | 始终                                                      | `loop_detection`       |
 
-**占位 / 未装配**（本次需补齐用户选定项）：`summarization` · `todo` · `title` · `uploads` · `thread-data` · `view-image`（另有 `sandbox` / `guardrail` 占位，本次不在范围内）。
+**占位 / 未装配**：`view_image`（占位 + 启用警告，等视觉模型适配再做）。
 **mini 暂缺**：`deferred_tool_filter` · `llm_error_handling` · `token_usage`（本次不强制补，文档登记）。
 
 ---
@@ -79,7 +84,7 @@ mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assem
 
 - **#4 buffer 无上限**：`ThreadChannel.buffer` 无裁剪，长线程内存膨胀（`CLAUDE.md` 已知限制 #3）。
 - ~~**#5 memory 永不启用**~~（已落地）：`_service.ts` 注入 `baseOptions.memoryEnabled: true` 默认开启；`resolveRuntimeOptions` 接通 `metadata.memoryEnabled` 单次请求覆盖（仅 `typeof === 'boolean'` 才生效）；`route.ts` 透传 `body.configuration.memoryEnabled`。
-- **#6 中间件占位**：`title/uploads/thread-data/view-image` 仍为空实现（`summarization`/`todo` 已接 LangChain 现成实现，未默认启用）。
+- ~~**#6 中间件占位**~~（基本落地）：`title` / `uploads` / `thread-data` 已实装并由 `_service.ts` 服务级默认开启；`view-image` 仍为占位（首次启用时 `console.warn` 一次，等真有视觉模型适配再做）；`summarization` / `todo` 已接 LangChain 现成实现，未默认启用。
 - **#7 Subagent 需核对**：`executor.ts` 已具超时/取消/终态一次/`inherit`/父子共享 checkpoint/`recursionLimit`；`subagent-limit-middleware.ts` 已具并发(默认3)+总量(默认8)双闸+LRU；`general-purpose.ts` 已 `disabledTools:['task']`+`model:'inherit'`。需对照 deer-flow 做差距校验与补强，**而非重写**。
 - **#8 Prompt 缺澄清系统**：缺 deer-flow 的 CLARIFY→PLAN→ACT、skills_section、working_directory、统一 citations 段。
 

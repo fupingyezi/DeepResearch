@@ -18,6 +18,9 @@ import { getContext } from './runtime/context';
 
 interface RuntimeRunOptions {
   memoryEnabled: boolean;
+  autoTitleEnabled: boolean;
+  threadDataEnabled: boolean;
+  uploadsEnabled: boolean;
   agentName: string;
   userId: string | null;
   availableSkills?: string[];
@@ -27,9 +30,21 @@ function buildConfigKey(modelConfig: ModelConfig, opts: RuntimeRunOptions): Agen
   return JSON.stringify([
     modelConfig.modelName,
     opts.memoryEnabled,
+    opts.autoTitleEnabled,
+    opts.threadDataEnabled,
+    opts.uploadsEnabled,
     opts.agentName,
     opts.availableSkills?.sort() ?? [],
   ]);
+}
+
+/**
+ * metadata 显式 boolean 覆盖 baseOptions：
+ * - 必须严格 `typeof === 'boolean'` 才覆盖；
+ * - 防止 `metadata.<key> = undefined` 被解释为 false 导致服务级默认被静默关闭。
+ */
+function pickBooleanOverride(metadataValue: unknown, fallback: boolean): boolean {
+  return typeof metadataValue === 'boolean' ? metadataValue : fallback;
 }
 
 /**
@@ -86,6 +101,9 @@ export class DeerFlowClient {
     this.baseOptions = {
       agentName: options?.agentName ?? 'lead',
       memoryEnabled: options?.memoryEnabled ?? false,
+      autoTitleEnabled: options?.autoTitleEnabled ?? false,
+      threadDataEnabled: options?.threadDataEnabled ?? false,
+      uploadsEnabled: options?.uploadsEnabled ?? false,
       userId: options?.userId,
       availableSkills: options?.availableSkills,
     };
@@ -99,9 +117,12 @@ export class DeerFlowClient {
   /**
    * 计算本轮 stream 的运行期开关：以 baseOptions 为底，metadata 显式传值时覆盖。
    *
-   * 优先级（仅 memoryEnabled 走两级；其它键暂不开放运行期覆盖）：
-   *   1. metadata.memoryEnabled (boolean) — 本次请求显式覆盖
-   *   2. baseOptions.memoryEnabled        — 服务级默认（_service.ts 注入 true）
+   * 优先级（仅以下键支持运行期覆盖）：
+   *   1. metadata.<key> (boolean) — 本次请求显式覆盖
+   *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
+   *
+   * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
+   * uploadsEnabled。`agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
    * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
@@ -109,11 +130,20 @@ export class DeerFlowClient {
    */
   private resolveRuntimeOptions(metadata?: Record<string, any>): RuntimeRunOptions {
     const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
-    const metadataMemory = metadata?.memoryEnabled;
-    const memoryEnabled =
-      typeof metadataMemory === 'boolean' ? metadataMemory : !!this.baseOptions.memoryEnabled;
     return {
-      memoryEnabled,
+      memoryEnabled: pickBooleanOverride(metadata?.memoryEnabled, !!this.baseOptions.memoryEnabled),
+      autoTitleEnabled: pickBooleanOverride(
+        metadata?.autoTitleEnabled,
+        !!this.baseOptions.autoTitleEnabled,
+      ),
+      threadDataEnabled: pickBooleanOverride(
+        metadata?.threadDataEnabled,
+        !!this.baseOptions.threadDataEnabled,
+      ),
+      uploadsEnabled: pickBooleanOverride(
+        metadata?.uploadsEnabled,
+        !!this.baseOptions.uploadsEnabled,
+      ),
       agentName: this.baseOptions.agentName ?? 'lead',
       userId,
       availableSkills: this.baseOptions.availableSkills,
@@ -180,6 +210,9 @@ export class DeerFlowClient {
       provider,
       features: {
         memory: opts.memoryEnabled,
+        autoTitle: opts.autoTitleEnabled,
+        threadData: opts.threadDataEnabled,
+        uploads: opts.uploadsEnabled,
       },
     });
 
