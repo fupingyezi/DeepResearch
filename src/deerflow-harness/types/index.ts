@@ -32,6 +32,12 @@ export interface ClientOptions {
   agentName?: string;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
+  /** 是否启用 autoTitle（features.autoTitle）。默认 false；服务级建议 true。 */
+  autoTitleEnabled?: boolean;
+  /** 是否启用 ThreadDataMiddleware（features.threadData）。默认 false；服务级建议 true。 */
+  threadDataEnabled?: boolean;
+  /** 是否启用 UploadsMiddleware（features.uploads）。默认 false；服务级建议 true。 */
+  uploadsEnabled?: boolean;
   /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
   userId?: string;
   /** 可用的 skill 列表 */

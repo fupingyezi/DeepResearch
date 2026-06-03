@@ -6,7 +6,8 @@
  *   {
  *     "sessionId"?: string,                       // 缺省 = 新建会话；存在 = 已有会话
  *     "configuration"?: {
- *       "model"?: { "value"?: string }            // 替代旧的 metadata.modelKey
+ *       "model"?: { "value"?: string },           // 替代旧的 metadata.modelKey
+ *       "memoryEnabled"?: boolean                 // 单次请求覆盖服务级 memory 开关
  *     },
  *     "message": {
  *       "contents": Array<
@@ -30,6 +31,7 @@ import {
   ClientAgentEventType,
   createClientAgentEvent,
   createSseStream,
+  consumeTitleUpdate,
   type ClientAgentEvent,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
@@ -57,6 +59,8 @@ interface ChatStreamBody {
   sessionId?: string;
   configuration?: {
     model?: { value?: string };
+    /** 本次请求是否启用长期记忆；不传 = 走服务级默认（_service.ts 注入 true）。 */
+    memoryEnabled?: boolean;
     [k: string]: unknown;
   } | null;
   message: { contents: ContentBlock[] };
@@ -220,6 +224,17 @@ export async function POST(request: NextRequest) {
   // 不再有 dynamicClient 直连分支（避免 Agent 被执行两次、断线无法回放）。
   const modelConfig = resolveModelConfigFromConfiguration(body.configuration ?? undefined);
 
+  // 运行期开关：仅当 client 端显式传入 boolean 时才透传，None/undefined 留给
+  // DeerFlowClient.resolveRuntimeOptions 走 baseOptions 默认值。
+  const memoryEnabledOverride =
+    typeof body.configuration?.memoryEnabled === 'boolean'
+      ? body.configuration.memoryEnabled
+      : undefined;
+  const runMetadata: Record<string, unknown> | undefined =
+    typeof memoryEnabledOverride === 'boolean'
+      ? { memoryEnabled: memoryEnabledOverride }
+      : undefined;
+
   // —— 幂等创建 thread ——
   try {
     const threadService = await getThreadService();
@@ -305,12 +320,14 @@ export async function POST(request: NextRequest) {
           user_id,
           decision: inputText,
           ...(modelConfig ? { modelConfig } : {}),
+          ...(runMetadata ? { metadata: runMetadata } : {}),
         })
       : await threadService.submitRun({
           thread_id: resolvedThreadId,
           user_id,
           input: inputText,
           ...(modelConfig ? { modelConfig } : {}),
+          ...(runMetadata ? { metadata: runMetadata } : {}),
         });
     run_id = r.run_id;
   } catch (e) {
@@ -346,6 +363,15 @@ export async function POST(request: NextRequest) {
     try {
       for await (const ev of inner) {
         if (collector) collector.onEvent(ev);
+        if (ev.eventType === ClientAgentEventType.END) {
+          // 过滤 StreamBridge 内部发出的 system END（仅用于唤醒挂起订阅者）
+          if (ev.agentId === 'system') continue;
+          const titleUpdate = consumeTitleUpdate(resolvedThreadId);
+          if (titleUpdate) {
+            yield createClientAgentEvent(ClientAgentEventType.END, ev.agentId, { titleUpdate });
+            continue;
+          }
+        }
         yield ev;
       }
     } finally {

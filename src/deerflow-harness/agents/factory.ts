@@ -3,7 +3,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { BaseCheckpointSaver } from '@langchain/langgraph';
 import { ThreadStateAnnotation } from './thread-state';
-import { RuntimeFeatures, DEFAULT_FEATURES } from './features';
+import { RuntimeFeatures, DEFAULT_FEATURES, type FeatureToggle } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool } from '../tools';
 import {
@@ -11,6 +11,10 @@ import {
   toolErrorHandlingMiddleware,
   memoryMiddleware,
   todoMiddleware,
+  titleMiddleware,
+  threadDataMiddleware,
+  uploadsMiddleware,
+  viewImageMiddleware,
   createSubagentLimitMiddleware,
   loopDetectionMiddleware,
   qwenToolCallRecoveryMiddleware,
@@ -104,7 +108,13 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  * 装配中间件链与 lead-agent 内置 extra tools。
  *
  * lead-agent 永远启用 subagent 能力：`taskTool` 与 `subagentLimitMiddleware`
- * 始终挂载。其它能力（memory / qwen recovery）按 features 开关条件挂载。
+ * 始终挂载。其它能力（memory / qwen recovery / threadData / uploads / title /
+ * vision）按 features 开关条件挂载。
+ *
+ * 装配顺序严格按 `middlewares/index.ts` 中 ORDERED_MIDDLEWARES 编排：
+ *   threadData(0) → uploads(1) → sandbox(2 暂未挂) → toolCallIntegrity(3) →
+ *   guardrail(4 暂未挂) → toolErrorHandling(5) → summarization(6) → todo(7) →
+ *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
  *
  * SubagentExecutor 内部调用 createBaseAgent 时同样会走这条路径，因此
  * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
@@ -121,6 +131,8 @@ export function assembleFromFeatures(
   const extraTools: StructuredToolInterface[] = [];
 
   // QwenToolCallRecoveryMiddleware：feature 启用，或 provider=qwen 时自动启用
+  // 编排上不在 ORDERED_MIDDLEWARES 内（mini 特有），保持在最前以最早处理 qwen
+  // 工具调用流式残片。
   const recoveryFeat = features.qwenToolCallRecovery;
   if (recoveryFeat === true) {
     chain.push(qwenToolCallRecoveryMiddleware);
@@ -130,19 +142,26 @@ export function assembleFromFeatures(
     chain.push(qwenToolCallRecoveryMiddleware);
   }
 
-  // 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
+  // (0) ThreadDataMiddleware：beforeAgent 装载 state.uploadedFiles。
+  pushFeature(chain, features.threadData, threadDataMiddleware);
+
+  // (1) UploadsMiddleware：beforeAgent 把 uploadedFiles 注入 SystemMessage。
+  // 必须排在 threadData 之后；运行期顺序由本数组顺序决定。
+  pushFeature(chain, features.uploads, uploadsMiddleware);
+
+  // (3) 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
 
-  // 始终启用：工具自身执行异常的兜底
+  // (5) 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);
 
-  // 可选：历史摘要（features.summarization 不允许 true，须传 createSummarizationMiddleware 实例）
+  // (6) 可选：历史摘要（features.summarization 不允许 true，须传 createSummarizationMiddleware 实例）
   const summarizationFeat = features.summarization;
   if (typeof summarizationFeat === 'object' && summarizationFeat !== null) {
     chain.push(summarizationFeat as AgentMiddleware);
   }
 
-  // 可选：todo 规划（现成 todoListMiddleware）
+  // (7) 可选：todo 规划（现成 todoListMiddleware）
   const todoFeat = features.todo;
   if (todoFeat === true) {
     chain.push(todoMiddleware);
@@ -150,7 +169,10 @@ export function assembleFromFeatures(
     chain.push(todoFeat as AgentMiddleware);
   }
 
-  // 可选：长期记忆
+  // (8) 可选：autoTitle —— afterAgent 生成会话标题并落库。
+  pushFeature(chain, features.autoTitle, titleMiddleware);
+
+  // (9) 可选：长期记忆
   const memoryFeat = features.memory;
   if (memoryFeat === true) {
     chain.push(memoryMiddleware);
@@ -158,16 +180,37 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // 始终启用：subagent 频次/并发上限。每个 agent 实例独立 counter——
+  // (10) 可选：viewImage —— 当前为占位实现（仅启用时打印一次警告）。
+  pushFeature(chain, features.vision, viewImageMiddleware);
+
+  // (11) 始终启用：subagent 频次/并发上限。每个 agent 实例独立 counter——
   // 模块级单例会让 CounterRegistry 跨请求共享，异常路径下 inflight 不
   // 回收会导致下次请求误报"concurrency limit reached"。
   chain.push(createSubagentLimitMiddleware());
 
-  // 始终启用：循环检测
+  // (12) 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
   // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）
   extraTools.push(taskTool as StructuredToolInterface);
 
   return { chain, extraTools };
+}
+
+/**
+ * features 三态装配辅助：
+ * - `true`     → 挂默认 middleware；
+ * - 对象实例   → 挂自定义 middleware；
+ * - 其它       → 跳过。
+ */
+function pushFeature(
+  chain: AgentMiddleware[],
+  feat: FeatureToggle | undefined,
+  defaultMw: AgentMiddleware,
+): void {
+  if (feat === true) {
+    chain.push(defaultMw);
+  } else if (typeof feat === 'object' && feat !== null) {
+    chain.push(feat);
+  }
 }

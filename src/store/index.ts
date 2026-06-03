@@ -1,12 +1,16 @@
-import useConversationStore from './conversation-store';
-import useArtifactPanelStore from './deep-research-process-store';
+import useChatSessionStore from './chat-session-store';
 import useFileUploadStore from './file-upload-store';
 import { useModelStore } from './modelStore';
 
-import type { ConversationState } from './conversation-store';
-import type { ArtifactPanelState } from './deep-research-process-store';
+import type { ChatSessionState } from './chat-session-store';
+import type { ArtifactPanelState } from './chat-session-store';
 import type { UploadedFileInfo } from './file-upload-store';
 
-export { useConversationStore, useArtifactPanelStore, useFileUploadStore, useModelStore };
+export {
+  useChatSessionStore as useConversationStore,
+  useChatSessionStore as useArtifactPanelStore,
+  useFileUploadStore,
+  useModelStore,
+};
 
-export { ConversationState, ArtifactPanelState, UploadedFileInfo };
+export { ChatSessionState, ArtifactPanelState, UploadedFileInfo };

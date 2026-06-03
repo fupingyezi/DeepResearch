@@ -10,8 +10,12 @@ export interface RuntimeFeatures {
   memory?: FeatureToggle;
   summarization?: FeatureToggle; // 不允许 true（须传 createSummarizationMiddleware 实例）
   todo?: FeatureToggle; // 现成 todoListMiddleware；true=默认实现
-  vision?: FeatureToggle;
+  vision?: FeatureToggle; // viewImageMiddleware（当前为占位 + 警告）
   autoTitle?: FeatureToggle;
+  /** ThreadDataMiddleware：beforeAgent 从 file_metadata 装载本会话上传文件到 state。 */
+  threadData?: FeatureToggle;
+  /** UploadsMiddleware：把 state.uploadedFiles 渲染为 SystemMessage 注入 prompt。 */
+  uploads?: FeatureToggle;
   guardrail?: FeatureToggle; // 不允许 true
   qwenToolCallRecovery?: FeatureToggle;
 }
@@ -23,6 +27,8 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
   todo: false,
   vision: false,
   autoTitle: false,
+  threadData: false,
+  uploads: false,
   guardrail: false,
 };
 

@@ -12,6 +12,7 @@ import {
   type PartsState,
 } from './parts-reducer';
 import { createRafFlusher, type RafFlusher } from '@/utils/common';
+import { TitleUpdatePayload } from '@/deerflow-harness';
 
 export interface StreamChatConfig {
   operation?: 'resume' | 'recall' | 'reEditCall';
@@ -27,6 +28,7 @@ export interface StreamChatConfig {
   setIsChating: (loading: boolean) => void;
   setShouldAutoScroll: (scroll: boolean) => void;
   addChatSession: (session: ChatSessionType) => void;
+  updateChatSession: (session: ChatSessionType, op: 'edit' | 'delete') => void;
   setCurrentSessionId: (id: UUIDTypes) => void;
   setCurrentMessages: (messages: ChatMessageType[]) => void;
   setAbortController: (controller: AbortController | null) => void;
@@ -47,9 +49,6 @@ export interface StreamChatConfig {
  *  - rAF 合帧 commit 到 React store
  *  - 错误兜底文本
  *  - END 时调用 reducer finalize 进行 task_summary / artifact 标记抽取
- *
- * parts 状态用不可变 `PartsState` 持有；reducer 的结构共享让 commit 时直接把
- * `state.parts` 整个写回 store 即可，无需逐 part 克隆。
  */
 export class StreamChatHandler {
   private config: StreamChatConfig;
@@ -279,11 +278,15 @@ export class StreamChatHandler {
       }
 
       if (event.eventType === ClientAgentEventType.END) {
+        // 后端可能在 END 上挂 titleUpdate（autoTitle 异步落库后的最终标题）。
+        // 在 finalize parts 之前先应用，避免 sider 列表展示落后一帧。
+        this.applyEndTitleUpdate(event.payload);
         const finalized = finalizePartsState(this.state, this.config.inputValue ?? '');
         this.state = {
           ...this.state,
           parts: finalized.parts,
-          lastPartType: finalized.parts[finalized.parts.length - 1]?.type ?? this.state.lastPartType,
+          lastPartType:
+            finalized.parts[finalized.parts.length - 1]?.type ?? this.state.lastPartType,
           interrupt: finalized.interrupt,
         };
         this.flushMessageSync();
@@ -392,6 +395,31 @@ export class StreamChatHandler {
       created_at: chatSession.created_at ?? Date.now(),
       updated_at: chatSession.updated_at ?? Date.now(),
     });
+  }
+
+  /**
+   * 处理 END 事件挂载的 titleUpdate（autoTitle 异步落库结果）。
+   *
+   * 命中已有 session：调 updateChatSession('edit') 直接替换标题
+   */
+  private applyEndTitleUpdate(payload: { titleUpdate?: TitleUpdatePayload }): void {
+    if (!payload || typeof payload !== 'object') return;
+    const titleUpdate = payload.titleUpdate;
+    if (!titleUpdate || typeof titleUpdate !== 'object') return;
+    const { sessionId, title, updatedAt } = titleUpdate;
+    if (typeof sessionId !== 'string' || typeof title !== 'string') return;
+    const existing = this.config.chatSessions.find((s) => s.id === sessionId);
+    const tsNumber = typeof updatedAt === 'number' ? updatedAt : Date.now();
+    if (existing) {
+      this.config.updateChatSession(
+        {
+          ...existing,
+          title,
+          updated_at: tsNumber,
+        },
+        'edit',
+      );
+    }
   }
 
   // flush（rAF 合帧）

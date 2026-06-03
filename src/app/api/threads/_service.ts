@@ -14,6 +14,7 @@ import {
   createThreadService,
   makeCheckpointer,
   setMemoryModelFactory,
+  setTitleModelFactory,
   type ThreadService,
   type ModelConfig,
 } from '@/deerflow-harness';
@@ -27,6 +28,7 @@ import {
 let service: ThreadService | null = null;
 let initPromise: Promise<ThreadService> | null = null;
 let memoryFactoryRegistered = false;
+let titleFactoryRegistered = false;
 
 /**
  * 把 chat model 工厂注入给 memory 子系统（updater）。
@@ -53,6 +55,32 @@ function ensureMemoryModelFactory(): void {
     });
   });
   memoryFactoryRegistered = true;
+}
+
+/**
+ * 把 chat model 工厂注入给 titleMiddleware。
+ */
+function ensureTitleModelFactory(): void {
+  if (titleFactoryRegistered) return;
+  setTitleModelFactory((modelName) => {
+    let base: ModelConfig;
+    if (modelName && MODEL_PRESETS[modelName as ModelPresetName]) {
+      base = buildModelConfigFromPreset(modelName as ModelPresetName);
+    } else if (modelName) {
+      const fallback = resolveModelConfig();
+      base = { ...fallback, modelName };
+    } else {
+      base = resolveModelConfig();
+    }
+    return createChatModel({
+      ...base,
+      streaming: false,
+      maxTokens: 64,
+      temperature: 0.3,
+      topP: 0.8,
+    });
+  });
+  titleFactoryRegistered = true;
 }
 
 /**
@@ -88,24 +116,33 @@ async function build(): Promise<ThreadService> {
   const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
 
   ensureMemoryModelFactory();
+  ensureTitleModelFactory();
 
   const defaultModelConfig = getDefaultModelConfig();
-  const client = new DeerFlowClient(defaultModelConfig, {
-    agentName: 'lead',
+
+  // 服务级默认 features：
+  //   - memoryEnabled:    true  → 长期记忆默认开启；可被 metadata 覆盖。
+  //   - autoTitleEnabled: true  → 首轮后异步生成会话标题（替代占位 "New thread"）。
+  //   - threadDataEnabled: true → 装载本会话上传文件到 state（基础设施）。
+  //   - uploadsEnabled:   true  → 把上传文件以 SystemMessage 注入 prompt 上下文。
+  // 单次请求可通过 body.configuration.<key> 显式覆盖（见 v3/chat route.ts）。
+  const sharedClientOptions = {
+    agentName: 'lead' as const,
     memoryEnabled: true,
+    autoTitleEnabled: true,
+    threadDataEnabled: true,
+    uploadsEnabled: true,
     checkpointer,
-  });
+  };
+
+  const client = new DeerFlowClient(defaultModelConfig, sharedClientOptions);
 
   // 按模型名缓存 client，供 submitRun 在单次请求切换模型时复用（避免每请求新建丢失 agentCache）。
   const clientByModel = new Map<string, DeerFlowClient>();
   const createClientForModel = (modelConfig: ModelConfig): DeerFlowClient => {
     const cached = clientByModel.get(modelConfig.modelName);
     if (cached) return cached;
-    const next = new DeerFlowClient(modelConfig, {
-      agentName: 'lead',
-      memoryEnabled: true,
-      checkpointer,
-    });
+    const next = new DeerFlowClient(modelConfig, sharedClientOptions);
     clientByModel.set(modelConfig.modelName, next);
     return next;
   };

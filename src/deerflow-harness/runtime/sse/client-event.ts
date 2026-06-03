@@ -141,8 +141,15 @@ export interface ErrorPayload {
   recoverable: boolean;
 }
 
-/** END / HEARTBEAT 不携带业务字段 */
-export type EndPayload = Record<string, never>;
+/** END 事件 payload：可选承载本轮异步副作用的最终结果（如 autoTitle 落库后的新标题）。 */
+export interface EndPayload {
+  titleUpdate?: {
+    sessionId: string;
+    title: string;
+    /** 毫秒时间戳；前端用于排序/展示。 */
+    updatedAt: number;
+  };
+}
 export type HeartbeatPayload = Record<string, never>;
 
 interface BaseClientAgentEvent {
