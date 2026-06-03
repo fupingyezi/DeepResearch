@@ -69,6 +69,8 @@ export async function* createAgentEventStream(
         ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         ...headers,
       },
+      // 同源携带 HttpOnly 会话 cookie，后端 getCurrentUser 解析鉴权
+      credentials: 'include',
       signal,
     };
     if (method === 'POST') init.body = JSON.stringify(body);

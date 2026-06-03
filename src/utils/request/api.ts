@@ -15,6 +15,8 @@ class ApiClient {
   constructor(baseURL: string = '', defaultOptions: ApiClientOptions = {}) {
     this.baseURL = baseURL;
     this.defaultOptions = {
+      // 同源携带 HttpOnly 会话 cookie，后端按用户隔离数据
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...defaultOptions.headers,
@@ -34,8 +36,9 @@ class ApiClient {
     let config: RequestInit;
 
     if (isFormData) {
-      // FormData，不设置headers
+      // FormData，不设置 headers；但仍需携带会话 cookie
       config = {
+        credentials: 'include',
         ...options,
       };
     } else {

@@ -88,6 +88,20 @@ export async function initialDB() {
     try {
       // 单条 multi-statement，一次 round-trip 跑完所有 DDL
       await client.query(`
+        create table if not exists users (
+          id            uuid primary key,
+          email         varchar(255) not null unique,
+          password_hash text,
+          system_role   varchar(20) not null default 'user'
+                        check (system_role in ('admin','user')),
+          needs_setup   boolean not null default false,
+          token_version integer not null default 0,
+          created_at    timestamptz not null default now(),
+          updated_at    timestamptz not null default now()
+        );
+        create index if not exists idx_users_email on users(email);
+        create index if not exists idx_users_role on users(system_role);
+
         create table if not exists chat_session (
           id uuid primary key,
           seq_id integer not null,
@@ -95,6 +109,8 @@ export async function initialDB() {
           created_at timestamp with time zone default current_timestamp,
           updated_at timestamp with time zone default current_timestamp
         );
+        alter table chat_session add column if not exists user_id uuid;
+        create index if not exists idx_chat_session_user on chat_session(user_id, updated_at desc);
 
         create table if not exists chat_message (
           id uuid primary key,
@@ -103,6 +119,8 @@ export async function initialDB() {
           parts jsonb not null default '[]'::jsonb,
           created_at timestamp with time zone default current_timestamp
         );
+        alter table chat_message add column if not exists user_id uuid;
+        create index if not exists idx_chat_message_user on chat_message(user_id, created_at);
 
         create table if not exists file_metadata (
           id uuid primary key,

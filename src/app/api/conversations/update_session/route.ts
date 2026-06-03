@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClient, query } from '@/lib';
+import { getCurrentUser } from '../../auth/_helpers';
 
 export async function POST(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
   try {
     const { sessionId, title } = await request.json();
 
@@ -12,12 +18,12 @@ export async function POST(request: NextRequest) {
     const updateQuery = `
       update chat_session 
       set title = $1, updated_at = $2 
-      where id = $3 
+      where id = $3 and user_id = $4
       returning *;
     `;
 
     const now = new Date().toISOString();
-    const response = await query(updateQuery, [title, now, sessionId]);
+    const response = await query(updateQuery, [title, now, sessionId, user.id]);
 
     if (response.rows.length === 0) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -44,6 +50,11 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
   try {
     const { sessionId } = await request.json();
 
@@ -57,16 +68,16 @@ export async function DELETE(request: NextRequest) {
 
       await client.query(
         `
-        delete from chat_message where session_id = $1
+        delete from chat_message where session_id = $1 and user_id = $2
       `,
-        [sessionId],
+        [sessionId, user.id],
       );
 
       const deleteSessionResult = await client.query(
         `
-        delete from chat_session where id = $1 returning *
+        delete from chat_session where id = $1 and user_id = $2 returning *
       `,
-        [sessionId],
+        [sessionId, user.id],
       );
 
       if (deleteSessionResult.rows.length === 0) {

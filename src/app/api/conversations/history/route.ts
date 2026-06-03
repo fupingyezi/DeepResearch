@@ -9,15 +9,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { loadSessionHistory } from '../_service';
+import { getCurrentUser } from '../../auth/_helpers';
 
 export async function GET(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
+  }
+
   const sessionId = request.nextUrl.searchParams.get('sessionId');
   if (!sessionId) {
     return NextResponse.json({ message: 'sessionId is required' }, { status: 400 });
   }
 
   try {
-    const data = await loadSessionHistory(sessionId);
+    const data = await loadSessionHistory(sessionId, user.id);
     return NextResponse.json(
       {
         message: 'Get history success!',

@@ -5,6 +5,7 @@ import {
   EllipsisOutlined,
   EditOutlined,
   DeleteOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { Popover, Modal } from 'antd';
 
@@ -16,6 +17,8 @@ import { useConversationStore } from '@/store';
 import { UUIDTypes } from 'uuid';
 import { formatYmd } from '@/utils/common';
 import { useOutsideClick } from '@/hooks';
+import { useAuth } from '@/runtime/context/auth-provider';
+import { SettingsDialog } from '@/components/settings/settings-dialog';
 
 interface SessionBubbleProps {
   chatSession: ChatSessionType;
@@ -144,6 +147,8 @@ const SiderContent = () => {
   const [selectedModal, setSelectedModal] = useState<'edit' | 'delete'>('edit');
   const [selectedSession, setSelectedSession] = useState<ChatSessionType | null>(null);
   const [renameValue, setRenameValue] = useState<string>(selectedSession?.title || '');
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const { user } = useAuth();
 
   const {
     intialChatSessions,
@@ -239,7 +244,7 @@ const SiderContent = () => {
         <PlusCircleOutlined style={{ color: '#0f766e', fontSize: 18 }} />
         开启新对话
       </div>
-      <div className="scrollbar-hide flex h-4/5 w-[92%] flex-col overflow-y-scroll">
+      <div className="scrollbar-hide flex min-h-0 w-[92%] flex-1 flex-col overflow-y-scroll">
         {chatSessions.map((session, index) => (
           <SessionBubble
             key={index}
@@ -253,6 +258,22 @@ const SiderContent = () => {
           />
         ))}
       </div>
+
+      <div
+        className="mb-3 flex h-11 w-[92%] cursor-pointer items-center gap-2 rounded-xl px-3 text-[#374151] transition-colors hover:bg-[#eef0f2]"
+        onClick={() => setSettingsOpen(true)}
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#d7f2f0] text-[13px] font-semibold text-[#0f766e]">
+          {(user?.email?.[0] ?? 'U').toUpperCase()}
+        </div>
+        <span className="flex-1 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">
+          {user?.email ?? '未登录'}
+        </span>
+        <SettingOutlined style={{ color: '#9ca3af', fontSize: 16 }} />
+      </div>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
       <Modal
         title={selectedModal === 'edit' ? '重命名' : '删除对话'}
         open={isModalOpen}
