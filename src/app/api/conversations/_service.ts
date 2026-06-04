@@ -32,6 +32,8 @@ export interface CreateChatSessionInput {
   id?: string;
   title?: string;
   seq_id?: number;
+  /** 会话归属用户；按用户隔离 */
+  userId: string;
   created_at?: string | number;
   updated_at?: string | number;
 }
@@ -47,31 +49,34 @@ function rowToSessionRecord(row: Record<string, unknown>): ChatSessionRecord {
 }
 
 /**
- * 取下一个 chat_session.seq_id：`coalesce(max(seq_id),0)+1`。
+ * 取某用户下一个 chat_session.seq_id：`coalesce(max(seq_id),0)+1`。
  *
- * 在并发极低的本地/演示场景下足够；如未来需要严格唯一序号，可改为 SERIAL 列。
+ * 按 user 隔离序号，使每个用户的会话从 1 开始递增。
  */
-async function nextSeqId(): Promise<number> {
-  const res = await query(`select coalesce(max(seq_id), 0) + 1 as next_seq_id from chat_session;`);
+async function nextSeqId(userId: string): Promise<number> {
+  const res = await query(
+    `select coalesce(max(seq_id), 0) + 1 as next_seq_id from chat_session where user_id = $1;`,
+    [userId],
+  );
   const v = res.rows[0]?.next_seq_id;
   return typeof v === 'number' ? v : Number(v ?? 1);
 }
 
 export async function createChatSessionRecord(
-  input: CreateChatSessionInput = {},
+  input: CreateChatSessionInput,
 ): Promise<ChatSessionRecord> {
   const id = input.id && input.id.length > 0 ? input.id : uuidv4();
   const title = input.title && input.title.length > 0 ? input.title : 'New thread';
-  const seq_id = typeof input.seq_id === 'number' ? input.seq_id : await nextSeqId();
+  const seq_id = typeof input.seq_id === 'number' ? input.seq_id : await nextSeqId(input.userId);
   const nowIso = new Date().toISOString();
   const createdAtIso = toIso(input.created_at) || nowIso;
   const updatedAtIso = toIso(input.updated_at) || nowIso;
 
   const res = await query(
-    `insert into chat_session (id, seq_id, title, created_at, updated_at)
-     values ($1, $2, $3, $4, $5)
+    `insert into chat_session (id, seq_id, title, user_id, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6)
      returning *;`,
-    [id, seq_id, title, createdAtIso, updatedAtIso],
+    [id, seq_id, title, input.userId, createdAtIso, updatedAtIso],
   );
 
   return rowToSessionRecord(res.rows[0]);
@@ -89,6 +94,8 @@ export interface SavedFileMetadata {
 
 export interface InsertUserMessageInput {
   sessionId: string;
+  /** 消息归属用户 */
+  userId: string;
   /** 不传则内部 uuidv4() */
   messageId?: string;
   parts: MessagePart[];
@@ -102,6 +109,8 @@ export interface InsertUserMessageResult {
 
 export interface InsertAssistantMessageInput {
   sessionId: string;
+  /** 消息归属用户 */
+  userId: string;
   messageId: string;
   parts: MessagePart[];
   /** human-in-the-loop 中断（独立于 parts 持久化） */
@@ -157,9 +166,9 @@ export async function insertUserMessageRecord(
     await client.query('BEGIN');
 
     await client.query(
-      `insert into chat_message (id, session_id, role, parts)
-       values ($1, $2, 'user', $3::jsonb);`,
-      [messageId, input.sessionId, partsJson],
+      `insert into chat_message (id, session_id, user_id, role, parts)
+       values ($1, $2, $3, 'user', $4::jsonb);`,
+      [messageId, input.sessionId, input.userId, partsJson],
     );
 
     await insertFileMetadataRows(client, input.sessionId, messageId, input.uploadedFiles);
@@ -191,9 +200,9 @@ export async function insertAssistantMessageRecord(
 ): Promise<void> {
   const partsJson = JSON.stringify(input.parts ?? []);
   await query(
-    `insert into chat_message (id, session_id, role, parts)
-     values ($1, $2, 'assistant', $3::jsonb);`,
-    [input.messageId, input.sessionId, partsJson],
+    `insert into chat_message (id, session_id, user_id, role, parts)
+     values ($1, $2, $3, 'assistant', $4::jsonb);`,
+    [input.messageId, input.sessionId, input.userId, partsJson],
   );
 }
 
@@ -271,9 +280,19 @@ function rowToFileMetadata(row: Record<string, unknown>): fileMetadataType {
 /**
  * 加载某个 session 的全部消息历史，含 file_metadata 单次批量补全。
  *
+ * 按 userId 校验归属：仅返回属于该用户的 session 消息（防越权读取他人会话）。
  * 单查 chat_message + 单查 file_metadata，避免按 message 逐条查的 N+1。
  */
-export async function loadSessionHistory(sessionId: string): Promise<ChatMessageType[]> {
+export async function loadSessionHistory(
+  sessionId: string,
+  userId: string,
+): Promise<ChatMessageType[]> {
+  const ownRes = await query(`select 1 from chat_session where id = $1 and user_id = $2 limit 1;`, [
+    sessionId,
+    userId,
+  ]);
+  if (ownRes.rows.length === 0) return [];
+
   const messageRes = await query(
     `select id, session_id, role, parts, created_at from chat_message
       where session_id = $1

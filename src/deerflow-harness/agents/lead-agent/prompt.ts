@@ -298,7 +298,7 @@ export interface BuildLeadAgentPromptOptions {
 
 /**
  * 构建带 memory 注入的 lead-agent system prompt。
- * memory 注入位置：BASE_SYSTEM_PROMPT 之后（与 Python `_get_memory_context` 拼接位序一致）。
+ * memory 注入位置：BASE_SYSTEM_PROMPT 之后。
  * memory 关闭或为空时退化为纯 BASE_SYSTEM_PROMPT。
  */
 export async function buildLeadAgentSystemPrompt(

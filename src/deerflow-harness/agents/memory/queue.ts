@@ -28,6 +28,7 @@ export interface ConversationContext {
   timestamp: Date;
   agentName: string | null;
   userId: string | null;
+  // 是否检测到修正 / 加强信号
   correctionDetected: boolean;
   reinforcementDetected: boolean;
 }
@@ -103,7 +104,7 @@ export class MemoryUpdateQueue {
     this.timer = setTimeout(() => {
       void this.processQueue();
     }, delayMs);
-    // 不阻止进程退出（等价 daemon=True）
+    // 不阻止进程退出
     this.timer.unref?.();
   }
 

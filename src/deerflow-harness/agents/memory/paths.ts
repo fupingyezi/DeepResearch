@@ -19,20 +19,24 @@ export function getBaseDir(): string {
   return path.join(os.homedir(), '.deer-flow');
 }
 
+// 全局 memory，路径：{base}/memory.json
 export function memoryFile(): string {
   return path.join(getBaseDir(), 'memory.json');
 }
 
+// per-agent memory，路径：{base}/agents/{name}/memory.json
 export function agentMemoryFile(agentName: string): string {
   validateAgentName(agentName);
   return path.join(getBaseDir(), 'agents', agentName, 'memory.json');
 }
 
+// per-user memory，路径：{base}/users/{user_id}/memory.json
 export function userMemoryFile(userId: string): string {
   if (!userId) throw new Error('userId must be a non-empty string');
   return path.join(getBaseDir(), 'users', userId, 'memory.json');
 }
 
+// per-user-agent memory，路径：{base}/users/{user_id}/agents/{name}/memory.json
 export function userAgentMemoryFile(userId: string, agentName: string): string {
   if (!userId) throw new Error('userId must be a non-empty string');
   validateAgentName(agentName);

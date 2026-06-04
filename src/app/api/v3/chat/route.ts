@@ -36,6 +36,7 @@ import {
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
 import { getThreadService, resolveModelConfigFromConfiguration } from '../../threads/_service';
+import { getCurrentUser } from '../../auth/_helpers';
 import {
   createChatSessionRecord,
   insertAssistantMessageRecord,
@@ -69,9 +70,6 @@ interface ChatStreamBody {
 }
 
 // 工具
-
-const pickUserId = (req: NextRequest): string | undefined =>
-  req.headers.get('x-user-id') ?? undefined;
 
 function pickInputText(contents: ContentBlock[]): string {
   const segments: string[] = [];
@@ -159,7 +157,14 @@ function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined
 }
 
 export async function POST(request: NextRequest) {
-  const user_id = pickUserId(request);
+  const currentUser = await getCurrentUser(request);
+  if (!currentUser) {
+    return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const user_id = currentUser.id;
 
   const body = (await request.json().catch(() => ({}))) as ChatStreamBody;
 
@@ -205,7 +210,7 @@ export async function POST(request: NextRequest) {
   if (!incomingSessionId) {
     try {
       const title = inputText.slice(0, 15) || 'New thread';
-      createdChatSession = await createChatSessionRecord({ title });
+      createdChatSession = await createChatSessionRecord({ title, userId: user_id });
       resolvedThreadId = createdChatSession.id;
     } catch (e) {
       console.error('[POST /api/v3/chat] createChatSessionRecord failed:', e);
@@ -291,6 +296,7 @@ export async function POST(request: NextRequest) {
       const userParts = contentsToUserParts(contents, resolvedFiles);
       const r = await insertUserMessageRecord({
         sessionId: resolvedThreadId,
+        userId: user_id,
         parts: userParts,
         uploadedFiles: resolvedFiles.length > 0 ? resolvedFiles : undefined,
       });
@@ -382,6 +388,7 @@ export async function POST(request: NextRequest) {
           try {
             await insertAssistantMessageRecord({
               sessionId: resolvedThreadId,
+              userId: user_id,
               messageId: assistantMessageId,
               parts: finalized.parts,
               interrupt: finalized.interrupt,

@@ -1,5 +1,6 @@
 import './globals.css';
-import Sider from '@/components/sider/sider';
+import { AppShell } from '@/components/app-shell';
+import { AuthProvider } from '@/runtime/context/auth-provider';
 import { initialDB } from '@/lib/db';
 
 // 在模块加载时触发一次（fire-and-forget），不阻塞 layout 渲染。
@@ -16,9 +17,9 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="flex h-screen overflow-hidden bg-[#f9fafb] text-[#111827] antialiased">
-        <Sider />
-        {/* chat 主体（页面内自带 ArtifactPanel） */}
-        {children}
+        <AuthProvider>
+          <AppShell>{children}</AppShell>
+        </AuthProvider>
       </body>
     </html>
   );

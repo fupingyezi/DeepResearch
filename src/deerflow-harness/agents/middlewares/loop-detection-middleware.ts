@@ -109,17 +109,19 @@ function normalizeQueryLike(s: any): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-/** 从工具名 + 显著字段派生稳定 key（与 Python 版语义对齐）。 */
+/** 从工具名 + 显著字段派生稳定 key */
 function stableToolKey(name: string, args: Record<string, any>, fallback: string | null): string {
   // read_file: 按 200 行为粒度做行号 bucket，降低噪声
   if (name === 'read_file' && fallback === null) {
     const path = (args.path as string | undefined) ?? '';
     const bucketSize = 200;
+
     const toInt = (v: any, def: number) => {
       if (v == null) return def;
       const n = typeof v === 'number' ? v : Number(v);
       return Number.isFinite(n) ? Math.trunc(n) : def;
     };
+
     let startLine = toInt(args.start_line, 1);
     let endLine = toInt(args.end_line, startLine);
     if (startLine > endLine) [startLine, endLine] = [endLine, startLine];
