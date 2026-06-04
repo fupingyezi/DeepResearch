@@ -136,7 +136,7 @@ export const unknownToolCallRule: IntegrityRule = {
 
     for (const m of messages) {
       if (!AIMessage.isInstance(m)) {
-        if (m instanceof ToolMessage && m.tool_call_id && removedIds.has(m.tool_call_id)) {
+        if (ToolMessage.isInstance(m) && m.tool_call_id && removedIds.has(m.tool_call_id)) {
           continue; // 孤立 ToolMessage：丢弃
         }
         result.push(m);

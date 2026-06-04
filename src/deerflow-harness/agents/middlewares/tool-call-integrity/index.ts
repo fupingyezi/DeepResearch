@@ -98,7 +98,7 @@ function assertToolCallIntegrity(messages: BaseMessage[]): void {
     const expected = new Set(ids);
     let j = i + 1;
     const matched = new Set<string>();
-    while (j < messages.length && messages[j] instanceof ToolMessage) {
+    while (j < messages.length && ToolMessage.isInstance(messages[j])) {
       const toolMessage = messages[j] as ToolMessage;
       if (toolMessage.tool_call_id && expected.has(toolMessage.tool_call_id)) {
         matched.add(toolMessage.tool_call_id);
