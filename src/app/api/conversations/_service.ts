@@ -207,6 +207,20 @@ export async function insertAssistantMessageRecord(
 }
 
 /**
+ * 更新既有 assistant message 的 parts（resume 续写场景）。
+ */
+export async function updateAssistantMessageParts(input: {
+  messageId: string;
+  parts: MessagePart[];
+}): Promise<void> {
+  const partsJson = JSON.stringify(input.parts ?? []);
+  await query(`update chat_message set parts = $2::jsonb where id = $1 and role = 'assistant';`, [
+    input.messageId,
+    partsJson,
+  ]);
+}
+
+/**
  * 截断指定 sessionId 下 created_at >= fromCreatedAt 的所有 chat_message。
  *
  * 用于 recall / reEditCall：
@@ -255,6 +269,32 @@ export async function getLatestMessageByRole(
     id: String(row.id),
     role: row.role as 'user' | 'assistant',
     createdAt: new Date(row.created_at),
+  };
+}
+
+/**
+ * 获取某 session 下最近一条 assistant 消息（含 parts）。
+ *
+ * 用于 resume 续写：定位中断时落库的 assistant 消息，把其既有 parts 作为
+ * collector 的 seed，并在续跑结束后回写（UPDATE）到同一条记录。
+ * 按 userId 校验归属，防越权。
+ */
+export async function getLatestAssistantMessageWithParts(
+  sessionId: string,
+  userId: string,
+): Promise<{ id: string; parts: MessagePart[] } | null> {
+  const res = await query(
+    `select id, parts from chat_message
+      where session_id = $1 and user_id = $2 and role = 'assistant'
+      order by created_at desc
+      limit 1;`,
+    [sessionId, userId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    parts: (row.parts ?? []) as MessagePart[],
   };
 }
 

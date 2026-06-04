@@ -438,11 +438,11 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ steps, status, interr
           <div className="mt-1 rounded-lg bg-yellow-50 p-2">
             <Alert
               type="info"
-              message={interrupt.question || '请确认是否继续？'}
+              message={interrupt.question || '需要你的回答'}
               showIcon
               className="mb-2!"
             />
-            <HumanDecision />
+            <HumanDecision question={interrupt.question} details={interrupt.details} />
           </div>
         )}
       </div>

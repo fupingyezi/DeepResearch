@@ -41,6 +41,8 @@ import {
   createChatSessionRecord,
   insertAssistantMessageRecord,
   insertUserMessageRecord,
+  updateAssistantMessageParts,
+  getLatestAssistantMessageWithParts,
   resolveFilesByIds,
   deleteMessagesAtOrAfter,
   getLatestMessageByRole,
@@ -313,8 +315,26 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 预生成 assistantMessageId（普通发送 / recall / reEditCall 都需要落库）
-  const assistantMessageId = shouldPersistMessages ? uuidv4() : undefined;
+  // 预生成 assistantMessageId。
+  // - 普通发送 / recall / reEditCall：新建一条 assistant 消息（INSERT）。
+  // - resume：复用中断时落库的同一条 assistant 消息（UPDATE 续写），
+  //   并用其既有 parts 作为 collector 的 seed，使 ask_clarification 的
+  //   TOOL_RESULT 能凭 toolCallId 命中、把 running 改为 done，最终答案追加其后。
+  let assistantMessageId: string | undefined = shouldPersistMessages ? uuidv4() : undefined;
+  let resumeSeedParts: MessagePart[] = [];
+  if (isResume) {
+    try {
+      const existing = await getLatestAssistantMessageWithParts(resolvedThreadId, user_id);
+      if (existing) {
+        assistantMessageId = existing.id;
+        resumeSeedParts = existing.parts;
+      }
+    } catch (e) {
+      console.error('[POST /api/v3/chat] load assistant message for resume failed:', e);
+    }
+  }
+  // 续写落库（UPDATE）仅在成功定位到既有 assistant 消息时启用
+  const shouldUpdateOnResume = isResume && typeof assistantMessageId === 'string';
 
   // —— 提交 run（fire-and-forget）——
   let run_id: string;
@@ -365,7 +385,11 @@ export async function POST(request: NextRequest) {
   ): AsyncGenerator<ClientAgentEvent> {
     yield createClientAgentEvent(ClientAgentEventType.START, 'lead', startPayload as never);
 
-    const collector = shouldPersistMessages ? new AssistantPartsCollector() : null;
+    // resume 续写时用既有 parts seed，使续跑的 TOOL_RESULT 能命中中断前的 tool_call。
+    const collector =
+      shouldPersistMessages || shouldUpdateOnResume
+        ? new AssistantPartsCollector(shouldUpdateOnResume ? resumeSeedParts : undefined)
+        : null;
     try {
       for await (const ev of inner) {
         if (collector) collector.onEvent(ev);
@@ -386,15 +410,23 @@ export async function POST(request: NextRequest) {
           collector.finalize(inputText);
         if (finalized.parts.length > 0) {
           try {
-            await insertAssistantMessageRecord({
-              sessionId: resolvedThreadId,
-              userId: user_id,
-              messageId: assistantMessageId,
-              parts: finalized.parts,
-              interrupt: finalized.interrupt,
-            });
+            if (shouldUpdateOnResume) {
+              // resume：覆盖式回写到中断时那条 assistant 消息
+              await updateAssistantMessageParts({
+                messageId: assistantMessageId,
+                parts: finalized.parts,
+              });
+            } else {
+              await insertAssistantMessageRecord({
+                sessionId: resolvedThreadId,
+                userId: user_id,
+                messageId: assistantMessageId,
+                parts: finalized.parts,
+                interrupt: finalized.interrupt,
+              });
+            }
           } catch (e) {
-            console.error('[POST /api/v3/chat] insertAssistantMessageRecord failed:', e);
+            console.error('[POST /api/v3/chat] persist assistant message failed:', e);
           }
         }
       }
