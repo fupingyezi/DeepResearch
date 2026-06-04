@@ -11,7 +11,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = await getMemoryData('lead', user.id);
+    // lead 对话使用跨 agent 全局 per-user 记忆（agentName=null → users/{userId}/memory.json），
+    // 与注入侧 / 异步写入侧保持一致，对齐 deer-flow 2.0 默认对话 agent_name=None 行为。
+    const data = await getMemoryData(null, user.id);
     return NextResponse.json({ message: 'Get memory success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory] get error:', error);
@@ -30,7 +32,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const data = await clearMemoryData('lead', user.id);
+    const data = await clearMemoryData(null, user.id);
     return NextResponse.json({ message: 'Clear memory success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory] clear error:', error);

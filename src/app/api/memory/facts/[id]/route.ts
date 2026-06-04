@@ -41,7 +41,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 
   try {
-    const data = await updateMemoryFact(params.id, patch, 'lead', user.id);
+    const data = await updateMemoryFact(params.id, patch, null, user.id);
     return NextResponse.json({ message: 'Update fact success!', data }, { status: 200 });
   } catch (error) {
     if (isNotFound(error)) {
@@ -63,7 +63,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   }
 
   try {
-    const data = await deleteMemoryFact(params.id, 'lead', user.id);
+    const data = await deleteMemoryFact(params.id, null, user.id);
     return NextResponse.json({ message: 'Delete fact success!', data }, { status: 200 });
   } catch (error) {
     if (isNotFound(error)) {

@@ -22,8 +22,8 @@ interface RuntimeContextLike {
  *   updater 异步落盘。
  * - 上传消息已在 message-processing 中剥离，filterMessagesForMemory 之后还需
  *   `hasUserAndAi` 守卫，避免空 turn / 工具结果 turn 触发更新。
- * - thread_id / user_id 从 RuntimeContext（AsyncLocalStorage）取，agentName
- *   从 runtime.context（如有）取，找不到时记为 null（全局 memory）。
+ * - thread_id / user_id / agent_name 优先从 RuntimeContext（AsyncLocalStorage）取，
+ *   失败时回退到 LangGraph `runtime.context`。
  *
  * 本中间件**只入队**，绝不在 hook 内 await LLM 调用，避免阻塞主流程。
  */
@@ -46,8 +46,7 @@ export const memoryMiddleware = createMiddleware({
       const runtimeContext: RuntimeContextLike = runtime?.context ?? {};
       const userId = ctx?.user_id ?? runtimeContext.userId ?? null;
 
-      // 优先从 runtime.context.agentName 读，否则为 null（全局 memory）
-      const agentName = runtimeContext.agentName ?? null;
+      const agentName = ctx?.agent_name ?? runtimeContext.agentName ?? null;
 
       const correction = detectCorrection(filtered);
       const reinforcement = detectReinforcement(filtered);

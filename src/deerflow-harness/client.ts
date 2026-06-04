@@ -159,7 +159,11 @@ export class DeerFlowClient {
   private async resolveSystemPrompt(opts: RuntimeRunOptions): Promise<string> {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
-    const promptOpts = { agentName: opts.agentName, userId: opts.userId };
+    // memory 作用域 agent 名固定为 null：lead 对话使用「跨 agent 全局 per-user」
+    // 记忆（users/{userId}/memory.json），对齐 deer-flow 2.0 默认对话 agent_name=None。
+    // 注意与展示用 agentId（opts.agentName='lead'，用于事件/生命周期/缓存 key）解耦——
+    // 这里**不要**用 opts.agentName，否则会落到 per-agent 文件而读不到跨 agent 全局记忆。
+    const promptOpts = { agentName: null, userId: opts.userId };
 
     if (opts.memoryEnabled) {
       try {
@@ -282,6 +286,11 @@ export class DeerFlowClient {
     // 把当前 ModelConfig 注入到外层 RuntimeContext，让 task-tool 在 'inherit'
     // 模式下能读到与 lead 完全一致的模型配置（含 baseUrl/apiKey）。
     // 这是对外层 als store 的"原地写"——als store 是引用类型，子调用链共享同一对象。
+    //
+    // memory 作用域：lead 对话**不写** ctx.agent_name（保持 undefined → null），
+    // 使 memoryMiddleware 把对话总结落到「跨 agent 全局 per-user」记忆
+    // users/{userId}/memory.json，与注入侧 / 读 API 三侧一致（对齐 deer-flow 2.0）。
+    // agentId（='lead'）仅用于对外事件/生命周期/缓存 key，不参与 memory 路径决策。
     if (ctx) {
       ctx.currentModelConfig = this.modelConfig;
     }
@@ -323,10 +332,12 @@ export class DeerFlowClient {
           thread_id: effectiveThreadId,
           currentModelConfig: this.modelConfig,
         },
-        // 把 agentName / userId 透传给 LangGraph runtime.context，
-        // 供 memoryMiddleware.afterAgent 在入队时读取。
+        // 把 memory 作用域 agentName / userId 透传给 LangGraph runtime.context，
+        // 供 memoryMiddleware.afterAgent 在入队时读取（作为 ALS 的 fallback）。
+        // agentName 固定为 null：lead 对话用跨 agent 全局 per-user 记忆；
+        // 这里**不要**透传 agentId('lead')，否则 fallback 会把对话总结写回 per-agent 文件。
         context: {
-          agentName: agentId,
+          agentName: null,
           userId: runOpts.userId,
         },
       };

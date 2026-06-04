@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       : 0.6;
 
   try {
-    const data = await createMemoryFact(content, category, confidence, 'lead', user.id);
+    const data = await createMemoryFact(content, category, confidence, null, user.id);
     return NextResponse.json({ message: 'Create fact success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory] create fact error:', error);
