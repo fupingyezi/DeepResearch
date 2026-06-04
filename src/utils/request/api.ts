@@ -112,6 +112,15 @@ class ApiClient {
     });
   }
 
+  // PATCH 请求
+  async patch(endpoint: string, data: any = {}, options: RequestOptions = {}): Promise<any> {
+    return this.request(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      ...options,
+    });
+  }
+
   // DELETE 请求
   async delete(endpoint: string, options: RequestOptions = {}): Promise<any> {
     return this.request(endpoint, {

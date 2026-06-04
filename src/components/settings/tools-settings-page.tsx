@@ -1,10 +1,11 @@
 'use client';
 
-import { ApiOutlined, CheckCircleFilled, GlobalOutlined, RobotOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, GlobalOutlined, RobotOutlined } from '@ant-design/icons';
 import { Empty, Spin, Tag, message } from 'antd';
 import { useEffect, useState } from 'react';
 
 import apiClient from '@/utils/request/api';
+import { McpServersSection } from './mcp-servers-section';
 
 type ToolCategory = 'builtin' | 'agent';
 
@@ -31,7 +32,8 @@ function ToolIcon({ category }: { category: ToolCategory }) {
 
 /**
  * 设置弹窗「工具」页：展示研究智能体真实注册的工具（联网搜索、任务委派、澄清提问等），
- * 工具为核心研究链路依赖，默认全部启用、暂不支持禁用。MCP 接入预留占位。
+ * 工具为核心研究链路依赖，默认全部启用、暂不支持禁用。下方 MCP 服务区支持接入外部
+ * MCP 服务器以扩展工具能力。
  */
 export function ToolsSettingsPage() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
@@ -71,7 +73,9 @@ export function ToolsSettingsPage() {
       </div>
 
       <section>
-        <h3 className="mb-3 text-[15px] font-medium text-[#111827]">已启用工具（{tools.length}）</h3>
+        <h3 className="mb-3 text-[15px] font-medium text-[#111827]">
+          已启用工具（{tools.length}）
+        </h3>
         {tools.length === 0 ? (
           <Empty description="暂无可用工具" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
@@ -86,7 +90,9 @@ export function ToolsSettingsPage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14px] font-medium text-[#111827]">{tool.displayName}</span>
+                    <span className="text-[14px] font-medium text-[#111827]">
+                      {tool.displayName}
+                    </span>
                     <span className="font-mono text-[12px] text-[#9ca3af]">{tool.name}</span>
                     <Tag color={CATEGORY_META[tool.category].color} style={{ margin: 0 }}>
                       {CATEGORY_META[tool.category].label}
@@ -106,13 +112,7 @@ export function ToolsSettingsPage() {
         )}
       </section>
 
-      <section>
-        <h3 className="mb-3 text-[15px] font-medium text-[#111827]">MCP 服务</h3>
-        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[#e5e7eb] bg-[#f9fafb] py-8 text-[#9ca3af]">
-          <ApiOutlined style={{ fontSize: 28 }} />
-          <p className="text-[13px]">即将支持接入 MCP（Model Context Protocol）服务以扩展工具能力</p>
-        </div>
-      </section>
+      <McpServersSection />
     </div>
   );
 }

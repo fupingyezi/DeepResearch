@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
+      "env": {},
+      "description": "Provides filesystem access within allowed directories"
+    },
+    "github": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "$GITHUB_TOKEN" },
+      "description": "GitHub MCP server for repository operations"
+    },
+    "remote-example": {
+      "enabled": false,
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer $API_TOKEN" },
+      "description": "Remote MCP server over streamable HTTP"
+    }
+  },
+  "skills": {
+    "deep-research": { "enabled": true }
+  }
+}

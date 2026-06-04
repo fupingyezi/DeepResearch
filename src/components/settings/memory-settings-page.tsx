@@ -26,7 +26,11 @@ interface MemoryData {
   version: string;
   lastUpdated: string;
   user: { workContext: SectionData; personalContext: SectionData; topOfMind: SectionData };
-  history: { recentMonths: SectionData; earlierContext: SectionData; longTermBackground: SectionData };
+  history: {
+    recentMonths: SectionData;
+    earlierContext: SectionData;
+    longTermBackground: SectionData;
+  };
   facts: Fact[];
 }
 
@@ -110,7 +114,9 @@ export function MemorySettingsPage() {
     if (!data) return [];
     return SECTION_LABELS.map((s) => ({
       label: s.label,
-      summary: data[s.group][s.key as keyof (typeof data)['user']].summary,
+      // data[s.group] 是 user / history 两类对象的联合，二者的值均为 SectionData，
+      // 按 key 动态取值需收窄为 Record<string, SectionData>。
+      summary: (data[s.group] as Record<string, SectionData>)[s.key].summary,
     })).filter((s) => s.summary.trim().length > 0);
   }, [data]);
 
@@ -274,7 +280,9 @@ export function MemorySettingsPage() {
                 ) : (
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
-                      <div className="text-[13px] leading-relaxed text-[#374151]">{fact.content}</div>
+                      <div className="text-[13px] leading-relaxed text-[#374151]">
+                        {fact.content}
+                      </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-[#9ca3af]">
                         <Tag color={CATEGORY_COLOR[fact.category]} style={{ margin: 0 }}>
                           {CATEGORY_LABEL[fact.category] ?? fact.category}

@@ -15,6 +15,8 @@ import {
   type ClientAgentEvent,
 } from './runtime/sse';
 import { getContext } from './runtime/context';
+import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './mcp';
+import { getEnabledSkillsSignature } from './skills';
 
 interface RuntimeRunOptions {
   memoryEnabled: boolean;
@@ -26,7 +28,12 @@ interface RuntimeRunOptions {
   availableSkills?: string[];
 }
 
-function buildConfigKey(modelConfig: ModelConfig, opts: RuntimeRunOptions): AgentConfigKey {
+function buildConfigKey(
+  modelConfig: ModelConfig,
+  opts: RuntimeRunOptions,
+  mcpSignature: string,
+  skillSignature: string,
+): AgentConfigKey {
   return JSON.stringify([
     modelConfig.modelName,
     opts.memoryEnabled,
@@ -35,6 +42,8 @@ function buildConfigKey(modelConfig: ModelConfig, opts: RuntimeRunOptions): Agen
     opts.uploadsEnabled,
     opts.agentName,
     opts.availableSkills?.sort() ?? [],
+    mcpSignature,
+    skillSignature,
   ]);
 }
 
@@ -152,28 +161,34 @@ export class DeerFlowClient {
 
   /**
    * 构建本轮 systemPrompt：
-   * - caller 显式 systemPrompt → 原样使用（不再注入 memory）；
-   * - memoryEnabled → lead-agent prompt builder（叠加 memory）；
-   * - 否则退化为静态 SYSTEM_PROMPT。
+   * - caller 显式 systemPrompt → 原样使用（不再注入 memory/skills/mcp）；
+   * - 否则 → lead-agent prompt builder：始终注入启用技能与已加载 MCP 工具，memory 按 opts 开关注入。
+   *
+   * mcpTools 由 caller 预加载并透传，使「绑定到 agent 的工具」与「写入提示的工具」严格一致，
+   * 避免模型不知道自己已接入 MCP 而回答"未配置 MCP"。
    */
-  private async resolveSystemPrompt(opts: RuntimeRunOptions): Promise<string> {
+  private async resolveSystemPrompt(
+    opts: RuntimeRunOptions,
+    mcpTools: StructuredToolInterface[],
+  ): Promise<string> {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
     // memory 作用域 agent 名固定为 null：lead 对话使用「跨 agent 全局 per-user」
     // 记忆（users/{userId}/memory.json），对齐 deer-flow 2.0 默认对话 agent_name=None。
     // 注意与展示用 agentId（opts.agentName='lead'，用于事件/生命周期/缓存 key）解耦——
     // 这里**不要**用 opts.agentName，否则会落到 per-agent 文件而读不到跨 agent 全局记忆。
-    const promptOpts = { agentName: null, userId: opts.userId };
-
-    if (opts.memoryEnabled) {
-      try {
-        return await buildLeadAgentSystemPrompt(promptOpts);
-      } catch (e) {
-        console.warn(
-          '[DeerFlowClient] buildLeadAgentSystemPrompt failed, fallback to SYSTEM_PROMPT:',
-          e,
-        );
-      }
+    try {
+      return await buildLeadAgentSystemPrompt({
+        agentName: null,
+        userId: opts.userId,
+        injectMemory: opts.memoryEnabled,
+        mcpToolsSection: buildMcpToolsSection(mcpTools),
+      });
+    } catch (e) {
+      console.warn(
+        '[DeerFlowClient] buildLeadAgentSystemPrompt failed, fallback to SYSTEM_PROMPT:',
+        e,
+      );
     }
 
     return SYSTEM_PROMPT;
@@ -192,9 +207,18 @@ export class DeerFlowClient {
   /**
    * 按 RuntimeRunOptions 获取或构建 agent 实例。
    * memoryEnabled=true 时不缓存（每轮 prompt 含最新 memory，必须重建）。
+   *
+   * mcpTools 由 caller 预加载并透传（与 systemPrompt 注入的工具同源）；缓存键纳入
+   * MCP/skill 启用签名，使配置变更后（关闭 memory 的可缓存场景）agent 自动重建。
    */
-  private async ensureAgent(systemPrompt: string, opts: RuntimeRunOptions): Promise<any> {
-    const key = buildConfigKey(this.modelConfig, opts);
+  private async ensureAgent(
+    systemPrompt: string,
+    opts: RuntimeRunOptions,
+    mcpTools: StructuredToolInterface[],
+  ): Promise<any> {
+    const mcpSignature = await getEnabledMcpSignature();
+    const skillSignature = await getEnabledSkillsSignature();
+    const key = buildConfigKey(this.modelConfig, opts, mcpSignature, skillSignature);
     const cacheable = !opts.memoryEnabled;
 
     if (cacheable) {
@@ -204,7 +228,7 @@ export class DeerFlowClient {
 
     const model = createChatModel(this.modelConfig);
     const provider = inferProvider(this.modelConfig);
-    const effectiveTools = this.resolveTools(opts);
+    const effectiveTools = [...this.resolveTools(opts), ...mcpTools];
 
     const agent = createBaseAgent({
       model,
@@ -229,6 +253,7 @@ export class DeerFlowClient {
       console.log(
         `[DeerFlowClient] Agent created/rebuilt (name=${opts.agentName}, ` +
           `memoryEnabled=${opts.memoryEnabled}, ` +
+          `mcpTools=${mcpTools.length}, ` +
           `caller-tools=[${builtinNames}], ` +
           `explicitTools=${this.hasExplicitTools})`,
       );
@@ -299,8 +324,11 @@ export class DeerFlowClient {
     const emit = (event: AgentEvent): ClientAgentEvent | null => toClientAgentEvent(event);
 
     // 2. 构建本轮 systemPrompt + agent
-    const systemPrompt = await this.resolveSystemPrompt(runOpts);
-    const agent = await this.ensureAgent(systemPrompt, runOpts);
+    // 先加载一次 MCP 工具（loadMcpTools 内部按签名缓存），同源喂给 prompt 注入与 agent 绑定，
+    // 保证「模型在提示里看到的 MCP 工具」与「实际可调用的工具」严格一致。
+    const mcpTools = await loadMcpTools();
+    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools);
+    const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
 
     // 3. lifecycle start
     {

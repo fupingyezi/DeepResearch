@@ -499,9 +499,43 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 
 ---
 
-### 9. 持久化层
+### 8.5 MCP 与 Skill 扩展子系统（extensions）
 
-#### ThreadMetaStore（PostgreSQL）
+参考 deer-flow，提供两类可在设置界面管理的扩展能力，统一由仓库根目录的文件式配置驱动。
+
+#### 统一配置
+
+**文件：** `src/deerflow-harness/extensions/`（`types.ts` / `paths.ts` / `config-store.ts`）
+
+- 配置文件：`extensions_config.json`（路径可由 `DEERFLOW_EXTENSIONS_CONFIG_PATH` 覆盖，默认 `{cwd}/extensions_config.json`），含 `mcpServers` 与 `skills` 两个 map，模板见 `extensions_config.example.json`。
+- `FileExtensionsConfigStore` 复用 memory 的 FileStorage 范式：mtime 缓存 + 原子写（tmp→rename）+ schema 校验失败回退空配置。Zod schema（`mcpServerConfigSchema` 等）同时用于 API 入参校验。
+- `extensions_config.json` 与 `skills/custom` 为运行期状态，已 gitignore。
+
+#### Skill 子系统（Prompt 注入式，无沙箱）
+
+**文件：** `src/deerflow-harness/skills/`（`frontmatter.ts` / `loader.ts` / `prompt.ts`）
+
+- 扫描 `skills/public|custom/<name>/SKILL.md`，自写最小 frontmatter 解析器（不引入 js-yaml）提取 `name`/`description`，正文用于 prompt 注入。
+- `loadEnabledSkills()` 合并配置中的 enabled 状态；**默认禁用（opt-in）**——启用即把 SKILL.md 正文注入系统提示，有 token 成本，与 deer-flow 沙箱场景默认启用不同。
+- 注入点：`buildLeadAgentSystemPrompt()` 拼装 `<available_skills>` section（顺序：BASE_SYSTEM_PROMPT → skills → memory），skill 加载失败降级为无 skill。
+
+#### MCP 子系统（端到端）
+
+**文件：** `src/deerflow-harness/mcp/client.ts`（依赖 `@langchain/mcp-adapters`）
+
+- 按启用的 MCP server 构建 `MultiServerMCPClient` 加载工具；`env`/`headers` 中的 `$VAR` 用 `process.env` 解析（未命中替换为空串）。
+- 关键不变量：`throwOnLoadError: false`（单服务器失败跳过，不阻断对话）；`prefixToolNameWithServerName: true`（防与内置工具重名）；按「启用 server 配置签名」缓存 client，签名变化才重连。
+- 接入：`DeerFlowClient.ensureAgent()` 在 stream 首帧前 **await** `loadMcpTools()` 并入工具集（满足 §8）；`buildConfigKey()` 纳入 MCP/skill 启用签名，配置变更后（关闭 memory 的可缓存场景）agent 自动重建。
+- 运行时：stdio 类型 server 需 spawn 子进程，相关 API 路由显式 `export const runtime = 'nodejs'`。
+
+#### 管理 API 与设置界面
+
+- `GET/POST /api/mcp`、`PATCH/DELETE /api/mcp/[name]`：MCP server CRUD 与启用切换（写后 `resetMcpClient()` 失效缓存）。
+- `GET/POST /api/skills`、`PATCH /api/skills/[name]`：skill 列表、新建自定义 skill、启用切换。
+- 设置弹窗：「技能」页（`skill-settings-page.tsx`，public/custom 分组 + 新建表单）、「工具」页 MCP 区（`mcp-servers-section.tsx`，列表 + 启用开关 + 增删改表单）。
+
+---
+
 
 **文件：** `src/deerflow-harness/persistence/thread-meta/postgres-store.ts`
 
@@ -717,6 +751,9 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | `src/deerflow-harness/types/agent-event.ts`                   | AgentEvent 内部事件枚举                   |
 | `src/deerflow-harness/agents/memory/updater.ts`               | MemoryUpdater（LLM 驱动记忆更新）         |
 | `src/deerflow-harness/subagents/executor.ts`                  | SubagentExecutor（子代理执行，超时+取消） |
+| `src/deerflow-harness/extensions/config-store.ts`             | extensions_config.json 文件存储（MCP/skill 统一配置） |
+| `src/deerflow-harness/skills/loader.ts`                       | skill 加载器（扫描 SKILL.md + 合并启用状态）   |
+| `src/deerflow-harness/mcp/client.ts`                          | MCP 客户端封装（加载工具 + 失败容错 + 缓存）   |
 | `src/deerflow-harness/runtime/context.ts`                     | AsyncLocalStorage 上下文传播              |
 | `src/store/conversation-store.ts`                             | 前端聊天会话状态                          |
 | `src/store/deep-research-process-store.ts`                    | DeepResearch 流程状态（Immer）            |

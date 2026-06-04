@@ -15,6 +15,46 @@ export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider
 export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';
 
+// extensions 子系统（MCP / skill 统一配置）
+export {
+  type McpTransport,
+  type McpServerConfig,
+  type SkillState,
+  type ExtensionsConfig,
+  mcpServerConfigSchema,
+  skillStateSchema,
+  extensionsConfigSchema,
+  createEmptyExtensionsConfig,
+  resolveEnvPlaceholders,
+  getExtensionsConfigPath,
+  getSkillsRootDir,
+  getPublicSkillsDir,
+  getCustomSkillsDir,
+  type ExtensionsConfigStore,
+  FileExtensionsConfigStore,
+  getExtensionsConfigStore,
+  resetExtensionsConfigStore,
+} from './extensions';
+
+// skill 子系统（Prompt 注入式）
+export {
+  type Skill,
+  type SkillCategory,
+  type CreateCustomSkillInput,
+  SKILL_NAME_PATTERN,
+  validateSkillName,
+  parseFrontmatter,
+  loadSkills,
+  loadEnabledSkills,
+  getEnabledSkillsSignature,
+  resetSkillCache,
+  createCustomSkill,
+  buildSkillsSection,
+} from './skills';
+
+// MCP 子系统（端到端：配置→连接→工具注入）
+export { type McpToolsResult, loadMcpTools, getEnabledMcpSignature, resetMcpClient } from './mcp';
+
 // Memory 子系统
 export {
   // types
