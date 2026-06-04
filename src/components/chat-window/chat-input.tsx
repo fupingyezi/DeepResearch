@@ -139,7 +139,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
         <button
           type="submit"
-          className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95`}
+          className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95`}
         >
           {isChating ? (
             <div className="flex h-6 w-6 items-center justify-center">

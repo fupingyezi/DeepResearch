@@ -45,7 +45,7 @@ const ArtifactPanel = () => {
         {/* body */}
         <div className="scrollbar-slim min-w-0 flex-1 overflow-y-auto px-7 py-6">
           {currentArtifact.report ? (
-            <div className="min-w-0 break-words">
+            <div className="min-w-0 wrap-break-word">
               <CustomMarkdown content={currentArtifact.report} />
             </div>
           ) : (

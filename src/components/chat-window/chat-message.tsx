@@ -27,7 +27,7 @@ const ChatMessage: React.FC<ChatMessagesProps> = ({
       <div
         className={`flex h-[70%] w-full flex-col items-center justify-center gap-4 text-center ${className || ''} `}
       >
-        <div className="bg-gradient-to-br from-teal-500 via-sky-500 to-teal-600 bg-clip-text font-serif text-6xl font-bold text-transparent">
+        <div className="bg-linear-to-br from-teal-500 via-sky-500 to-teal-600 bg-clip-text font-serif text-6xl font-bold text-transparent">
           {emptyStateComponent}
         </div>
         <p className="text-2xl text-gray-400" style={{ fontFamily: '楷体' }}>

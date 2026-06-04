@@ -144,7 +144,7 @@ const ReasoningBubble: React.FC<{ step: ReasoningStep }> = ({ step }) => {
         <span className="text-sm font-medium">思考</span>
       </div>
       {isOpen && (
-        <div className="mt-1 ml-5 min-w-0 overflow-hidden text-sm leading-relaxed break-words text-gray-600">
+        <div className="mt-1 ml-5 min-w-0 overflow-hidden text-sm leading-relaxed wrap-break-word text-gray-600">
           <CustomMarkdown content={step.content.text} />
         </div>
       )}
@@ -195,13 +195,13 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
             </ul>
           )}
           {!searchResults && c.args !== undefined && (
-            <pre className="scrollbar-slim max-h-48 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-48 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] wrap-break-word whitespace-pre-wrap text-gray-600">
               {safeStringifyArgs(c.args)}
             </pre>
           )}
-          {c.errorMessage && <div className="break-words text-red-500">错误：{c.errorMessage}</div>}
+          {c.errorMessage && <div className="wrap-break-word text-red-500">错误：{c.errorMessage}</div>}
           {!searchResults && c.result !== undefined && (
-            <pre className="scrollbar-slim max-h-60 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] break-words whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-60 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] wrap-break-word whitespace-pre-wrap text-gray-600">
               {typeof c.result === 'string' ? c.result : safeStringifyArgs(c.result)}
             </pre>
           )}
@@ -227,7 +227,7 @@ const ReasoningBlock: React.FC<{ text: string }> = ({ text }) => {
         <span className="text-xs font-medium">思考过程</span>
       </div>
       {isOpen && (
-        <div className="mt-1 ml-4 min-w-0 overflow-hidden text-xs leading-relaxed break-words text-gray-500">
+        <div className="mt-1 ml-4 min-w-0 overflow-hidden text-xs leading-relaxed wrap-break-word text-gray-500">
           <CustomMarkdown content={text} />
         </div>
       )}
@@ -287,7 +287,7 @@ const SubagentTaskBubble: React.FC<{
           {structured && (
             <div className="min-w-0 rounded-xl border border-purple-100 bg-purple-50/60 p-3 text-xs">
               <div className="mb-1 font-semibold text-purple-700">摘要</div>
-              <div className="mb-2 break-words text-gray-700">{structured.summary}</div>
+              <div className="mb-2 wrap-break-word text-gray-700">{structured.summary}</div>
               {structured.keyFindings?.length > 0 && (
                 <>
                   <div className="mb-1 font-semibold text-purple-700">
@@ -326,12 +326,12 @@ const SubagentTaskBubble: React.FC<{
 
           {/* fallback：没有 structured 时展示原文 result */}
           {!structured && c.result && (
-            <div className="min-w-0 overflow-hidden text-sm break-words text-gray-700">
+            <div className="min-w-0 overflow-hidden text-sm wrap-break-word text-gray-700">
               <CustomMarkdown content={c.result} />
             </div>
           )}
 
-          {c.error && <div className="text-sm break-words text-red-500">错误：{c.error}</div>}
+          {c.error && <div className="text-sm wrap-break-word text-red-500">错误：{c.error}</div>}
         </div>
       )}
     </div>
@@ -384,12 +384,12 @@ const SubagentToolCallRow: React.FC<{ item: SubagentToolItem }> = ({ item }) => 
             </ul>
           )}
           {hasMeaningfulArgs(item.args) && (
-            <pre className="scrollbar-slim max-h-24 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-[12px] break-words whitespace-pre-wrap text-gray-600">
+            <pre className="scrollbar-slim max-h-24 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2 text-[12px] wrap-break-word whitespace-pre-wrap text-gray-600">
               {safeStringifyArgs(item.args)}
             </pre>
           )}
           {item.errorMessage && (
-            <div className="break-words text-red-500">错误：{item.errorMessage}</div>
+            <div className="wrap-break-word text-red-500">错误：{item.errorMessage}</div>
           )}
         </div>
       )}

@@ -293,7 +293,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             </div>
           )}
           <div
-            className="max-w-[75%] min-w-0 rounded-2xl rounded-tr-md bg-gradient-to-br from-sky-100 to-teal-50 px-4 py-3 text-[15px] break-words text-gray-800 shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
+            className="max-w-[75%] min-w-0 rounded-2xl rounded-tr-md bg-linear-to-br from-sky-100 to-teal-50 px-4 py-3 text-[15px] wrap-break-word text-gray-800 shadow-[0_1px_2px_rgba(16,24,40,0.05)]"
             onMouseEnter={() => setIsShowOtherOperators(true)}
             onMouseLeave={() => setIsShowOtherOperators(false)}
           >
@@ -391,7 +391,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-500" />
                   本次工作流任务总结
                 </div>
-                <div className="min-w-0 text-sm break-words text-gray-700">
+                <div className="min-w-0 text-sm wrap-break-word text-gray-700">
                   <CustomMarkdown content={taskSummaryPart.content.text} />
                 </div>
               </div>
