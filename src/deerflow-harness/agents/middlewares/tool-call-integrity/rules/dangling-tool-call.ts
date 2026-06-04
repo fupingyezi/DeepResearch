@@ -105,7 +105,7 @@ export const danglingToolCallRule: IntegrityRule = {
 
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
-      if (m instanceof ToolMessage) {
+      if (ToolMessage.isInstance(m)) {
         toolMsgCount += 1;
         const id = m.tool_call_id;
         if (!id || !allToolCallIds.has(id)) {
@@ -125,7 +125,7 @@ export const danglingToolCallRule: IntegrityRule = {
         const expectedIds = new Set(calls.map((c) => c.id!));
         const matched = new Set<string>();
         let j = i + 1;
-        while (j < messages.length && messages[j] instanceof ToolMessage) {
+        while (j < messages.length && ToolMessage.isInstance(messages[j])) {
           const tm = messages[j] as ToolMessage;
           if (tm.tool_call_id && expectedIds.has(tm.tool_call_id)) {
             matched.add(tm.tool_call_id);
@@ -147,7 +147,7 @@ export const danglingToolCallRule: IntegrityRule = {
     // 通常只对应一条；如有多条只保留首条，其余视为冗余丢弃）。
     const toolByCallId = new Map<string, ToolMessage>();
     for (const m of messages) {
-      if (m instanceof ToolMessage && m.tool_call_id && !toolByCallId.has(m.tool_call_id)) {
+      if (ToolMessage.isInstance(m) && m.tool_call_id && !toolByCallId.has(m.tool_call_id)) {
         toolByCallId.set(m.tool_call_id, m);
       }
     }
@@ -158,7 +158,7 @@ export const danglingToolCallRule: IntegrityRule = {
 
     for (const m of messages) {
       // ToolMessage：在 AIMessage 处会被消费；这里跳过
-      if (m instanceof ToolMessage) {
+      if (ToolMessage.isInstance(m)) {
         if (m.tool_call_id && allToolCallIds.has(m.tool_call_id)) {
           // 已被或将被对应的 AIMessage 消费，不再单独 push
           continue;

@@ -45,3 +45,8 @@ next-env.d.ts
 
 # codebuddy
 .codebuddy
+
+# extensions（MCP / skill 启用状态，运行期生成；模板见 extensions_config.example.json）
+/extensions_config.json
+# 自定义技能（用户在设置界面新建，运行期生成）
+/skills/custom

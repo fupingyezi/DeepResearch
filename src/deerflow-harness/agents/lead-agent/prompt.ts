@@ -9,6 +9,7 @@
  */
 
 import { buildMemoryContext } from '../memory';
+import { buildSkillsSection, loadEnabledSkills } from '../../skills';
 
 /**
  * 与 SubagentLimitMiddleware 默认值保持一致。
@@ -294,20 +295,39 @@ export const SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;
 export interface BuildLeadAgentPromptOptions {
   agentName?: string | null;
   userId?: string | null;
+  /** 是否注入 memory section。默认 true；memory 关闭时传 false（仍注入 skills）。 */
+  injectMemory?: boolean;
+  /** 已加载 MCP 工具的注入块（由 caller 经 buildMcpToolsSection 生成）；为空则不注入。 */
+  mcpToolsSection?: string;
 }
 
 /**
- * 构建带 memory 注入的 lead-agent system prompt。
- * memory 注入位置：BASE_SYSTEM_PROMPT 之后。
- * memory 关闭或为空时退化为纯 BASE_SYSTEM_PROMPT。
+ * 构建带 memory + skills + mcp 注入的 lead-agent system prompt。
+ *
+ * 注入顺序：BASE_SYSTEM_PROMPT → 启用技能 section → MCP 工具 section → memory section。
+ * 任一为空则该段省略；skill 加载失败不阻断 prompt 构建（降级为无 skill）。
  */
 export async function buildLeadAgentSystemPrompt(
   opts: BuildLeadAgentPromptOptions = {},
 ): Promise<string> {
-  const memoryBlock = await buildMemoryContext({
-    agentName: opts.agentName ?? null,
-    userId: opts.userId ?? null,
-  });
-  if (!memoryBlock) return BASE_SYSTEM_PROMPT;
-  return `${BASE_SYSTEM_PROMPT}\n\n${memoryBlock}`;
+  let skillsBlock = '';
+  try {
+    skillsBlock = buildSkillsSection(await loadEnabledSkills());
+  } catch (e) {
+    console.warn('[lead-agent/prompt] loadEnabledSkills failed, skip skills injection:', e);
+  }
+
+  const memoryBlock =
+    opts.injectMemory === false
+      ? ''
+      : await buildMemoryContext({
+          agentName: opts.agentName ?? null,
+          userId: opts.userId ?? null,
+        });
+
+  const sections = [BASE_SYSTEM_PROMPT];
+  if (skillsBlock) sections.push(skillsBlock);
+  if (opts.mcpToolsSection) sections.push(opts.mcpToolsSection);
+  if (memoryBlock) sections.push(memoryBlock);
+  return sections.join('\n\n');
 }

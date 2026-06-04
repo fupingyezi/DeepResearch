@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { AccountSettingsPage } from './account-settings-page';
 import { MemorySettingsPage } from './memory-settings-page';
 import { PlaceholderPage } from './placeholder-page';
+import { SkillSettingsPage } from './skill-settings-page';
 import { ToolsSettingsPage } from './tools-settings-page';
 
 type TabKey = 'account' | 'appearance' | 'notification' | 'memory' | 'tools' | 'skills' | 'about';
@@ -81,6 +82,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             <MemorySettingsPage />
           ) : active === 'tools' ? (
             <ToolsSettingsPage />
+          ) : active === 'skills' ? (
+            <SkillSettingsPage />
           ) : (
             <PlaceholderPage title={activeLabel} />
           )}

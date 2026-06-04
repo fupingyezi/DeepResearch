@@ -83,13 +83,12 @@ rg -nP "^\s*//\s*[-=─━*]{5,}|^\s*/\*+\s*[-=─━*]{5,}" src
 | `(err as Error & { code?: string }).code` | 自定义错误类 `class AppError extends Error { constructor(msg, public code: string) { super(msg); } }` |
 | `(x as any).field`                        | 定义本地接口 `interface X { field?: T }` 后用 `as X`                                                  |
 | `setTimeout(...) as unknown as number`    | 显式包装函数返回 `Number(setTimeout(...))` 或用 `ReturnType<typeof setTimeout>`                       |
-| `params as any[]`                         | 直接声明 `const params: unknown[] = []`                                                               |
+
+能用any优先any，减少过度防御
 
 ### 2.4 检查清单
 
 ```bash
-# 必须为 0
-rg -n "as\s+any\b" src
 # 必须有解释性注释，否则视为违规
 rg -nP "as\s+unknown\s+as" src
 ```
@@ -199,3 +198,7 @@ rg -nw "cfg|tcId|Tc" src                        # = 0
 1. 先读 `CLAUDE.md` 与本文件；
 2. 仍不确定 → 在 PR / commit message 中**显式列出疑虑**，让维护者拍板；
 3. **绝不**自行扩大改动范围或自行决定保留兼容层。
+
+## 10， 文件代码结构
+
+类型和常量放在文件顶部，函数和类放在文件底部，不要间杂。
