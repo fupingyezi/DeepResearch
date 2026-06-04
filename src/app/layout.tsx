@@ -1,5 +1,4 @@
 import './globals.css';
-import { AppShell } from '@/components/app-shell';
 import { AuthProvider } from '@/runtime/context/auth-provider';
 import { initialDB } from '@/lib/db';
 
@@ -9,7 +8,12 @@ initialDB().catch((error) => {
   console.error('Database initialization failed:', error);
 });
 
-export default async function RootLayout({
+/**
+ * 根布局：仅负责 html/body 骨架与全局 Provider 注入。
+ * 侧边栏等应用外壳下沉到 (app)/layout，鉴权页外壳下沉到 (auth)/layout，
+ * 由 Next.js Route Group 各自承担布局，互不干扰。
+ */
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -17,9 +21,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="flex h-screen overflow-hidden bg-[#f9fafb] text-[#111827] antialiased">
-        <AuthProvider>
-          <AppShell>{children}</AppShell>
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

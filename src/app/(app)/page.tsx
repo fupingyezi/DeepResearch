@@ -12,7 +12,7 @@ export default function Home() {
       {/* chat 主体：占据除右侧产物面板外的全部剩余空间 */}
       <div className="h-screen min-w-0 flex-1">
         <ChatWindow
-          emptyStateComponent={'Hi, Yezi!😃'}
+          emptyStateComponent={'Hi, Good Luck!'}
           placeholder="只要不失去你的崇高，整个世界都会向你敞开。"
         />
       </div>

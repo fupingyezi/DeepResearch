@@ -40,7 +40,9 @@ export default function LoginPage() {
           ? await loginRequest(email, password)
           : await registerRequest(email, password);
       applyUser(user);
-      router.replace('/');
+      // 硬导航整页跳转：确保 HttpOnly cookie 已写入、middleware 重新放行 /，
+      // 规避软导航命中 Router 缓存的"未登录重定向"导致 URL 停留 /login。
+      window.location.assign('/');
     } catch (err) {
       setError(err instanceof AuthRequestError ? err.message : 'Network error, please try again');
     } finally {

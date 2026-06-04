@@ -1,14 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
 import { useAuth } from '@/runtime/context/auth-provider';
 import { AuthRequestError, initializeAdmin } from '@/utils/auth/client';
 
 export default function SetupPage() {
-  const router = useRouter();
   const { applyUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +25,8 @@ export default function SetupPage() {
     try {
       const admin = await initializeAdmin(email, password);
       applyUser(admin);
-      router.replace('/');
+      // 硬导航整页跳转，确保 cookie 写入后 middleware 重新放行 /
+      window.location.assign('/');
     } catch (err) {
       setError(err instanceof AuthRequestError ? err.message : 'Network error, please try again');
     } finally {
