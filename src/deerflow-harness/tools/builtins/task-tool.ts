@@ -162,11 +162,14 @@ export const taskTool = tool(
           `subagent with model='inherit' will fall back to default in createChatModel.`,
       );
     }
+    // 从 runtime 中提取 parentThreadId， 作为ALS的兜底
+    const parentThreadId = getContext()?.thread_id ?? runtimeConfig.configurable?.thread_id;
     const executor = new SubagentExecutor({
       config,
       tools,
       taskId: toolCallId,
       inheritedModelConfig,
+      parentThreadId,
     });
 
     const safeWriter = (payload: any) => {

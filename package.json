@@ -30,6 +30,7 @@
     "jspdf": "^3.0.4",
     "katex": "^0.16.27",
     "langchain": "^1.0.4",
+    "langsmith": "^0.7.5",
     "lucide-react": "^0.556.0",
     "mammoth": "^1.11.0",
     "minio": "^8.0.6",

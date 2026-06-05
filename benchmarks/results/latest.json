@@ -1,0 +1,591 @@
+{
+  "runAt": "2026-06-05T08:41:20.799Z",
+  "config": {
+    "agentModel": "deepseek-chat",
+    "judgeModel": "gpt-4o",
+    "datasetSize": 8
+  },
+  "summary": {
+    "totalExamples": 8,
+    "successCount": 8,
+    "errorCount": 0,
+    "avgLatencyMs": 246,
+    "avgTtftMs": 0,
+    "avgScores": {
+      "non_empty": 0,
+      "error_free": 1,
+      "keyword_coverage": 0,
+      "performance": 1
+    }
+  },
+  "results": [
+    {
+      "exampleId": "fact-001",
+      "query": "什么是 LangGraph？它和 LangChain 的关系是什么？",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 588,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880304,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880304,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/4 个关键词: [LangGraph, 状态机, 工作流, 有向图]",
+          "metadata": {
+            "matched": 0,
+            "total": 4,
+            "keywords": [
+              "LangGraph",
+              "状态机",
+              "工作流",
+              "有向图"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.6s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 588,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "fact-002",
+      "query": "Next.js 14 的 App Router 和 Pages Router 有什么主要区别？",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 410,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880126,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880126,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/4 个关键词: [App Router, Pages Router, Server Components, 文件路由]",
+          "metadata": {
+            "matched": 0,
+            "total": 4,
+            "keywords": [
+              "App Router",
+              "Pages Router",
+              "Server Components",
+              "文件路由"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.4s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 410,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "multi-001",
+      "query": "RAG（检索增强生成）系统中，如何平衡召回率和精确率？请从索引策略、重排序、混合搜索三个维度分析。",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 161,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880465,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880465,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/6 个关键词: [RAG, 召回率, 精确率, 重排序, 向量搜索, 关键词搜索]",
+          "metadata": {
+            "matched": 0,
+            "total": 6,
+            "keywords": [
+              "RAG",
+              "召回率",
+              "精确率",
+              "重排序",
+              "向量搜索",
+              "关键词搜索"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 161,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "multi-002",
+      "query": "对比分析 OpenAI GPT-4o、Anthropic Claude 3.5 Sonnet、Google Gemini 1.5 Pro 三款模型在 Agent 场景下的工具调用能力差异。",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 166,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880470,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880470,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/6 个关键词: [GPT-4o, Claude, Gemini, 工具调用, function calling, JSON Schema]",
+          "metadata": {
+            "matched": 0,
+            "total": 6,
+            "keywords": [
+              "GPT-4o",
+              "Claude",
+              "Gemini",
+              "工具调用",
+              "function calling",
+              "JSON Schema"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 166,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "timeliness-001",
+      "query": "2025 年 AI Agent 领域最重要的技术突破有哪些？",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 169,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880639,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880639,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/4 个关键词: [AI Agent, LLM, 推理, 工具使用]",
+          "metadata": {
+            "matched": 0,
+            "total": 4,
+            "keywords": [
+              "AI Agent",
+              "LLM",
+              "推理",
+              "工具使用"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 169,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "timeliness-002",
+      "query": "当前主流 LLM 应用框架（LangChain/CrewAI/AutoGen）的优缺点对比是什么？",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 161,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880632,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880632,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/4 个关键词: [LangChain, CrewAI, AutoGen, 框架对比]",
+          "metadata": {
+            "matched": 0,
+            "total": 4,
+            "keywords": [
+              "LangChain",
+              "CrewAI",
+              "AutoGen",
+              "框架对比"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 161,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "tech-001",
+      "query": "在 TypeScript/Node.js 后端实现 SSE（Server-Sent Events）流式输出时，如何处理背压、断线重连、以及消息边界问题？给出具体的实现方案。",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 159,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880798,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880798,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/6 个关键词: [SSE, 背压, 断线重连, 消息边界, ReadableStream, Node.js]",
+          "metadata": {
+            "matched": 0,
+            "total": 6,
+            "keywords": [
+              "SSE",
+              "背压",
+              "断线重连",
+              "消息边界",
+              "ReadableStream",
+              "Node.js"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 159,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    },
+    {
+      "exampleId": "tech-002",
+      "query": "PostgreSQL 作为 LLM 应用的 Checkpoint 存储方案，相比 Redis 和纯文件存储有哪些优势和劣势？请结合 LangGraph 的 checkpoint-postgres 实际使用场景分析。",
+      "result": {
+        "output": "",
+        "metrics": {
+          "ttftMs": 0,
+          "totalLatencyMs": 155,
+          "toolCallCount": 0,
+          "toolNames": [],
+          "error": false
+        },
+        "events": [
+          {
+            "eventType": "error",
+            "timestamp": 1780648880795,
+            "agentId": "lead",
+            "payload": {
+              "errorCode": "AGENT_STREAM_ERROR",
+              "errorMessage": "Error in middleware \"ToolCallIntegrityMiddleware\": Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable.",
+              "recoverable": false
+            }
+          },
+          {
+            "eventType": "end",
+            "timestamp": 1780648880795,
+            "agentId": "lead",
+            "payload": {}
+          }
+        ]
+      },
+      "evaluations": [
+        {
+          "key": "non_empty",
+          "score": 0,
+          "comment": "输出过短或为空 (0 字符)"
+        },
+        {
+          "key": "error_free",
+          "score": 1,
+          "comment": "无错误"
+        },
+        {
+          "key": "keyword_coverage",
+          "score": 0,
+          "comment": "覆盖 0/6 个关键词: [PostgreSQL, Checkpoint, LangGraph, Redis, ACID, 序列化]",
+          "metadata": {
+            "matched": 0,
+            "total": 6,
+            "keywords": [
+              "PostgreSQL",
+              "Checkpoint",
+              "LangGraph",
+              "Redis",
+              "ACID",
+              "序列化"
+            ]
+          }
+        },
+        {
+          "key": "performance",
+          "score": 1,
+          "comment": "TTFT=0.0s, Total=0.2s",
+          "metadata": {
+            "ttftMs": 0,
+            "totalLatencyMs": 155,
+            "ttftScore": 1,
+            "latencyScore": 1
+          }
+        }
+      ]
+    }
+  ]
+}

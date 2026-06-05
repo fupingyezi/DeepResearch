@@ -17,6 +17,8 @@ export interface SubagentExecutorOptions {
   /** 可选 task id（通常来自 lead agent 的 tool_call_id）；未提供时使用 traceId。 */
   taskId?: string;
   inheritedModelConfig?: ModelConfig;
+  /** 父级（lead）thread_id，作为 ALS 的兜底来源。 */
+  parentThreadId?: string;
 }
 
 interface RawMessageChunk {
@@ -324,6 +326,7 @@ export class SubagentExecutor {
   private readonly traceId: string;
   private readonly taskId: string;
   private readonly inheritedModelConfig?: ModelConfig;
+  private readonly parentThreadId?: string;
 
   constructor(opts: SubagentExecutorOptions) {
     this.config = opts.config;
@@ -331,6 +334,7 @@ export class SubagentExecutor {
     this.traceId = opts.traceId ?? uuidv4().slice(0, 8);
     this.taskId = opts.taskId ?? this.traceId;
     this.inheritedModelConfig = opts.inheritedModelConfig;
+    this.parentThreadId = opts.parentThreadId;
   }
 
   async *execute(
@@ -387,8 +391,10 @@ export class SubagentExecutor {
 
       // 5) 主循环：消费 LangGraph stream
       const input = { messages: [new HumanMessage(prompt)] };
-      // 若处于 thread 上下文中，把 thread_id 透传给子图，让父子共用同一 checkpoint thread
-      const ctxThreadId = getContext()?.thread_id;
+      // 若处于 thread 上下文中，把 thread_id 透传给子图，让父子共用同一 checkpoint thread。
+      // ALS（getContext）在 LangGraph 流式执行进入 subagent 时若丢失，则
+      // task-tool 从 runnable config 透传来的 parentThreadId 作兜底，
+      const ctxThreadId = getContext()?.thread_id ?? this.parentThreadId;
       const streamOpts: Record<string, any> = {
         signal: internalController.signal,
         // 增加 'updates' 用于补抓 ToolMessage（subagent 内部工具结果）

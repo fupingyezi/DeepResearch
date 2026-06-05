@@ -8,6 +8,8 @@ import {
 } from '@langchain/core/messages';
 import type { ToolCall } from '@langchain/core/messages/tool';
 
+import { getContext } from '../../runtime/context';
+
 /**
  * LoopDetectionMiddleware
  *
@@ -251,8 +253,12 @@ export function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}
 
   const tracker = new LoopTracker(maxTrackedThreads);
 
-  function getThreadId(runtime: { configurable?: { thread_id?: string } }): string {
-    return runtime.configurable?.thread_id || 'default';
+  function getThreadId(runtime: any): string {
+    const tid =
+      getContext()?.thread_id ??
+      runtime?.configurable?.thread_id ??
+      runtime?.config?.configurable?.thread_id;
+    return typeof tid === 'string' && tid ? tid : 'default';
   }
 
   /** 跟踪 + 检测，返回 [warning, hardStop]。 */
