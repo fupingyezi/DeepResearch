@@ -10,13 +10,15 @@
 - 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离。
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按 `agentName + userId` 分文件持久化到 `.memory/`；支持通过 API 或设置界面手动 CRUD 记忆事实。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
-- 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
+- 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父子 subagent 共用 thread checkpoint）；Redis 缓存；MinIO 存上传文件。
-- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 13 层中间件（Qwen 工具调用恢复、ToolError、Memory、SubagentLimit、LoopDetection、Title、Todo、Summarization、Clarification 等），支持 `@Next` / `@Prev` 装饰器自定义插入锚点。
+- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复、ToolError、Memory、SubagentLimit、LoopDetection、Guardrail、Title、Todo、Summarization、Clarification、ViewImage、Uploads、ThreadData、Sandbox 等），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
+- 🔒 **安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list 等沙箱工具集。
+- 📊 **基准测试框架**：`benchmarks/` 内置评估系统 + 研究 QA 数据集，支持 Agent 质量打分与结果持久化。
 
 ## 🛠️ 技术栈
 
@@ -25,10 +27,14 @@
 | 前端       | Next.js 14（App Router + Turbopack）、React 18、TypeScript、Ant Design 5、Zustand           |
 | 样式       | Tailwind CSS v4（`@theme inline` token）、`@tailwindcss/typography`                         |
 | Markdown   | react-markdown + remark-gfm/math + rehype-katex + react-syntax-highlighter                  |
+| 图标       | Lucide React                                                                                |
 | Agent / AI | LangChain 1.x、LangGraph 1.x、`@langchain/langgraph-checkpoint-postgres`                    |
 | 模型       | `@langchain/openai`（OpenAI 兼容协议，支持 OpenAI / Qwen / Spark / DeepSeek / Moonshot 等） |
 | 检索       | Tavily（`@tavily/core`）                                                                    |
 | MCP        | `@langchain/mcp-adapters`                                                                   |
+| 状态管理   | Zustand + Immer                                                                             |
+| 校验       | Zod                                                                                          |
+| 导出       | jsPDF + html2canvas                                                                         |
 | 存储       | PostgreSQL、Redis、MinIO                                                                    |
 | 鉴权       | JWT（jsonwebtoken）、bcryptjs                                                               |
 
@@ -76,7 +82,7 @@ src/
 │   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
 │   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
-│   │   ├── middlewares/                # 13 种中间件实现（含 tool-call-integrity 子目录）
+│   │   ├── middlewares/                # 14 种中间件实现（含 tool-call-integrity 子目录）
 │   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储与队列
 │   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
@@ -93,7 +99,14 @@ src/
 │   ├── models/                         # 模型预设（MODEL_PRESETS）
 │   ├── auth/                           # 认证模块
 │   ├── config/                         # 应用配置
-│   ├── sandbox/                        # 待扩展沙箱
+│   ├── sandbox/                        # 安全沙箱（路径校验、文件操作锁、异常隔离）
+│   │   ├── tools.ts                    # 沙箱内置工具集（读/写/搜索/list 等）
+│   │   ├── search.ts                   # 沙箱内搜索
+│   │   ├── security.ts                 # 安全策略
+│   │   ├── file-operation-lock.ts      # 并发文件操作锁
+│   │   ├── path-utils.ts               # 路径安全处理
+│   │   ├── exceptions.ts               # 异常定义
+│   │   └── local/                      # 本地文件系统沙箱实现
 │   └── types/                          # AgentEvent 等共享类型
 │
 ├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
@@ -137,6 +150,27 @@ docker-compose.yaml                     # PostgreSQL + Redis + MinIO 一键启�
 extensions_config.example.json          # MCP/Skills 扩展配置模板
 CLAUDE.md                               # 架构与协作指引（详细版）
 project.md                              # AI 协作代码规范
+
+benchmarks/                             # 基准测试与评估框架
+├── run.ts                              # 测试运行脚本
+├── agent-wrapper.ts                    # Agent 包装器
+├── config.ts                           # 测试配置
+├── evaluators/                         # 评估器（质量打分）
+├── datasets/research-qa.ts             # 研究 QA 数据集
+└── results/                            # 评估结果持久化
+
+docs/                                   # 设计文档
+├── deerflow-alignment-plan.md          # DeerFlow 架构对齐计划
+└── sandbox-implementation.md           # 沙箱实现设计文档
+
+skills/                                 # 内置技能定义（7 种）
+├── deep-research/SKILL.md              # 深度研究（核心技能）
+├── consulting-analysis/SKILL.md        # 咨询分析
+├── code-documentation/SKILL.md         # 代码文档生成
+├── academic-paper-review/SKILL.md      # 学术论文评审
+├── newsletter-generation/SKILL.md      # 新闻稿生成
+├── frontend-design/SKILL.md            # 前端设计
+└── web-design-guidelines/SKILL.md      # Web 设计指南
 ```
 
 ## 🚀 快速开始
@@ -295,9 +329,10 @@ API Routes（/api/v3/chat/[threadId] 等）
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用 + MCP/Skill 工具加载）
-   │ │      └── createBaseAgent + 中间件管线（最多 13 层）
-   │ │             └── 工具：task / search_web / clarification / ...
-   │ │                       └── SubagentExecutor（父子共用 checkpoint）
+   │ │      └── createBaseAgent + 中间件管线（最多 14 层）
+   │ │             ├── 工具：task / search_web / clarification / ...
+   │ │             │         └── SubagentExecutor（父子共用 checkpoint）
+   │ │             └── Sandbox（路径安全校验 + 文件操作锁 + 异常隔离）
    │ ├── Checkpointer（PostgreSQL）
    │ └── Stores（threads / runs）
         │
@@ -310,12 +345,16 @@ StreamBridge（进程内 EventEmitter 总线）
 
 - ThreadService 状态机与不变量（`try / catch / finally` 三段式收敛）
 - Tool Call Chunk 缓冲机制（OpenAI 流式分片按 index 拼接）
-- 中间件组装顺序与 `RuntimeFeatures` 开关
+- 中间件组装顺序与 `RuntimeFeatures` 开关（14 层中间件 + Tool Call 完整性子规则）
 - Memory LLM 更新流程（含显式 `callbacks: []` 切断回调链的关键约束）
 - ThreadMetaStore / RunStore 的 PG schema
 - MCP 客户端连接与工具加载缓存策略
-- Skill frontmatter 解析与 prompt 注入机制
+- Skill frontmatter 解析与 prompt 注入机制（7 种内置技能）
 - 扩展统一配置（extensions_config.json）的读写与校验
+- 沙箱安全策略、路径校验与文件操作锁机制
+
+沙箱实现细节见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)。
+架构对齐计划见 [`docs/deerflow-alignment-plan.md`](./docs/deerflow-alignment-plan.md)。
 
 ## 📖 使用指南
 
@@ -406,6 +445,27 @@ MEMORY_DEBUG=1 pnpm dev
 - `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
 
+## 📊 基准测试
+
+项目内置评估框架（`benchmarks/`），用于对 Agent 研究质量进行自动化打分：
+
+```bash
+# 运行基准测试
+cd benchmarks && npx tsx run.ts
+
+# 或从项目根目录（需先配置 benchmarks/.env.local）
+npx tsx benchmarks/run.ts
+```
+
+测试流程：
+
+1. 从 `datasets/research-qa.ts` 加载研究 QA 数据集
+2. 通过 `agent-wrapper.ts` 包装 Agent 调用
+3. `evaluators/` 对输出进行质量打分
+4. 结果持久化到 `results/latest.json` / `.jsonl`
+
+详见 [`benchmarks/README.md`](./benchmarks/README.md)。
+
 ## 🧭 协作规范
 
 代码风格、注释规范、命名约定、禁用项等详见 [`project.md`](./project.md)。要点：
@@ -422,8 +482,7 @@ MEMORY_DEBUG=1 pnpm dev
 2. StreamBridge 为进程内总线，多实例水平扩展需替换为 Redis pub/sub
 3. ThreadChannel buffer 无上限，超长运行的线程可能积累大量事件
 4. 单次请求只能使用一个模型
-5. `ViewImageMiddleware` 当前为占位实现，视觉模型适配待完成
-6. 项目目前无单元测试
+5. 项目目前无单元测试（已内置 `benchmarks/` 评估框架，覆盖研究 QA 场景）
 
 ## 📝 License
 
