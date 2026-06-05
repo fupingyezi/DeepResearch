@@ -11,8 +11,19 @@
 
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { taskTool, searchWebTool } from './builtins';
+import { SANDBOX_TOOLS } from '../sandbox';
 
 export { taskTool, askClarificationTool, searchWebTool } from './builtins';
+export {
+  SANDBOX_TOOLS,
+  bashTool,
+  lsTool,
+  globTool,
+  grepTool,
+  readFileTool,
+  writeFileTool,
+  strReplaceTool,
+} from '../sandbox';
 
 export interface GetAvailableToolsOptions {
   /** 工具名白名单（按工具的 `name` 属性匹配）；缺省返回所有非 task 工具。 */
@@ -28,7 +39,7 @@ export interface GetAvailableToolsOptions {
  */
 function buildToolRegistry(): Map<string, StructuredToolInterface> {
   const registry = new Map<string, StructuredToolInterface>();
-  for (const t of [searchWebTool, taskTool]) {
+  for (const t of [searchWebTool, taskTool, ...SANDBOX_TOOLS]) {
     const name = (t as { name?: string }).name;
     if (!name) continue;
     registry.set(name, t as StructuredToolInterface);
