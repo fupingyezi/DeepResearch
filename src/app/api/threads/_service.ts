@@ -125,6 +125,7 @@ async function build(): Promise<ThreadService> {
   //   - autoTitleEnabled: true  → 首轮后异步生成会话标题（替代占位 "New thread"）。
   //   - threadDataEnabled: true → 装载本会话上传文件到 state（基础设施）。
   //   - uploadsEnabled:   true  → 把上传文件以 SystemMessage 注入 prompt 上下文。
+  //   - sandboxEnabled:   true  → 获取沙箱并注入文件工具集（bash 默认禁用，需 env 开启）。
   // 单次请求可通过 body.configuration.<key> 显式覆盖（见 v3/chat route.ts）。
   const sharedClientOptions = {
     agentName: 'lead' as const,
@@ -132,6 +133,7 @@ async function build(): Promise<ThreadService> {
     autoTitleEnabled: true,
     threadDataEnabled: true,
     uploadsEnabled: true,
+    sandboxEnabled: true,
     checkpointer,
   };
 

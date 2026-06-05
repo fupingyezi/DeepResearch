@@ -23,6 +23,7 @@ interface RuntimeRunOptions {
   autoTitleEnabled: boolean;
   threadDataEnabled: boolean;
   uploadsEnabled: boolean;
+  sandboxEnabled: boolean;
   agentName: string;
   userId: string | null;
   availableSkills?: string[];
@@ -40,6 +41,7 @@ function buildConfigKey(
     opts.autoTitleEnabled,
     opts.threadDataEnabled,
     opts.uploadsEnabled,
+    opts.sandboxEnabled,
     opts.agentName,
     opts.availableSkills?.sort() ?? [],
     mcpSignature,
@@ -113,6 +115,7 @@ export class DeerFlowClient {
       autoTitleEnabled: options?.autoTitleEnabled ?? false,
       threadDataEnabled: options?.threadDataEnabled ?? false,
       uploadsEnabled: options?.uploadsEnabled ?? false,
+      sandboxEnabled: options?.sandboxEnabled ?? false,
       userId: options?.userId,
       availableSkills: options?.availableSkills,
     };
@@ -131,7 +134,7 @@ export class DeerFlowClient {
    *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled。`agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
+   * uploadsEnabled / sandboxEnabled。`agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
    * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
@@ -152,6 +155,10 @@ export class DeerFlowClient {
       uploadsEnabled: pickBooleanOverride(
         metadata?.uploadsEnabled,
         !!this.baseOptions.uploadsEnabled,
+      ),
+      sandboxEnabled: pickBooleanOverride(
+        metadata?.sandboxEnabled,
+        !!this.baseOptions.sandboxEnabled,
       ),
       agentName: this.baseOptions.agentName ?? 'lead',
       userId,
@@ -241,6 +248,7 @@ export class DeerFlowClient {
         autoTitle: opts.autoTitleEnabled,
         threadData: opts.threadDataEnabled,
         uploads: opts.uploadsEnabled,
+        sandbox: opts.sandboxEnabled,
       },
     });
 
@@ -377,6 +385,7 @@ export class DeerFlowClient {
       const stream = await agent.stream(input, {
         ...config,
         streamMode: ['messages', 'updates', 'custom'],
+        recursionLimit: 200, // 防止递归调用过早报错
       });
 
       // OpenAI 兼容流：tool_call 的 args 按 index 分片到达，需累加后再 emit。

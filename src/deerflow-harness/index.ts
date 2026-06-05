@@ -15,6 +15,30 @@ export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider
 export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';
 
+// Sandbox 子系统（LocalSandbox + Provider 单例 + 文件工具集）
+export {
+  Sandbox,
+  SandboxProvider,
+  LocalSandbox,
+  LocalSandboxProvider,
+  getSandboxProvider,
+  resetSandboxProvider,
+  setSandboxProvider,
+  SandboxError,
+  SandboxNotFoundError,
+  SandboxRuntimeError,
+  SandboxPermissionError,
+  SandboxFileNotFoundError,
+  isHostBashAllowed,
+  LOCAL_HOST_BASH_DISABLED_MESSAGE,
+  getSandboxBaseDir,
+  getThreadDirectories,
+  VIRTUAL_PATH_PREFIX,
+  SANDBOX_TOOLS,
+  type GrepMatch,
+  type ThreadDirectories,
+} from './sandbox';
+
 // extensions 子系统（MCP / skill 统一配置）
 export {
   type McpTransport,

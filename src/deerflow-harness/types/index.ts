@@ -38,6 +38,8 @@ export interface ClientOptions {
   threadDataEnabled?: boolean;
   /** 是否启用 UploadsMiddleware（features.uploads）。默认 false；服务级建议 true。 */
   uploadsEnabled?: boolean;
+  /** 是否启用 SandboxMiddleware + 文件工具集（features.sandbox）。默认 false；服务级建议 true。 */
+  sandboxEnabled?: boolean;
   /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
   userId?: string;
   /** 可用的 skill 列表 */

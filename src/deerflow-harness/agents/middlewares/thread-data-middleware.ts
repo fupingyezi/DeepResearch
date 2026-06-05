@@ -2,6 +2,7 @@ import { createMiddleware } from 'langchain';
 
 import { query } from '@/lib/db';
 import { getContext } from '../../runtime/context';
+import { getThreadDirectories } from '../../sandbox';
 import type { ThreadDataState, UploadedFile } from '../thread-state';
 
 /**
@@ -9,8 +10,9 @@ import type { ThreadDataState, UploadedFile } from '../thread-state';
  *
  * 职责：
  * - `beforeAgent` 阶段从 PostgreSQL 加载本会话关联的上传文件元信息 + 解析后全文，
- *   写入 `state.uploadedFiles`；同时初始化 `state.threadData`（路径字段保留 null，
- *   等 sandbox 接入再填）。为下游 `UploadsMiddleware` 提供数据基座。
+ *   写入 `state.uploadedFiles`；同时初始化 `state.threadData`（按 thread_id 计算
+ *   workspace/uploads/outputs 实际目录），为下游 `UploadsMiddleware` 与 sandbox
+ *   工具提供数据基座。
  *
  * 触发与幂等：
  * - 必须能从 `getContext()` 拿到 `thread_id`（lead-agent 入口已注入）；缺失直接 return。
@@ -18,7 +20,7 @@ import type { ThreadDataState, UploadedFile } from '../thread-state';
  *
  * 错误隔离：任何异常仅 console.error，不影响主流程。
  *
- * 顺序：必须排在 UploadsMiddleware（与未来 SandboxMiddleware）之前。由
+ * 顺序：必须排在 UploadsMiddleware 与 SandboxMiddleware 之前。由
  * `ORDERED_MIDDLEWARES` 位序保证。
  */
 
@@ -73,7 +75,7 @@ export const threadDataMiddleware = createMiddleware({
         // 仍写入空数组 + threadData 占位，避免下游每次都判空
         return {
           uploadedFiles: [] as UploadedFile[],
-          threadData: emptyThreadData(),
+          threadData: buildThreadData(threadId),
         };
       }
 
@@ -92,7 +94,7 @@ export const threadDataMiddleware = createMiddleware({
 
       return {
         uploadedFiles,
-        threadData: emptyThreadData(),
+        threadData: buildThreadData(threadId),
       };
     } catch (e) {
       console.error('[threadDataMiddleware] beforeAgent error:', e);
@@ -101,10 +103,11 @@ export const threadDataMiddleware = createMiddleware({
   },
 });
 
-function emptyThreadData(): ThreadDataState {
+function buildThreadData(threadId: string): ThreadDataState {
+  const dirs = getThreadDirectories(threadId);
   return {
-    workspacePath: null,
-    uploadsPath: null,
-    outputsPath: null,
+    workspacePath: dirs.workspace,
+    uploadsPath: dirs.uploads,
+    outputsPath: dirs.outputs,
   };
 }

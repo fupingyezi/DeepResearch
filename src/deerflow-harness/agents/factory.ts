@@ -5,7 +5,7 @@ import { BaseCheckpointSaver } from '@langchain/langgraph';
 import { ThreadStateAnnotation } from './thread-state';
 import { RuntimeFeatures, DEFAULT_FEATURES, type FeatureToggle } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
-import { taskTool } from '../tools';
+import { taskTool, SANDBOX_TOOLS } from '../tools';
 import {
   toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
@@ -14,6 +14,7 @@ import {
   titleMiddleware,
   threadDataMiddleware,
   uploadsMiddleware,
+  sandboxMiddleware,
   viewImageMiddleware,
   createSubagentLimitMiddleware,
   loopDetectionMiddleware,
@@ -112,7 +113,7 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  * vision）按 features 开关条件挂载。
  *
  * 装配顺序严格按 `middlewares/index.ts` 中 ORDERED_MIDDLEWARES 编排：
- *   threadData(0) → uploads(1) → sandbox(2 暂未挂) → toolCallIntegrity(3) →
+ *   threadData(0) → uploads(1) → sandbox(2 features.sandbox) → toolCallIntegrity(3) →
  *   guardrail(4 暂未挂) → toolErrorHandling(5) → summarization(6) → todo(7) →
  *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
  *
@@ -148,6 +149,16 @@ export function assembleFromFeatures(
   // (1) UploadsMiddleware：beforeAgent 把 uploadedFiles 注入 SystemMessage。
   // 必须排在 threadData 之后；运行期顺序由本数组顺序决定。
   pushFeature(chain, features.uploads, uploadsMiddleware);
+
+  // (2) SandboxMiddleware：beforeAgent 获取/复用沙箱并写回 state.sandbox。
+  // 开启时把 7 个文件工具注入 lead-agent 工具集（subagent 经工具注册表继承）。
+  if (features.sandbox === true) {
+    chain.push(sandboxMiddleware);
+    for (const t of SANDBOX_TOOLS) extraTools.push(t as StructuredToolInterface);
+  } else if (typeof features.sandbox === 'object' && features.sandbox !== null) {
+    chain.push(features.sandbox);
+    for (const t of SANDBOX_TOOLS) extraTools.push(t as StructuredToolInterface);
+  }
 
   // (3) 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
