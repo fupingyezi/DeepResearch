@@ -385,6 +385,7 @@ export class DeerFlowClient {
       const stream = await agent.stream(input, {
         ...config,
         streamMode: ['messages', 'updates', 'custom'],
+        recursionLimit: 200, // 防止递归调用过早报错
       });
 
       // OpenAI 兼容流：tool_call 的 args 按 index 分片到达，需累加后再 emit。
