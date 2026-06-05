@@ -124,7 +124,7 @@ export const DATASET_V1: BenchmarkExample[] = [
  */
 export function toLangSmithFormat(examples: BenchmarkExample[]): Array<{
   inputs: { query: string };
-  outputs?: { referenceAnswer: string; expectedKeywords: string[] };
+  outputs?: { referenceAnswer?: string; expectedKeywords?: string[] };
 }> {
   return examples.map((ex) => ({
     inputs: { query: ex.query },
