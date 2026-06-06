@@ -7,7 +7,7 @@
  */
 
 import { ChatOpenAI } from '@langchain/openai';
-import type { AgentRunResult } from '../agent-wrapper';
+import type { AgentRunResult } from './agent';
 
 // ── 类型定义 ──
 

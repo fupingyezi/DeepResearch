@@ -24,6 +24,8 @@ interface RuntimeRunOptions {
   threadDataEnabled: boolean;
   uploadsEnabled: boolean;
   sandboxEnabled: boolean;
+  mcpEnabled: boolean;
+  subagentsEnabled: boolean;
   agentName: string;
   userId: string | null;
   availableSkills?: string[];
@@ -42,6 +44,8 @@ function buildConfigKey(
     opts.threadDataEnabled,
     opts.uploadsEnabled,
     opts.sandboxEnabled,
+    opts.mcpEnabled,
+    opts.subagentsEnabled,
     opts.agentName,
     opts.availableSkills?.sort() ?? [],
     mcpSignature,
@@ -116,6 +120,9 @@ export class DeerFlowClient {
       threadDataEnabled: options?.threadDataEnabled ?? false,
       uploadsEnabled: options?.uploadsEnabled ?? false,
       sandboxEnabled: options?.sandboxEnabled ?? false,
+      // MCP / subagent 默认开启，保持主应用历史行为；caller 可显式关闭以收紧工具集。
+      mcpEnabled: options?.mcpEnabled ?? true,
+      subagentsEnabled: options?.subagentsEnabled ?? true,
       userId: options?.userId,
       availableSkills: options?.availableSkills,
     };
@@ -159,6 +166,11 @@ export class DeerFlowClient {
       sandboxEnabled: pickBooleanOverride(
         metadata?.sandboxEnabled,
         !!this.baseOptions.sandboxEnabled,
+      ),
+      mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
+      subagentsEnabled: pickBooleanOverride(
+        metadata?.subagentsEnabled,
+        this.baseOptions.subagentsEnabled !== false,
       ),
       agentName: this.baseOptions.agentName ?? 'lead',
       userId,
@@ -249,6 +261,7 @@ export class DeerFlowClient {
         threadData: opts.threadDataEnabled,
         uploads: opts.uploadsEnabled,
         sandbox: opts.sandboxEnabled,
+        subagents: opts.subagentsEnabled,
       },
     });
 
@@ -334,7 +347,8 @@ export class DeerFlowClient {
     // 2. 构建本轮 systemPrompt + agent
     // 先加载一次 MCP 工具（loadMcpTools 内部按签名缓存），同源喂给 prompt 注入与 agent 绑定，
     // 保证「模型在提示里看到的 MCP 工具」与「实际可调用的工具」严格一致。
-    const mcpTools = await loadMcpTools();
+    // mcpEnabled=false 时本轮不加载任何 MCP 工具（既不绑定也不写进提示），用于收紧工具集。
+    const mcpTools = runOpts.mcpEnabled ? await loadMcpTools() : [];
     const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools);
     const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
 

@@ -18,6 +18,8 @@ export interface RuntimeFeatures {
   uploads?: FeatureToggle;
   guardrail?: FeatureToggle; // 不允许 true
   qwenToolCallRecovery?: FeatureToggle;
+  /** 是否注入 task 工具 + subagentLimit 中间件（subagent 委派能力）。*/
+  subagents?: FeatureToggle;
 }
 
 export const DEFAULT_FEATURES: RuntimeFeatures = {

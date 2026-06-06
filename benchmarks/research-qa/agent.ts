@@ -10,13 +10,13 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { DeerFlowClient } from '../src/deerflow-harness/client';
-import { runWithContext } from '../src/deerflow-harness/runtime/context';
-import type { ModelConfig } from '../src/deerflow-harness/types';
+import { DeerFlowClient } from '../../src/deerflow-harness/client';
+import { runWithContext } from '../../src/deerflow-harness/runtime/context';
+import type { ModelConfig } from '../../src/deerflow-harness/types';
 import {
   ClientAgentEvent,
   ClientAgentEventType,
-} from '../src/deerflow-harness/runtime/sse/client-event';
+} from '../../src/deerflow-harness/runtime/sse/client-event';
 
 export interface AgentRunResult {
   /** Agent 最终输出文本（完整回答） */
@@ -47,7 +47,7 @@ export interface PerformanceMetrics {
  *
  * @example
  * ```ts
- * import { createBenchmarkAgent } from './agent-wrapper';
+ * import { createBenchmarkAgent } from './agent';
  *
  * const runAgent = createBenchmarkAgent({ modelName: 'gpt-4o-mini' });
  * const result = await runAgent({ query: '什么是量子计算？' });

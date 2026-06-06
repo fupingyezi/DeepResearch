@@ -194,16 +194,21 @@ export function assembleFromFeatures(
   // (10) 可选：viewImage —— 当前为占位实现（仅启用时打印一次警告）。
   pushFeature(chain, features.vision, viewImageMiddleware);
 
-  // (11) 始终启用：subagent 频次/并发上限。每个 agent 实例独立 counter——
-  // 模块级单例会让 CounterRegistry 跨请求共享，异常路径下 inflight 不
-  // 回收会导致下次请求误报"concurrency limit reached"。
-  chain.push(createSubagentLimitMiddleware());
+  // (11) subagent 频次/并发上限。每个 agent 实例独立 counter——
+  // 仅在启用 subagents 时挂载（features.subagents !== false，默认启用）。
+  const subagentsEnabled = features.subagents !== false;
+  if (subagentsEnabled) {
+    chain.push(createSubagentLimitMiddleware());
+  }
 
   // (12) 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
-  // task 工具始终注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）
-  extraTools.push(taskTool as StructuredToolInterface);
+  // task 工具按开关注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）。
+  // 关闭 subagents 时不注入 task
+  if (subagentsEnabled) {
+    extraTools.push(taskTool as StructuredToolInterface);
+  }
 
   return { chain, extraTools };
 }

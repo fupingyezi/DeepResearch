@@ -3,23 +3,22 @@
  * Benchmark 主执行脚本
  *
  * 用法（从项目根目录执行）：
- *   npx tsx benchmarks/run.ts
- *   npx tsx benchmarks/run.ts --category multi-hop
- *   npx tsx benchmarks/run.ts --id fact-001
- *   npx tsx benchmarks/run.ts --upload
+ *   npx tsx benchmarks/research-qa/run.ts
+ *   npx tsx benchmarks/research-qa/run.ts --category multi-hop
+ *   npx tsx benchmarks/research-qa/run.ts --id fact-001
+ *   npx tsx benchmarks/research-qa/run.ts --upload
  *
  * 环境变量：见 benchmarks/.env.example
  *   自动加载 benchmarks/.env.local（优先）或 .env.local（fallback）
  */
 
-// ⚠️ 必须是第一个 import：ES import 会 hoist 到顶部，
 // load-env 的副作用在 config 读取 process.env 之前执行
-import './load-env';
+import '../load-env';
 
 import { Client } from 'langsmith';
-import defaultConfig, { validateEnv } from './config';
-import { DATASET_V1, toJSONL, toLangSmithFormat } from './datasets/research-qa';
-import { createBenchmarkAgent, type AgentRunResult } from './agent-wrapper';
+import defaultConfig, { validateEnv } from '../config';
+import { DATASET_V1, toJSONL, toLangSmithFormat } from './dataset';
+import { createBenchmarkAgent, type AgentRunResult } from './agent';
 import {
   createDefaultEvaluators,
   type BuiltInEvaluator,
@@ -33,6 +32,8 @@ function parseArgs(): {
   id?: string;
   upload: boolean;
   output: string;
+  /** 数据集类型：默认 research-qa，可选 longmem */
+  dataset?: 'research-qa' | 'longmem';
 } {
   const args = process.argv.slice(2);
   return {
@@ -43,7 +44,10 @@ function parseArgs(): {
     upload: args.includes('--upload'),
     output: args.find((a, i) => a === '--output')
       ? args[args.indexOf('--output') + 1]
-      : 'benchmarks/results/latest.json',
+      : 'benchmarks/results/research-qa/latest.json',
+    dataset: (args.find((a, i) => a === '--dataset')
+      ? args[args.indexOf('--dataset') + 1]
+      : undefined) as 'research-qa' | 'longmem' | undefined,
   };
 }
 
@@ -280,6 +284,18 @@ async function main(): Promise<void> {
 
   const config = defaultConfig;
   const args = parseArgs();
+
+  // ── LongMemEval 路由 ──
+  if (args.dataset === 'longmem') {
+    console.log('[Benchmark] 检测到 --dataset longmem，切换到 LongMemEval 运行模式...');
+    // 动态导入避免未安装数据集时的加载开销
+    const longMemModule = await import('../longmem/run');
+    const longMemMain = longMemModule.main as () => Promise<void>;
+    // 将原始 CLI 参数透传给 longmem/run
+    await longMemMain();
+    return;
+  }
+
   const { dataset } = filterDataset();
 
   if (dataset.length === 0) {
@@ -288,7 +304,7 @@ async function main(): Promise<void> {
   }
 
   console.log('╔══════════════════════════════════════════════╗');
-  console.log('║     mini-DeepResearch Benchmark Runner        ║');
+  console.log('║         DeepResearch Benchmark Runner        ║');
   console.log('╠══════════════════════════════════════════════╣');
   console.log(`║  Agent Model: ${config.agent.modelName.padStart(30)}║`);
   console.log(`║  Judge Model: ${config.judge.modelName.padStart(30)}║`);

@@ -53,3 +53,10 @@ next-env.d.ts
 
 # sandbox 工作区（按线程隔离的运行期文件，DEERFLOW_SANDBOX_DIR 可覆盖）
 /.sandbox
+
+# LongMemEval 两阶段评测的记忆落盘目录（--ingest 运行期生成，可随时删除）
+/benchmarks/.memory-store
+
+# benchmarks 数据文件和评测结果（运行期生成，不纳入版本控制）
+benchmarks/data/
+benchmarks/results/

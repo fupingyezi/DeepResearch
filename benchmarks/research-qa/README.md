@@ -1,4 +1,4 @@
-# mini-DeepResearch Benchmark
+# mini-DeepResearch Benchmark (research-qa)
 
 基于 **LangSmith** 的 Deep Research Agent 质量评估方案。
 
@@ -34,47 +34,49 @@ cp benchmarks/.env.example .env.local
 
 ```bash
 # 运行全部测试（8条预设数据）
-npx tsx benchmarks/run.ts
+npx tsx benchmarks/research-qa/run.ts
 
 # 按分类运行
-npx tsx benchmarks/run.ts --category single-hop
-npx tsx benchmarks/run.ts --category technical-deep-dive
+npx tsx benchmarks/research-qa/run.ts --category single-hop
+npx tsx benchmarks/research-qa/run.ts --category technical-deep-dive
 
 # 运行单条
-npx tsx benchmarks/run.ts --id tech-001
+npx tsx benchmarks/research-qa/run.ts --id tech-001
 
 # 上传数据集到 LangSmith Dashboard
-npx tsx benchmarks/run.ts --upload
+npx tsx benchmarks/research-qa/run.ts --upload
 
 # 指定输出路径
-npx tsx benchmarks/run.ts --output my-results.json
+npx tsx benchmarks/research-qa/run.ts --output my-results.json
 ```
 
 ### 3. 查看结果
 
 - **终端输出**：实时显示每条测试的评分和性能指标
-- **JSON 报告**：保存在 `benchmarks/results/latest.json`
+- **JSON 报告**：保存在 `benchmarks/results/research-qa/latest.json`
 - **LangSmith Dashboard**：上传后可在 https://smith.langchain.com 查看 trace 详情
 
 ## 架构说明
 
 ```
 benchmarks/
-├── tsconfig.bench.json     # 专用 TS 配置（IDE 类型检查用，含 src/）
-├── run.ts                  # 主执行脚本
-├── config.ts               # 配置管理
-├── .env.example            # 环境变量模板
-├── datasets/
-│   └── research-qa.ts      # 预置测试数据集（8条）
-├── evaluators/
-│   └── index.ts            # 评估器集合
-│       ├── NonEmptyEvaluator      # 非空检查
-│       ├── ErrorFreeEvaluator     # 错误率
-│       ├── KeywordCoverageEvaluator # 关键词覆盖率
-│       ├── PerformanceEvaluator   # 性能指标（TTFT/延迟）
-│       └── LlmJudgeEvaluator      # LLM-as-Judge 多维打分
-├── agent-wrapper.ts        # DeerFlowClient → LangSmith 适配器
-└── README.md               # 本文件
+├── config.ts                   # 配置管理（共享）
+├── load-env.ts                 # 环境变量加载（共享）
+├── tsconfig.bench.json         # 专用 TS 配置（IDE 类型检查用，含 src/）
+├── .env.example                # 环境变量模板（共享）
+├── results/
+│   └── research-qa/            # 本套件运行结果
+└── research-qa/
+    ├── run.ts                  # 主执行脚本
+    ├── agent.ts                # DeerFlowClient → LangSmith 适配器
+    ├── dataset.ts              # 预置测试数据集（8条）
+    ├── evaluators.ts           # 评估器集合
+    │   ├── NonEmptyEvaluator      # 非空检查
+    │   ├── ErrorFreeEvaluator     # 错误率
+    │   ├── KeywordCoverageEvaluator # 关键词覆盖率
+    │   ├── PerformanceEvaluator   # 性能指标（TTFT/延迟）
+    │   └── LlmJudgeEvaluator      # LLM-as-Judge 多维打分
+    └── README.md               # 本文件
 ```
 
 ## 评估指标说明
@@ -89,7 +91,7 @@ benchmarks/
 
 ## 自定义数据集
 
-在 `benchmarks/datasets/research-qa.ts` 中扩展 `DATASET_V1` 数组：
+在 `benchmarks/research-qa/dataset.ts` 中扩展 `DATASET_V1` 数组：
 
 ```typescript
 {
@@ -122,6 +124,6 @@ benchmarks/
     LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
   run: |
-    npx tsx benchmarks/run.ts --output benchmark-results.json
+    npx tsx benchmarks/research-qa/run.ts --output benchmark-results.json
     node scripts/check-benchmark-threshold.js benchmark-results.json
 ```

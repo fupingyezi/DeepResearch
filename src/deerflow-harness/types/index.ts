@@ -40,6 +40,10 @@ export interface ClientOptions {
   uploadsEnabled?: boolean;
   /** 是否启用 SandboxMiddleware + 文件工具集（features.sandbox）。默认 false；服务级建议 true。 */
   sandboxEnabled?: boolean;
+  /** 是否加载并绑定 MCP 工具。默认 true。*/
+  mcpEnabled?: boolean;
+  /** 是否注入 task 工具与 subagent 能力（features.subagents）。默认 true。*/
+  subagentsEnabled?: boolean;
   /** 可选的 user_id，用于 per-user memory 隔离；缺省走 global / per-agent。 */
   userId?: string;
   /** 可用的 skill 列表 */
