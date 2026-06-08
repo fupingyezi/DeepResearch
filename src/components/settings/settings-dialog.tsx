@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   ToolOutlined,
   ApiOutlined,
+  RobotOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import { Modal } from 'antd';
@@ -14,11 +15,20 @@ import { useState } from 'react';
 
 import { AccountSettingsPage } from './account-settings-page';
 import { MemorySettingsPage } from './memory-settings-page';
+import { ModelSettingsPage } from './model-settings-page';
 import { PlaceholderPage } from './placeholder-page';
 import { SkillSettingsPage } from './skill-settings-page';
 import { ToolsSettingsPage } from './tools-settings-page';
 
-type TabKey = 'account' | 'appearance' | 'notification' | 'memory' | 'tools' | 'skills' | 'about';
+type TabKey =
+  | 'account'
+  | 'models'
+  | 'appearance'
+  | 'notification'
+  | 'memory'
+  | 'tools'
+  | 'skills'
+  | 'about';
 
 interface TabItem {
   key: TabKey;
@@ -28,6 +38,7 @@ interface TabItem {
 
 const TABS: TabItem[] = [
   { key: 'account', label: '账号', icon: <UserOutlined /> },
+  { key: 'models', label: '模型管理', icon: <RobotOutlined /> },
   { key: 'appearance', label: '外观', icon: <BgColorsOutlined /> },
   { key: 'notification', label: '通知', icon: <BellOutlined /> },
   { key: 'memory', label: '记忆', icon: <DatabaseOutlined /> },
@@ -78,6 +89,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         <div className="flex-1 overflow-y-auto p-8">
           {active === 'account' ? (
             <AccountSettingsPage />
+          ) : active === 'models' ? (
+            <ModelSettingsPage />
           ) : active === 'memory' ? (
             <MemorySettingsPage />
           ) : active === 'tools' ? (

@@ -223,7 +223,7 @@ MOONSHOT_BASE_URL=https://api.moonshot.cn/v1
 TAVILY_API_KEY=your-tavily-api-key
 
 # === PostgreSQL ===
-DATABASE_URL=postgresql://yezi:fupingyezi123@localhost:5432/mini-DeepResearch
+DATABASE_URL=postgresql://yezi:fupingyezi123@localhost:5432/DeepResearch
 
 # === Redis ===
 REDIS_URL=redis://localhost:6379

@@ -8,5 +8,10 @@ export {
   type UseAutoScrollToBottomOptions,
   type UseAutoScrollToBottomReturn,
 } from './use-auto-scroll-to-bottom';
+export {
+  default as useModelConfigStatus,
+  type ModelConfigStatus,
+  type ConfiguredProviderStatus,
+} from './use-model-config-status';
 
 export type { UseFileUploadOptions } from './use-file-upload';

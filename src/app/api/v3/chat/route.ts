@@ -35,7 +35,7 @@ import {
   type ClientAgentEvent,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
-import { getThreadService, resolveModelConfigFromConfiguration } from '../../threads/_service';
+import { getThreadService, resolveUserModelConfig } from '../../threads/_service';
 import { getCurrentUser } from '../../auth/_helpers';
 import {
   createChatSessionRecord,
@@ -202,6 +202,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // —— 模型与 Key 解析（前置守卫，置于建会话之前以避免产生空会话） ——
+  // 按当前用户解析模型与解密 Key（不再使用环境变量默认 Key）：
+  // 用户未选模型 / 未配置对应 Key 时直接返回 4xx，引导去「设置-模型管理」配置。
+  const modelResolution = await resolveUserModelConfig(user_id, body.configuration ?? undefined);
+  if (!modelResolution.ok) {
+    const isNoKey = modelResolution.reason === 'NO_KEY';
+    return new Response(
+      JSON.stringify({
+        error: isNoKey ? 'no_api_key' : 'no_model_selected',
+        message: isNoKey
+          ? `尚未为 ${modelResolution.provider} 配置 API Key，请前往「设置 - 模型管理」填写后再试。`
+          : '尚未选择模型，请前往「设置 - 模型管理」选择模型并填写 API Key 后再试。',
+        ...(isNoKey ? { provider: modelResolution.provider } : {}),
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  const modelConfig = modelResolution.modelConfig;
+
   // —— sessionId 分流 ——
   const incomingSessionId =
     typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : null;
@@ -229,7 +248,7 @@ export async function POST(request: NextRequest) {
   // 单路径：始终走 submitRun（fire-and-forget）+ StreamBridge.subscribe。
   // 带模型配置时把 modelConfig 透传给 submitRun，由 service 解析对应 client，
   // 不再有 dynamicClient 直连分支（避免 Agent 被执行两次、断线无法回放）。
-  const modelConfig = resolveModelConfigFromConfiguration(body.configuration ?? undefined);
+  // modelConfig 已在前置守卫中按当前用户解析并注入解密 Key。
 
   // 运行期开关：仅当 client 端显式传入 boolean 时才透传，None/undefined 留给
   // DeerFlowClient.resolveRuntimeOptions 走 baseOptions 默认值。

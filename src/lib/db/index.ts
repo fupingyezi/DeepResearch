@@ -101,6 +101,23 @@ export async function initialDB() {
         );
         create index if not exists idx_users_email on users(email);
         create index if not exists idx_users_role on users(system_role);
+        -- 用户当前选用的模型预设（preset key），跨设备一致；null 表示未选择。
+        alter table users add column if not exists selected_model varchar(64);
+
+        -- 用户级模型 API Key：按 (user_id, provider) 维度保存，仅存密文/IV/authTag/掩码，
+        -- 绝不存明文。一个 provider 的 Key 可服务该 provider 下多个预设模型。
+        create table if not exists user_model_keys (
+          user_id     uuid not null,
+          provider    varchar(32) not null,
+          enc_key     text not null,
+          iv          text not null,
+          auth_tag    text not null,
+          key_masked  varchar(64) not null,
+          created_at  timestamptz not null default now(),
+          updated_at  timestamptz not null default now(),
+          primary key (user_id, provider)
+        );
+        create index if not exists idx_user_model_keys_user on user_model_keys(user_id);
 
         create table if not exists chat_session (
           id uuid primary key,

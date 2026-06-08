@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import Image from 'next/image';
 
 import FileItem from '../files/file-items';
-import ModelSelector from '../model-selector/model-selector';
 
 import { ChatInputProps } from '@/types';
 import { useConversationStore } from '@/store';
@@ -134,12 +133,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
             className="h-8 w-10 rounded-3xl p-2 hover:cursor-pointer hover:bg-[#e7e7e7]"
             onClick={() => handleUploadClick()}
           />
-          <ModelSelector showLabel={false} />
         </div>
 
         <button
           type="submit"
-          className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95`}
+          disabled={disabled && !isChating}
+          className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95 disabled:cursor-not-allowed disabled:from-gray-300 disabled:to-gray-400 disabled:shadow-none disabled:hover:shadow-none disabled:active:scale-100`}
         >
           {isChating ? (
             <div className="flex h-6 w-6 items-center justify-center">

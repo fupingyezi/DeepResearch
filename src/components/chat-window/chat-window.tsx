@@ -1,11 +1,13 @@
 'use client';
 
 import { ChatLayoutProps, ChatWindowProps } from '@/types';
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import ChatMessage from './chat-message';
 import ChatInput from './chat-input';
 import { useConversationStore, useFileUploadStore, useModelStore } from '@/store';
+import { useModelConfigStatus } from '@/hooks';
 import { chatWithAgent } from '@/utils/chat';
+import type { ModelPresetName } from '@/config/models';
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {
   return (
@@ -26,7 +28,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
   const currentMessages = useConversationStore((s) => s.currentMessages);
   const setShouldAutoScroll = useConversationStore((s) => s.setShouldAutoScroll);
   const { uploadedFiles, clearUploadedFiles } = useFileUploadStore();
-  const { model } = useModelStore();
+  const { model, setModel } = useModelStore();
+  // 模型配置状态：决定是否可发送 + 引导文案；selectedModel 以服务端为准。
+  const { hasUsableKey, selectedModel, loading } = useModelConfigStatus();
+
+  // 把服务端落库的 selectedModel 同步到本地 store，保证发送时携带正确模型。
+  useEffect(() => {
+    if (selectedModel && selectedModel !== model) {
+      setModel(selectedModel as ModelPresetName);
+    }
+  }, [selectedModel, model, setModel]);
 
   const handleChangeScroll = useCallback(
     (next: boolean) => {
@@ -45,7 +56,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
       const conversationStore = useConversationStore.getState();
       await chatWithAgent({
         inputValue,
-        model,
+        model: (selectedModel as ModelPresetName) ?? model,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
         ...conversationStore,
       });
@@ -53,8 +64,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
         clearUploadedFiles();
       }
     },
-    [uploadedFiles, clearUploadedFiles, model],
+    [uploadedFiles, clearUploadedFiles, model, selectedModel],
   );
+
+  // 未配置任何可用 Key 时禁用输入并展示引导文案；加载中也先禁用，避免空跑请求。
+  const guardDisabled = loading || !hasUsableKey;
+  const effectivePlaceholder = guardDisabled
+    ? '请先在「设置 - 模型管理」中选择模型并填写 API Key'
+    : placeholder;
 
   return (
     <ChatLayout
@@ -68,7 +85,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
         />
       }
       footer={
-        <ChatInput placeholder={placeholder} onSend={handleSendMessage} disabled={isChating} />
+        <ChatInput
+          placeholder={effectivePlaceholder}
+          onSend={handleSendMessage}
+          disabled={isChating || guardDisabled}
+        />
       }
     />
   );

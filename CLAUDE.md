@@ -71,7 +71,7 @@ OPENAI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL_NAME=qwen3-235b-a22b         # 默认模型
 
 # 数据库
-DATABASE_URL=postgresql://user:pass@localhost:5432/mini-DeepResearch
+DATABASE_URL=postgresql://user:pass@localhost:5432/DeepResearch
 
 # Redis
 REDIS_URL=redis://localhost:6379
