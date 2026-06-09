@@ -19,12 +19,12 @@ import type { AuthErrorCode, UserRecord } from '@deerflow-harness/auth';
 export const COOKIE_NAME = 'access_token';
 
 export function setSessionCookie(response: NextResponse, token: string): void {
-  const isProd = process.env.NODE_ENV === 'production';
+  const isSecure = process.env.NODE_ENV === 'production' && !process.env.DISABLE_SECURE_COOKIE;
   response.cookies.set({
     name: COOKIE_NAME,
     value: token,
     httpOnly: true,
-    secure: isProd,
+    secure: isSecure,
     sameSite: 'lax',
     path: '/',
     maxAge: getTokenExpiryDays() * 24 * 3600,
