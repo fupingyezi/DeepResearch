@@ -130,6 +130,6 @@ class ApiClient {
   }
 }
 
-const apiClient = new ApiClient('http://localhost:3000/api');
+const apiClient = new ApiClient('/api');
 export { ApiClient };
 export default apiClient;
