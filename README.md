@@ -17,7 +17,8 @@
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
-- 🔒 **安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list 等沙箱工具集。
+- 🔒 **可插拔安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list/bash 等沙箱工具集。通过 `DEERFLOW_SANDBOX_BACKEND` 在 **local**（宿主文件系统直连）与 **docker**（每线程一个加固容器，内核级隔离）两种后端间切换。
+- 🐳 **Docker 沙箱 + 多对话并行编排**：docker 后端为每个 thread 分配长驻加固容器（`--cap-drop ALL` + `no-new-privileges` + 内存/CPU/pids 限额 + 非 root 降权），支持空闲回收、LRU 淘汰与容错重建；配套 **双层背压**（run 级并发闸门 + 容器级并发上限）与 Redis 跨进程协调（不可用时自动降级进程内），单机多进程 / PM2 场景可安全并行多对话。
 - 📊 **基准测试框架**：`benchmarks/` 内置评估系统 + 研究 QA 数据集，支持 Agent 质量打分与结果持久化。
 
 ## 🛠️ 技术栈
@@ -90,6 +91,7 @@ src/
 │   ├── subagents/                      # SubagentExecutor、注册表、schema、general-purpose 内置
 │   ├── runtime/                        # ThreadService、StreamBridge、SSE、Checkpointer
 │   │   ├── service.ts                  # ThreadService（fire-and-forget 提交 + 状态收敛）
+│   │   ├── run-concurrency-gate.ts     # run 级并发闸门（双层背压之一，FIFO 信号量 + 跨进程占位）
 │   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（缓冲回放）
 │   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
 │   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
@@ -99,14 +101,23 @@ src/
 │   ├── models/                         # 模型预设（MODEL_PRESETS）
 │   ├── auth/                           # 认证模块
 │   ├── config/                         # 应用配置
-│   ├── sandbox/                        # 安全沙箱（路径校验、文件操作锁、异常隔离）
-│   │   ├── tools.ts                    # 沙箱内置工具集（读/写/搜索/list 等）
+│   ├── sandbox/                        # 可插拔安全沙箱（路径校验、文件操作锁、异常隔离）
+│   │   ├── provider-factory.ts         # ⭐ 后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker）
+│   │   ├── sandbox-provider.ts         # SandboxProvider 基类（acquire/release/retain/isSecureIsolation）
+│   │   ├── sandbox-monitor.ts          # 沙箱运行态快照（供 stats API）
+│   │   ├── tools.ts                    # 沙箱内置工具集（读/写/搜索/list/bash 等）
 │   │   ├── search.ts                   # 沙箱内搜索
 │   │   ├── security.ts                 # 安全策略
 │   │   ├── file-operation-lock.ts      # 并发文件操作锁
 │   │   ├── path-utils.ts               # 路径安全处理
 │   │   ├── exceptions.ts               # 异常定义
-│   │   └── local/                      # 本地文件系统沙箱实现
+│   │   ├── local/                      # 本地文件系统沙箱实现
+│   │   └── docker/                     # ⭐ Docker 沙箱后端
+│   │       ├── docker-config.ts        # env-only 配置（镜像/限额/网络/并发/锁 TTL）
+│   │       ├── docker-cli.ts           # execFile 封装 docker CLI（禁 shell 拼接）
+│   │       ├── docker-sandbox.ts       # DockerSandbox（仅重写 executeCommand 走 docker exec）
+│   │       ├── docker-sandbox-provider.ts # 每 thread 长驻容器 + 引用计数 + 空闲回收
+│   │       └── docker-coordinator.ts   # 跨进程协调（Redis 原子计数/登记/分布式锁，可降级进程内）
 │   └── types/                          # AgentEvent 等共享类型
 │
 ├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
@@ -286,6 +297,7 @@ pnpm start
 | `/api/skills`                                 | GET/POST     | 技能列表 / 新建自定义 skill                       |
 | `/api/skills/[name]`                          | PATCH        | 技能启用 / 禁用切换                               |
 | `/api/tools`                                  | GET          | 当前已绑定工具列表                                |
+| `/api/sandbox/stats`                          | GET          | 沙箱运行态快照（容器/并发统计，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控） |
 | `/api/auth/register`                          | POST         | 用户注册                                          |
 | `/api/auth/login`                             | POST         | 用户登录（返回 JWT）                              |
 | `/api/auth/logout`                            | POST         | 登出                                              |
@@ -328,11 +340,12 @@ API Routes（/api/v3/chat/[threadId] 等）
         │
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
+   │ ├── RunConcurrencyGate（run 级并发闸门：FIFO 信号量 + 跨进程占位，超限先回传 queued）
    │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用 + MCP/Skill 工具加载）
-   │ │      └── createBaseAgent + 中间件管线（最多 14 层）
-   │ │             ├── 工具：task / search_web / clarification / ...
+   │ │      └── createBaseAgent + 中间件管线（最多 14 层，含 Sandbox 中间件 retain/markIdle）
+   │ │             ├── 工具：task / search_web / clarification / sandbox(读写/搜索/bash) / ...
    │ │             │         └── SubagentExecutor（父子共用 checkpoint）
-   │ │             └── Sandbox（路径安全校验 + 文件操作锁 + 异常隔离）
+   │ │             └── SandboxProvider（local 宿主直连 / docker 每线程加固容器 + 容器级并发）
    │ ├── Checkpointer（PostgreSQL）
    │ └── Stores（threads / runs）
         │
@@ -352,6 +365,7 @@ StreamBridge（进程内 EventEmitter 总线）
 - Skill frontmatter 解析与 prompt 注入机制（7 种内置技能）
 - 扩展统一配置（extensions_config.json）的读写与校验
 - 沙箱安全策略、路径校验与文件操作锁机制
+- 可插拔沙箱后端（local / docker）、Docker 容器生命周期与多对话并行编排（双层背压 + 跨进程协调）
 
 沙箱实现细节见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)。
 架构对齐计划见 [`docs/deerflow-alignment-plan.md`](./docs/deerflow-alignment-plan.md)。
@@ -444,6 +458,18 @@ MEMORY_DEBUG=1 pnpm dev
 - `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认无上限）
 - `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
+
+沙箱与并行编排相关环境变量（详见 `.env.example`）：
+
+- `DEERFLOW_SANDBOX_BACKEND` —— 沙箱后端，`local`（默认，宿主直连）或 `docker`（每线程加固容器）
+- `DEERFLOW_ALLOW_HOST_BASH` —— local 后端下是否放行 host bash（默认拦截；docker 后端内核级隔离不受此门控）
+- `DEERFLOW_MAX_CONCURRENT_RUNS` —— run 级并发上限（默认 16），超限的对话先回传 `queued` 状态帧
+- `DEERFLOW_DOCKER_IMAGE` / `DEERFLOW_DOCKER_MEMORY` / `DEERFLOW_DOCKER_CPUS` / `DEERFLOW_DOCKER_PIDS_LIMIT` —— 容器镜像与资源限额
+- `DEERFLOW_DOCKER_NETWORK` —— 容器网络模式，`bridge`（默认，研究需联网）或 `none`（完全断网）
+- `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS` —— 活跃容器数上限（容器级并发闸门，默认 32）
+- `DEERFLOW_DOCKER_IDLE_TIMEOUT_MS` / `DEERFLOW_DOCKER_IDLE_REAP_INTERVAL_MS` —— 容器空闲回收阈值与扫描周期
+- `DEERFLOW_SANDBOX_STATS_TOKEN` —— `GET /api/sandbox/stats` 的访问令牌（未设置则该接口禁用）
+- `REDIS_URL` —— 多进程 / PM2 部署时用于跨进程沙箱协调（不可用自动降级进程内）
 
 ## 📊 基准测试
 
