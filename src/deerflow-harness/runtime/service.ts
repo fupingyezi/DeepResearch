@@ -26,6 +26,8 @@ import type { ModelConfig } from '../types';
 import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
 import { streamBridge } from './stream-bridge';
+import { getRunConcurrencyGate } from './run-concurrency-gate';
+import { getSandboxProvider } from '../sandbox';
 
 const LOG = '[thread-service]';
 
@@ -184,7 +186,20 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     };
 
     void (async () => {
+      let releaseRunSlot: (() => void) | null = null;
       try {
+        // run 级并发闸门：超限时先回传「排队中」状态帧（复用 task_progress 语义，
+        // 仅增字段不破坏白名单），对话可先思考，执行体延迟到放行后启动。
+        releaseRunSlot = await getRunConcurrencyGate().acquire(() => {
+          channel.publish(
+            createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, threadMeta.assistant_id, {
+              taskId: run_id,
+              status: 'queued',
+              description: 'Run queued: concurrency limit reached, waiting for a free slot.',
+            }),
+          );
+        });
+
         await runWithContext(ctx, async () => {
           for await (const ev of makeStream()) {
             channel.publish(ev);
@@ -211,6 +226,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         }
         console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
       } finally {
+        if (releaseRunSlot) releaseRunSlot();
         channel.publish(
           createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
         );
@@ -262,6 +278,12 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
 
     async deleteThread({ thread_id, user_id }) {
       await threads.delete(thread_id, { user_id: user_id ?? null });
+      // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
+      try {
+        getSandboxProvider().releaseByThreadId(thread_id);
+      } catch (e) {
+        console.warn(`${LOG} deleteThread sandbox release failed:`, (e as Error)?.message);
+      }
       // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
       const saver = checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
       if (typeof saver.deleteThread === 'function') {

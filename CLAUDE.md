@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 实时 SSE 事件流（fire-and-forget 执行 + StreamBridge 缓冲回放）
 - 长期记忆系统（LLM 驱动的事实提取与更新）
 - 文件上传与解析（MinIO 存储，支持 PDF/Word）
+- 可插拔安全沙箱（`local` 宿主直连 / `docker` 每线程加固容器），配套多对话并行编排（双层背压 + 跨进程协调）
 
 **技术栈：**
 
@@ -85,6 +86,17 @@ MINIO_BUCKET=chat-files
 
 # 搜索
 TAVILY_API_KEY=...
+
+# 沙箱后端（可选，默认 local）
+DEERFLOW_SANDBOX_BACKEND=local            # local（宿主直连）| docker（每线程加固容器）
+DEERFLOW_ALLOW_HOST_BASH=false            # local 后端是否放行 host bash（docker 不受此门控）
+DEERFLOW_MAX_CONCURRENT_RUNS=16           # run 级并发上限，超限对话回传 queued
+DEERFLOW_DOCKER_IMAGE=python:3.12-slim-bookworm
+DEERFLOW_DOCKER_MEMORY=2g
+DEERFLOW_DOCKER_CPUS=1.5
+DEERFLOW_DOCKER_NETWORK=bridge            # bridge（联网）| none（断网）
+DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS=32    # 容器级并发上限
+DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌（未设则禁用）
 ```
 
 ---
@@ -133,9 +145,11 @@ Agent 缓存         Postgres / 内存  ThreadMeta
      ▼
 ┌──────────────────────────────────────────────┐
 │       Agent 执行流水线（LangGraph ReAct）      │
+│  RunConcurrencyGate（run 级并发闸门，超限 queued） │
 │  createBaseAgent() → assembleFromFeatures()   │
 │  中间件链（按 ORDERED_MIDDLEWARES 位序，由 RuntimeFeatures 组装） │
-│  工具：searchWebTool / taskTool / ...         │
+│  工具：searchWebTool / taskTool / sandbox(读写/bash) / ... │
+│  SandboxProvider：local 宿主直连 / docker 每线程加固容器 │
 └──────────────────────────────────────────────┘
      │
      ▼
@@ -350,13 +364,14 @@ StreamBridge（单例 streamBridge）
 
 #### 中间件组装规则（`assembleFromFeatures`）
 
-按 `ORDERED_MIDDLEWARES` 位序装配（位序留白处为暂未挂的占位 sandbox/guardrail）：
+按 `ORDERED_MIDDLEWARES` 位序装配（位序留白处为暂未挂的占位 guardrail 等）：
 
 | 位序 | 中间件                           | 触发条件                                                                                                        |
 | ---- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | —    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置                                    |
 | 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                |
 | 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）       |
+| 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）    |
 | 3    | `DanglingToolCallMiddleware`     | 始终启用                                                                                                        |
 | 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                        |
 | 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware()` 实例（不允许 true）                                |
@@ -367,7 +382,7 @@ StreamBridge（单例 streamBridge）
 | 11   | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）                                                |
 | 12   | `LoopDetectionMiddleware`        | 始终启用                                                                                                        |
 
-同时，`taskTool` 始终注入到 `extraTools`。
+同时，`taskTool` 始终注入到 `extraTools`；`features.sandbox` 启用时，7 个沙箱文件/执行工具（`SANDBOX_TOOLS`）注入 lead-agent 工具集（subagent 经工具注册表继承）。
 
 #### RuntimeFeatures 类型
 
@@ -536,6 +551,49 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 
 ---
 
+### 8.6 安全沙箱与多对话并行编排（sandbox）
+
+**文件：** `src/deerflow-harness/sandbox/`
+
+沙箱为 Agent 提供受限的文件读写/搜索/list/bash 执行环境（路径安全校验 + 文件操作锁 + 异常隔离），后端可插拔。
+
+#### 后端工厂（provider-factory）
+
+**文件：** `src/deerflow-harness/sandbox/provider-factory.ts`
+
+进程级单例，按 `DEERFLOW_SANDBOX_BACKEND` 选后端（`getSandboxProvider()` / `resetSandboxProvider()` / `setSandboxProvider()` 供测试注入）：
+
+- `local`（默认）：`LocalSandboxProvider`，宿主文件系统直连；bash 直接在宿主执行，受 `DEERFLOW_ALLOW_HOST_BASH` 门控。
+- `docker`：`DockerSandboxProvider`，每 thread 一个长驻加固容器；bash 在容器内执行，具内核级隔离，**不受 host-bash 门控**。
+
+依赖方向 `factory → local / docker`、`docker → local`（`DockerSandbox extends LocalSandbox`，仅重写 `executeCommand` 走 `docker exec`），均单向无循环。
+
+`SandboxProvider` 基类关键方法：`acquire` / `release`（abstract）+ 默认 no-op 的 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId` + `isSecureIsolation()`（默认 `false`，Docker 覆盖为 `true`，用于 `bashTool` 判断是否跳过 host-bash 门控）。
+
+#### Docker 后端（docker/）
+
+- `docker-config.ts`：env-only 配置（前缀 `DEERFLOW_DOCKER_*`），含镜像、内存/CPU/pids 限额、网络模式、空闲回收、并发上限、锁 TTL、只读根 + tmpfs 等。
+- `docker-cli.ts`：`runDocker()` 用 `execFile` + 参数数组（禁 shell 拼接防注入），另有 `dockerPsByPrefix` / `dockerStats` / `runDockerWithRetry`。
+- `docker-sandbox-provider.ts`：每 thread 一个 `sleep infinity` 加固容器（`--cap-drop ALL` + `--security-opt no-new-privileges` + `--memory/--cpus/--pids-limit` + `--user 1000:1000` 降权）；卷挂载 `{threadDir}/user-data → /mnt/user-data`（不暴露宿主真实路径，`DockerSandbox` 内做路径反向映射）；引用计数 + 空闲回收 + LRU + 容器消失时 reprovision 重建。
+- `docker-coordinator.ts`：跨进程协调。Redis 原子计数（containers/runs count 用 Lua RESERVE/RELEASE）、thread→container 登记 Hash、`SET NX PX` 分布式锁；**Redis 不可用自动降级进程内 Map**。
+
+#### 多对话并行编排（双层背压）
+
+`submitRun` 是 fire-and-forget，此前无背压。现引入双层：
+
+- **run 级**：`runtime/run-concurrency-gate.ts`（`RunConcurrencyGate` 进程级单例）。本进程 FIFO 信号量 + 跨进程 `runs:count` 占位；接在 `service.ts` 执行体消费 stream 之前 `acquire`，超限先 publish `task_progress{status:'queued'}`（对话仍可先思考），`finally` 释放。`DEERFLOW_MAX_CONCURRENT_RUNS` 控制上限（默认 16）。
+- **容器级**：`DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS` 活跃容器数上限（默认 32），配合空闲回收器（`refCount==0` 且空闲超 `idleTimeoutMs`）与启动 `reconcile()` 清孤儿容器。
+
+引用计数不变式：`refCount` = 正在使用容器的 run/agent 层数，由 `sandbox-middleware` 的 `beforeAgent` retain(+1) 与 `afterAgent` markIdle(-1) 严格成对；`acquire` 幂等命中只 touch 不 incRef（避免 subagent/工具惰性 acquire 泄漏）。`deleteThread` 联动 `releaseByThreadId` 销毁容器。
+
+#### 监控
+
+`sandbox/sandbox-monitor.ts`（`getSandboxSnapshot`）+ `app/api/sandbox/stats/route.ts`（`GET`，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控，`runtime='nodejs'`）暴露容器/并发运行态快照。
+
+> 完整设计见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)（§10 为并行编排方案）。
+
+---
+
 
 **文件：** `src/deerflow-harness/persistence/thread-meta/postgres-store.ts`
 
@@ -585,23 +643,17 @@ CREATE TABLE runs (
 
 **文件：** `src/store/`
 
-#### conversationStore
+#### chatSessionStore（多对话并行状态隔离）
 
-管理聊天会话：
+**文件：** `src/store/chat-session-store.ts`
 
-- `chatSessions[]`：所有对话 session（含 threadId）
-- `currentMessages[]`：当前 session 消息列表
-- `isChating: boolean`：是否正在接收流式响应
-- `shouldAutoScroll: boolean`：是否自动滚动
-- `abortController`：当前请求的 AbortController（用于取消）
+为支持「切换对话后正在跑的对话不中断、侧栏按运行态显示 loading/绿点」，采用**分桶为真相源 + 当前视图投影**的模型：
 
-所有 setter 均为幂等（条件更新），最小化 re-render。
+- `sessionRuntimes: Record<sessionId, { messages, status: 'idle'|'running'|'done'|'error', abortController, lastActiveAt }>`：每个对话一个独立运行桶（真并行的真相源）。
+- 按 sessionId 的 action：`setSessionMessages` / `setSessionStatus` / `setSessionAbortController` / `getSessionRuntime` / `migrateSessionRuntime`（临时 id → 真实 id）/ `abortSession`。
+- `currentMessages` / `isChating` / `currentAbortController` 降级为「`currentSessionId` 桶的投影」；`setCurrentSessionId` 切换时从桶恢复投影（含正在跑的消息与运行态），彻底避免全局单例被切走的对话覆盖。
 
-#### chatSelectStore
-
-管理 Agent 模式选择：
-
-- `selectedAgent: 'chat' | 'search' | 'deepResearch'`
+`StreamChatHandler`（`src/utils/chat/stream-chat-handler.ts`）全程用 `this.sessionId` 作桶 key 写回；`applyStartEvent` 用 `migrateSessionRuntime` 衔接新建对话的临时 id 与后端真实 id（不再强行 `setCurrentSessionId` 把用户拽回）。侧栏 `sider-content.tsx` 的 `SessionStatusIndicator` 订阅 `sessionRuntimes[id]?.status` 显示运行态。
 
 #### fileUploadStore
 
@@ -754,9 +806,12 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | `src/deerflow-harness/extensions/config-store.ts`             | extensions_config.json 文件存储（MCP/skill 统一配置） |
 | `src/deerflow-harness/skills/loader.ts`                       | skill 加载器（扫描 SKILL.md + 合并启用状态）   |
 | `src/deerflow-harness/mcp/client.ts`                          | MCP 客户端封装（加载工具 + 失败容错 + 缓存）   |
+| `src/deerflow-harness/sandbox/provider-factory.ts`           | 沙箱后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker） |
+| `src/deerflow-harness/sandbox/docker/docker-sandbox-provider.ts` | Docker 后端（每线程加固容器 + 引用计数 + 空闲回收） |
+| `src/deerflow-harness/sandbox/docker/docker-coordinator.ts`  | 跨进程沙箱协调（Redis 计数/登记/锁，可降级进程内） |
+| `src/deerflow-harness/runtime/run-concurrency-gate.ts`       | run 级并发闸门（FIFO 信号量 + 跨进程占位）     |
 | `src/deerflow-harness/runtime/context.ts`                     | AsyncLocalStorage 上下文传播              |
-| `src/store/conversation-store.ts`                             | 前端聊天会话状态                          |
-| `src/store/deep-research-process-store.ts`                    | DeepResearch 流程状态（Immer）            |
+| `src/store/chat-session-store.ts`                             | 前端聊天会话状态（sessionRuntimes 分桶并行） |
 | `src/utils/chat/stream-chat-handler.ts`                       | 前端 SSE 流处理                           |
 
 ---

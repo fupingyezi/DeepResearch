@@ -286,7 +286,7 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 ## 8. 后续扩展方向
 
-1. **Docker 隔离**：实现 `DockerSandbox` + `DockerSandboxProvider`
+1. **Docker 隔离**：`DockerSandbox` + `DockerSandboxProvider` 已实现，并补齐多对话并行编排（详见 §10）
 2. **Skills 只读挂载**：参考 deer-flow，将 skills 目录只读挂载到沙箱
 3. **bash 命令黑名单**：扩展 `security.ts`，支持危险命令检测
 4. **文件大小限制**：在 `write_file` 中增加文件大小上限（防 DOS）
@@ -298,3 +298,99 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 - **project.md**：`/Users/yokotu/code/ai-repo/mini-DeepResearch/project.md`
 - **LangChain Tool Runtime**：`@langchain/core/dist/tools/types.d.ts`
+
+---
+
+## 10. Docker 沙箱多对话并行编排
+
+> 形态：单机多进程（PM2，多 Node 进程共享同一 Docker daemon）。生命周期模型：
+> 每 thread 长驻容器（`sleep infinity` + `docker exec`）+ 空闲回收 + LRU 淘汰。
+
+### 10.1 架构分层
+
+- **容器真相源**：Docker daemon（`docker ps` 按 name 前缀），容器是否存在以它为准。
+- **跨进程协调层**：Redis（`docker-coordinator.ts`），承载容器计数 / run 计数 /
+  thread→container 登记 / lastActiveAt / refCount / 分布式锁。Redis 不可用时自动降级
+  为进程内 Map（单进程正确、多进程尽力而为），不阻断对话。
+- **进程内缓存**：`DockerSandboxProvider.entries` 仅作本进程 DockerSandbox 实例缓存。
+
+### 10.2 双层并发背压
+
+| 层级       | 落点                                 | 机制                                                     | 超限表现                                                     |
+| ---------- | ------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------ |
+| run 级     | `runtime/run-concurrency-gate.ts`    | 本进程 FIFO 信号量 + 跨进程 `runs:count` 原子占位        | 进入队列，先回传 `task_progress{status:'queued'}`，对话可先思考 |
+| 容器级     | `DockerSandboxProvider.provisionContainer` | `containers:count` Lua 原子占位 + LRU 淘汰空闲容器腾位 | 无可淘汰则抛可读错误，bash 工具转为 `Error:` 结果            |
+
+### 10.3 生命周期与会话状态同步
+
+| 对话动作            | 容器动作                              | 触发点                                       |
+| ------------------- | ------------------------------------- | -------------------------------------------- |
+| 创建 / 首次执行     | 占位闸门 → 建容器 → 登记（refCount=0）| `sandbox-middleware.beforeAgent` → `acquire` |
+| 执行中（retain）    | refCount +1，命令执行时 heartbeat 刷新活跃时间 | `beforeAgent` retain / `executeCommand`      |
+| 一轮结束（空闲）    | refCount -1；归零不立即删，等回收器    | `sandbox-middleware.afterAgent` → `markIdle` |
+| 暂停 / 恢复(resume) | 容器保活（不回收），新 run 复用同容器 | resume 走同一 threadId 的 `acquire` 复用     |
+| 空闲超时            | `rm -f` + 清登记 + 计数 -1            | 空闲回收器（`idleReapIntervalMs` 周期）      |
+| 容量压力            | LRU 淘汰最久未活跃的 refCount=0 容器  | `provisionContainer` 占位失败时              |
+| 销毁 thread         | `rm -f` + 清登记 + 计数 -1            | `ThreadService.deleteThread` → `releaseByThreadId` |
+
+**引用计数不变式**：`refCount = 正在使用容器的 run/agent 层数`。由 `beforeAgent` retain(+1)
+与 `afterAgent` markIdle(-1) 严格成对；工具层（含 subagent）惰性 `acquire` 只 `touch`
+刷新活跃时间、不增计数，故不破坏成对性。回收器只回收 `refCount==0 且空闲超时` 的容器。
+
+### 10.4 数据隔离与卷挂载改造
+
+- 卷挂载由 `-v {threadDir}:{threadDir}`（暴露宿主真实路径）改为
+  `-v {threadDir}/user-data:/mnt/user-data`，容器内只见规范路径，消除宿主目录结构泄露。
+- `DockerSandbox.executeCommand` 把工具层展开的「宿主 user-data 根路径」反向映射为容器内
+  `/mnt/user-data` 后再 `docker exec`；`-w` 固定为 `/mnt/user-data`。
+- 文件读写仍复用 LocalSandbox 直接操作宿主 user-data（与容器内经 bind mount 同一份文件）。
+- 环境变量：`docker exec` 不透传宿主 env；依赖安装落容器可写层（容器销毁即失），产出物写
+  `outputs` → 宿主可见 → 经现有 MinIO / 文件链路回传。
+
+### 10.5 安全加固（纵深防御）
+
+在既有 `--cap-drop ALL` / `--security-opt no-new-privileges` / `--user` 非 root /
+`--pids-limit` 基础上新增：`--memory-swap`（默认等于 `--memory`，禁 swap 绕过限额）、
+可选 `--read-only` 根 + `--tmpfs /tmp`、`--network none` 断网选项、镜像固定 tag。
+
+### 10.6 容错与自愈
+
+- **容器崩溃 / 被回收**：`executeCommand` 检测「No such container / is not running」等 stderr
+  片段 → 触发 `reprovision` 重建 + 有限次重试（`commandMaxRetries`）。
+- **Docker daemon 不可用**：`isDockerAvailable()` 探测失败明确报错，不阻塞其它对话。
+- **宿主重启 / 进程崩溃残留**：启动 `reconcile()` 以 `docker ps` 前缀 vs Redis 登记对账——
+  孤儿容器（有容器无登记）`rm -f`；陈旧登记（有登记无容器）清登记与计数。
+- **多进程重复回收 / 重复建同名容器**：回收器抢 `lock:reap`；`acquire` 抢
+  `lock:acquire:{containerName}`（`SET NX PX`），未抢到则等待他方 ready 后复用。
+
+### 10.7 监控与日志
+
+- 只读监控 API：`GET /api/sandbox/stats`，返回 thread↔container 映射、refCount、空闲时长与
+  `docker stats` 采样（`?stats=0` 跳过采样）；可选 `DEERFLOW_SANDBOX_STATS_TOKEN` 门控。
+- 命令审计：`executeCommand` 以 `[docker-sandbox]` 前缀记容器名 + 命令首段（容器内路径已是
+  `/mnt/user-data`，不含宿主结构）；回收 / 淘汰 / 对账均有前缀日志。
+
+### 10.8 关键改动文件
+
+| 文件                                                       | 改动                                                     |
+| ---------------------------------------------------------- | -------------------------------------------------------- |
+| `sandbox/docker/docker-coordinator.ts`                     | 新增：Redis 原子计数 / 登记 / 分布式锁，降级进程内       |
+| `sandbox/docker/docker-config.ts`                          | 新增并发上限 / 回收 / 只读根 / tmpfs / swap / 重试配置    |
+| `sandbox/docker/docker-sandbox-provider.ts`                | 容器级闸门 + LRU + 引用计数 + 回收器 + 对账 + 重建重试    |
+| `sandbox/docker/docker-sandbox.ts`                         | 路径反向映射 + 命令审计 + 容器消失重试 + 心跳            |
+| `sandbox/docker/docker-cli.ts`                             | 新增 `dockerPsByPrefix` / `dockerStats` / 重试封装       |
+| `sandbox/sandbox-provider.ts`                              | 基类新增 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId`（默认 no-op） |
+| `sandbox/sandbox-monitor.ts`                               | 新增：只读快照聚合                                       |
+| `agents/middlewares/sandbox-middleware.ts`                 | 补 `afterAgent` markIdle；`beforeAgent` retain            |
+| `runtime/run-concurrency-gate.ts`                          | 新增：run 级并发闸门                                     |
+| `runtime/service.ts`                                       | `executeRun` 前置 run 闸门 + 排队帧；`deleteThread` 联动销毁 |
+| `app/api/sandbox/stats/route.ts`                           | 新增：只读监控 API                                       |
+
+### 10.9 配置项
+
+见 `.env.example` 的「Docker 沙箱多对话并行编排」段：`DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`
+/ `DEERFLOW_DOCKER_IDLE_TIMEOUT_MS` / `DEERFLOW_DOCKER_IDLE_REAP_INTERVAL_MS` /
+`DEERFLOW_DOCKER_ACQUIRE_LOCK_TTL_MS` / `DEERFLOW_DOCKER_REAP_LOCK_TTL_MS` /
+`DEERFLOW_DOCKER_COMMAND_MAX_RETRIES` / `DEERFLOW_DOCKER_MEMORY_SWAP` /
+`DEERFLOW_DOCKER_READONLY_ROOTFS` / `DEERFLOW_DOCKER_TMPFS_SIZE` /
+`DEERFLOW_MAX_CONCURRENT_RUNS` / `DEERFLOW_SANDBOX_STATS_TOKEN`；跨进程协调复用 `REDIS_URL`。

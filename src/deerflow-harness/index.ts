@@ -33,10 +33,13 @@ export {
   LOCAL_HOST_BASH_DISABLED_MESSAGE,
   getSandboxBaseDir,
   getThreadDirectories,
+  getSandboxSnapshot,
   VIRTUAL_PATH_PREFIX,
   SANDBOX_TOOLS,
   type GrepMatch,
   type ThreadDirectories,
+  type SandboxSnapshot,
+  type SandboxContainerSnapshot,
 } from './sandbox';
 
 // extensions 子系统（MCP / skill 统一配置）
