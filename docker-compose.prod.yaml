@@ -1,0 +1,97 @@
+# 生产编排：以 docker-compose.yaml 为基线派生，新增 app 服务。
+# 与开发版差异：
+#   - app 服务运行构建好的 standalone 镜像（tag 由部署脚本经 APP_IMAGE 注入）
+#   - 业务密钥经 env_file(.env.production) 注入，不写进本文件
+#   - 依赖服务健康后才拉起 app，避免启动期连接失败
+#   - 运行期生成的数据（记忆/沙箱/扩展状态/自定义技能）挂卷持久化
+# 数据库/中间件密码沿用基线（生产可在服务器改本文件或改用 env）。
+
+version: '3.8'
+
+services:
+  app:
+    # APP_IMAGE 由 scripts/deploy-remote.sh 设置为带 git sha 的 tag，
+    # 缺省回退到 :latest 便于手动起服务。
+    image: ${APP_IMAGE:-mini-deepresearch:latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      # 长期记忆、沙箱工作区、扩展启用状态、自定义技能：容器重建后需保留
+      - app_memory:/app/.memory
+      - app_sandbox:/app/.sandbox
+      - app_skills_custom:/app/skills/custom
+    healthcheck:
+      # slim 镜像无 curl，用 node 探无副作用公开路由；应用未就绪时非 0 退出
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/api/auth/setup-status',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: DeepResearch
+      POSTGRES_USER: yezi
+      POSTGRES_PASSWORD: fupingyezi123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U yezi -d DeepResearch']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: yezi
+      MINIO_ROOT_PASSWORD: fupingyezi123
+    volumes:
+      - minio_data:/data
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  app_memory:
+  app_sandbox:
+  app_skills_custom:
