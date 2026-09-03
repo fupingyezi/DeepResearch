@@ -27,7 +27,7 @@ import {
 import { LOCAL_HOST_BASH_DISABLED_MESSAGE, isHostBashAllowed } from './security';
 import type { Sandbox } from './sandbox';
 import { SandboxFsError } from './search';
-import { getSandboxProvider } from './local/local-sandbox-provider';
+import { getSandboxProvider } from './provider-factory';
 
 interface SandboxRuntimeState {
   threadData?: ThreadDataState | null;
@@ -380,7 +380,9 @@ export const bashTool = tool(
   async (input, runtime: ToolRuntime) => {
     const { command } = input;
     try {
-      if (!isHostBashAllowed()) {
+      // host-bash 门控仅适用于非隔离后端（Local 在宿主直连执行）；
+      // Docker 等具内核级隔离的后端不受此限制，容器本身即为安全边界。
+      if (!getSandboxProvider().isSecureIsolation() && !isHostBashAllowed()) {
         return `Error: ${LOCAL_HOST_BASH_DISABLED_MESSAGE}`;
       }
       const { sandbox, threadData } = await ensureSandbox(runtime);
@@ -399,7 +401,8 @@ export const bashTool = tool(
     name: 'bash',
     description:
       'Execute a bash command in a Linux-like environment. Use `python` to run Python code. ' +
-      'Always use absolute paths under /mnt/user-data. Disabled by default for safety.',
+      'Always use absolute paths under /mnt/user-data. On non-isolated backends this is ' +
+      'disabled unless host bash is explicitly allowed.',
     schema: BashSchema,
   },
 );

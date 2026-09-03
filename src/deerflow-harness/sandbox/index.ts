@@ -15,12 +15,16 @@ export {
 } from './sandbox';
 export { SandboxProvider } from './sandbox-provider';
 export {
-  LocalSandboxProvider,
   getSandboxProvider,
   resetSandboxProvider,
   setSandboxProvider,
-} from './local/local-sandbox-provider';
+} from './provider-factory';
+export { LocalSandboxProvider } from './local/local-sandbox-provider';
 export { LocalSandbox } from './local/local-sandbox';
+export { DockerSandboxProvider } from './docker/docker-sandbox-provider';
+export { DockerSandbox } from './docker/docker-sandbox';
+export { isDockerAvailable } from './docker/docker-cli';
+export { getDockerSandboxConfig, type DockerSandboxConfig } from './docker/docker-config';
 export {
   SandboxError,
   SandboxNotFoundError,
