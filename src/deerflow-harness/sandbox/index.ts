@@ -34,6 +34,11 @@ export {
 } from './exceptions';
 export { isHostBashAllowed, LOCAL_HOST_BASH_DISABLED_MESSAGE } from './security';
 export { getSandboxBaseDir, getThreadDirectories, type ThreadDirectories } from './paths';
+export {
+  getSandboxSnapshot,
+  type SandboxSnapshot,
+  type SandboxContainerSnapshot,
+} from './sandbox-monitor';
 export { VIRTUAL_PATH_PREFIX } from './path-utils';
 export {
   SANDBOX_TOOLS,

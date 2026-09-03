@@ -6,12 +6,14 @@ import {
   EditOutlined,
   DeleteOutlined,
   SettingOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { Popover, Modal } from 'antd';
 
 import { useCallback, useEffect, useState } from 'react';
 import React from 'react';
 import { ChatSessionType } from '@/types';
+import type { SessionRunStatus } from '@/store/chat-session-store';
 import apiClient from '@/utils/request/api';
 import { useConversationStore } from '@/store';
 import { UUIDTypes } from 'uuid';
@@ -40,6 +42,26 @@ async function getConversationSessions() {
   }
 }
 
+/**
+ * 对话运行状态标识（多对话并行可视化）：
+ * - running：转圈 loading，表示该对话正在后台跑（无论是否为当前查看对话）。
+ * - done：绿点，表示已跑完。
+ * - error：红点，表示本轮出错。
+ * - idle / 无运行桶：不显示（保持列表干净）。
+ */
+const SessionStatusIndicator: React.FC<{ status?: SessionRunStatus }> = ({ status }) => {
+  if (status === 'running') {
+    return <LoadingOutlined className="shrink-0 text-[#0f766e]" style={{ fontSize: 14 }} />;
+  }
+  if (status === 'done') {
+    return <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-label="已完成" />;
+  }
+  if (status === 'error') {
+    return <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label="出错" />;
+  }
+  return null;
+};
+
 const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
   ({
     chatSession,
@@ -52,16 +74,24 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
   }) => {
     const [isHover, setIsHover] = useState<boolean>(false);
 
-    const { currentSessionId, setCurrentSessionId, setCurrentMessages } = useConversationStore();
+    const { currentSessionId, setCurrentSessionId, getSessionRuntime, setSessionMessages } =
+      useConversationStore();
+    const runtimeStatus = useConversationStore(
+      (s) => s.sessionRuntimes[String(chatSession.id)]?.status,
+    );
     const showDate = formatYmd(chatSession.updated_at);
 
     const handleSelectSession = async (sessionId: UUIDTypes) => {
+      // 先切当前对话：store 会从该对话的运行桶恢复投影（含正在流式的消息与运行态）。
       setCurrentSessionId(sessionId);
+      // 已有运行桶（正在跑或跑过）：直接用桶内消息，绝不拉历史覆盖正在流式的内容。
+      if (getSessionRuntime(String(sessionId))) return;
       try {
         const response = await apiClient.get(
           `/conversations/history?sessionId=${encodeURIComponent(String(sessionId))}`,
         );
-        setCurrentMessages(response.data);
+        // 写入该对话的桶（并投影到当前视图）；不触碰其它正在跑的对话。
+        setSessionMessages(String(sessionId), response.data);
       } catch (error) {
         console.error('error:', error);
       }
@@ -102,7 +132,7 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
           open={selectedSession?.id === chatSession.id && !isModalOpen}
         >
           <div
-            className="relative min-h-10 w-full overflow-hidden rounded-xl px-3 leading-10 text-ellipsis whitespace-nowrap transition-colors hover:cursor-pointer hover:bg-[#eef0f2]"
+            className="relative flex min-h-10 w-full items-center gap-2 overflow-hidden rounded-xl px-3 leading-10 transition-colors hover:cursor-pointer hover:bg-[#eef0f2]"
             style={{
               backgroundColor: chatSession.id === currentSessionId ? '#d7f2f0' : '',
               color: chatSession.id === currentSessionId ? '#0f766e' : '#374151',
@@ -112,7 +142,10 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
             onMouseLeave={() => setIsHover(false)}
             onClick={() => handleSelectSession(chatSession.id)}
           >
-            {chatSession.title}
+            <SessionStatusIndicator status={runtimeStatus} />
+            <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+              {chatSession.title}
+            </span>
             {isHover && (
               <div
                 className={`absolute top-1/2 right-0 flex h-full w-9 -translate-y-1/2 transform items-center justify-center ${
@@ -150,13 +183,8 @@ const SiderContent = () => {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const { user } = useAuth();
 
-  const {
-    intialChatSessions,
-    updateChatSession,
-    chatSessions,
-    setCurrentSessionId,
-    setCurrentMessages,
-  } = useConversationStore();
+  const { intialChatSessions, updateChatSession, chatSessions, setCurrentSessionId } =
+    useConversationStore();
 
   const checkDifferentDay = (session: ChatSessionType, index: number) => {
     const showDate = formatYmd(session.updated_at);
@@ -164,11 +192,11 @@ const SiderContent = () => {
     return index === 0 || showDate !== lastDate;
   };
 
-  // 点击开启新对话
+  // 点击开启新对话：仅切到空对话视图（currentSessionId=''），store 会清空当前投影，
+  // 不触碰其它正在后台运行的对话桶。
   const handleCreateNewSession = useCallback(() => {
-    setCurrentMessages([]);
     setCurrentSessionId('');
-  }, [setCurrentMessages, setCurrentSessionId]);
+  }, [setCurrentSessionId]);
 
   // 点击编辑session
   const handleSelectEditSession = useCallback(

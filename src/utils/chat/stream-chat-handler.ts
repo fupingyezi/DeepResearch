@@ -13,6 +13,7 @@ import {
 } from './parts-reducer';
 import { createRafFlusher, type RafFlusher } from '@/utils/common';
 import { TitleUpdatePayload } from '@/deerflow-harness';
+import type { SessionRunStatus } from '@/store/chat-session-store';
 
 export interface StreamChatConfig {
   operation?: 'resume' | 'recall' | 'reEditCall';
@@ -20,18 +21,29 @@ export interface StreamChatConfig {
   /** operation === 'resume' 时使用：'确认'/'拒绝'等 human-in-the-loop 决策文本 */
   resumeDecision?: string;
   sessionId?: UUIDTypes;
+  /**
+   * 是否新建对话：为 true 时 sessionId 仅作为「前端临时桶 key / 当前视图 id」，
+   * 请求体不携带 sessionId（由后端新建并在 START 回传真实 id，再迁移桶）。
+   */
+  isNewSession?: boolean;
   /** 已上传文件的元信息（前端上传后拿到，转成 message.contents 中的 file/image block，仅传 fileId） */
   uploadedFiles?: ChatUploadedFileRef[];
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
-  setIsChating: (loading: boolean) => void;
   setShouldAutoScroll: (scroll: boolean) => void;
   addChatSession: (session: ChatSessionType) => void;
   updateChatSession: (session: ChatSessionType, op: 'edit' | 'delete') => void;
-  setCurrentSessionId: (id: UUIDTypes) => void;
-  setCurrentMessages: (messages: ChatMessageType[]) => void;
-  setAbortController: (controller: AbortController | null) => void;
+
+  /**
+   * 多对话并行：以下全部按 sessionId 分桶写回，绝不触碰「当前查看对话」以外的状态。
+   * 当写回的 sessionId 恰为当前对话时，store 内部会自动投影到 current*（视图无感）。
+   */
+  setSessionMessages: (sessionId: string, messages: ChatMessageType[]) => void;
+  setSessionStatus: (sessionId: string, status: SessionRunStatus) => void;
+  setSessionAbortController: (sessionId: string, controller: AbortController | null) => void;
+  /** 新建对话 START 后，把前端临时 sessionId 桶迁移到后端真实 sessionId 桶。 */
+  migrateSessionRuntime: (fromSessionId: string, toSessionId: string) => void;
 
   /** 模型预设标识（映射成 configuration.model.value 等运行配置） */
   model?: ModelPresetName;
@@ -57,6 +69,9 @@ export class StreamChatHandler {
   private isNewSession = false;
   private assistantMessageId: string = '';
   private initialUpdateMessages: ChatMessageType[] = [];
+
+  /** 本次 run 的终态：正常结束 done / 出错 error / 被用户中止 idle。cleanup 据此落桶。 */
+  private finalStatus: SessionRunStatus = 'done';
 
   /** 流式期间维护的不可变聚合状态 */
   private state: PartsState = initialPartsState;
@@ -88,6 +103,13 @@ export class StreamChatHandler {
 
   // session / messages 初始化
   private handleSession(): void {
+    // 新建对话：sessionId 是外部预生成的临时桶 key，请求体不带 sessionId（后端新建）。
+    if (this.config.isNewSession) {
+      this.sessionId = this.config.sessionId || uuidv4();
+      this.isNewSession = true;
+      return;
+    }
+
     const existing = this.config.sessionId || '';
     if (existing) {
       this.sessionId = existing;
@@ -101,8 +123,9 @@ export class StreamChatHandler {
 
   private setupAbortController(): void {
     this.abortController = new AbortController();
-    this.config.setAbortController(this.abortController);
-    this.config.setIsChating(true);
+    const sid = String(this.sessionId);
+    this.config.setSessionAbortController(sid, this.abortController);
+    this.config.setSessionStatus(sid, 'running');
   }
 
   private initializeMessages(): void {
@@ -134,7 +157,7 @@ export class StreamChatHandler {
 
     this.initialUpdateMessages = [...this.config.currentMessages, userMessage, assistantMessage];
 
-    this.config.setCurrentMessages(this.initialUpdateMessages);
+    this.config.setSessionMessages(String(this.sessionId), this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
   }
 
@@ -182,7 +205,7 @@ export class StreamChatHandler {
       ];
     }
 
-    this.config.setCurrentMessages(this.initialUpdateMessages);
+    this.config.setSessionMessages(String(this.sessionId), this.initialUpdateMessages);
     this.config.setShouldAutoScroll(true);
   }
 
@@ -325,8 +348,11 @@ export class StreamChatHandler {
     const tempAssistantId = this.assistantMessageId;
 
     if (realSessionId && realSessionId !== tempSessionId) {
+      // 新建对话：把临时 id 桶迁移到后端真实 id 桶。migrate 内部仅当用户当前仍在看
+      // 这个临时对话时才把 currentSessionId 切到真实 id——若用户已切走，则不打扰，
+      // 从根源修复「对话跑完/START 后自动跳回」的串扰。
+      this.config.migrateSessionRuntime(String(tempSessionId), realSessionId);
       this.sessionId = realSessionId;
-      this.config.setCurrentSessionId(realSessionId);
     }
     if (realAssistantId) {
       this.assistantMessageId = realAssistantId;
@@ -382,7 +408,7 @@ export class StreamChatHandler {
 
     if (mutated) {
       this.initialUpdateMessages = updated;
-      this.config.setCurrentMessages(updated);
+      this.config.setSessionMessages(String(this.sessionId), updated);
     }
   }
 
@@ -453,7 +479,7 @@ export class StreamChatHandler {
     });
     if (!mutated) return;
     this.initialUpdateMessages = updateMessages;
-    this.config.setCurrentMessages(updateMessages);
+    this.config.setSessionMessages(String(this.sessionId), updateMessages);
   }
 
   // error / cleanup
@@ -461,6 +487,7 @@ export class StreamChatHandler {
     const err = error as { name?: string; message?: string };
     if (err?.name === 'AbortError' || err?.name === 'AGENT_STREAM_ABORTED') {
       console.log('Chat was Interrupted by user');
+      this.finalStatus = 'idle';
       if (this.config.onStreamComplete) {
         this.config.onStreamComplete({
           sessionId: this.sessionId,
@@ -469,6 +496,7 @@ export class StreamChatHandler {
       }
     } else {
       console.error('Stream error:', error);
+      this.finalStatus = 'error';
 
       if (this.config.onStreamError) {
         this.config.onStreamError(error);
@@ -480,8 +508,9 @@ export class StreamChatHandler {
   }
 
   private async cleanup(): Promise<void> {
-    this.config.setIsChating(false);
-    this.config.setAbortController(null);
+    const sid = String(this.sessionId);
+    this.config.setSessionStatus(sid, this.finalStatus);
+    this.config.setSessionAbortController(sid, null);
 
     if (this.config.onStreamComplete) {
       this.config.onStreamComplete({
