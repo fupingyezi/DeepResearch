@@ -65,7 +65,7 @@ jobs:
       - name: Set image tag
         id: meta
         # 用 git 短 sha 作为版本 tag，便于回滚定位
-        run: echo "tag=mini-deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Build image (standalone)
         uses: docker/build-push-action@v6

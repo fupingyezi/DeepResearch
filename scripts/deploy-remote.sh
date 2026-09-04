@@ -6,7 +6,7 @@
 #
 # 约定的参数：
 #   $1  新镜像 tar.gz 的路径（CI scp 上来的产物）
-#   $2  新镜像完整 tag（如 mini-deepresearch:<git_sha>）
+#   $2  新镜像完整 tag（如 deepresearch:<git_sha>）
 # 工作目录须为 DEPLOY_PATH（含 docker-compose.prod.yaml 与 .env.production）。
 
 set -Eeuo pipefail
@@ -26,7 +26,8 @@ command -v docker >/dev/null 2>&1 || fail "未找到 docker，请先在服务器
 [ -f ".env.production" ] || fail "当前目录缺少 .env.production（业务密钥文件）"
 [ -f "$IMAGE_TAR" ]      || fail "镜像产物不存在: $IMAGE_TAR"
 
-compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# --env-file：compose 文件中的 ${POSTGRES_PASSWORD} 等中间件凭证插值自 .env.production
+compose() { docker compose --env-file .env.production -f "$COMPOSE_FILE" "$@"; }
 
 # 记录当前正在运行的 app 镜像，作为回滚目标
 CURRENT_IMAGE="$(compose ps -q app 2>/dev/null | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
