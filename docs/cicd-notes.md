@@ -200,6 +200,23 @@ export function getMinioClient(): Client {
 **教训：挂卷前必须读代码确认真实落盘路径**（`grep DEERFLOW_DATA_DIR` 一分钟的事），
 挂错位置等于没挂。
 
+### 5.3 named volume 与非 root 容器的属主坑（曾致记忆静默丢失）
+
+镜像以 `USER node` 运行，但 named volume 首次挂载到**镜像中不存在的路径**时，
+Docker 会以 **root** 创建目录 → 容器内 node 用户 `mkdir` 直接 `EACCES`。
+记忆更新的 LLM 调用成功、最后写文件失败，被 catch 静默吞掉——表象是
+「对话正常但记忆一直不沉淀」，只有 `docker compose logs | grep memory` 能看到。
+
+修法两层：
+
+- 服务器一次性救急：`sudo chown -R 1000:1000 /var/lib/docker/volumes/<proj>_<vol>/_data`
+  （node 用户 uid=1000）
+- 治本（Dockerfile）：runner 阶段**预建**数据目录并 `chown node`——volume 挂到
+  「镜像中已存在且属 node」的路径时，copy-up 会继承属主，新卷天然可写
+
+> 通用教训：**非 root 容器 + named volume 的组合，必须预建目录**；「LLM 成功但
+> 落盘失败」这类静默错误，靠日志 grep 才现形。
+
 ---
 
 ## 6. 环境变量体系（.env.production）

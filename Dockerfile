@@ -36,6 +36,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 
+# 预建运行期数据目录并置 node 属主：named volume 挂载到"镜像中已存在且属 node"的
+# 目录时，copy-up 会继承该属主；否则全新卷由 Docker 以 root 创建，容器内 node
+# 用户写入即 EACCES（曾导致记忆更新静默失败）
+RUN mkdir -p .memory .data .sandbox skills/custom \
+    && chown -R node:node .memory .data .sandbox skills
+
 USER node
 EXPOSE 3000
 
