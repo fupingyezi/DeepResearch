@@ -53,9 +53,25 @@ GitHub 端到此完成，日常不用再动。
 ### 1. 安装 Docker
 
 ```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker "$USER"   # 然后退出重新登录生效
-docker compose version                 # 确认输出 v2.x
+curl -fsSL https://get.docker.com -o get-docker.sh
+# 国内服务器走 Aliyun 镜像源装 docker-ce，避免 download.docker.com 超时
+sudo sh get-docker.sh --mirror Aliyun
+
+# 让当前用户免 sudo 用 docker，然后退出重新登录生效
+sudo usermod -aG docker "$USER"
+
+# 配置 Docker Hub 镜像加速（腾讯云内网镜像）：
+# compose 要拉 postgres/redis/minio 基础镜像，不配加速国内基本拉不动
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
+}
+EOF
+sudo systemctl restart docker
+
+# 验证：compose 为 v2 及以上，且能正常拉镜像
+docker compose version
+docker pull hello-world
 ```
 
 ### 2. 创建部署目录
