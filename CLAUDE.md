@@ -371,7 +371,7 @@ StreamBridge（单例 streamBridge）
 | —    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置                                    |
 | 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                |
 | 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）       |
-| 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）    |
+| 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）   |
 | 3    | `DanglingToolCallMiddleware`     | 始终启用                                                                                                        |
 | 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                        |
 | 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware()` 实例（不允许 true）                                |
@@ -594,7 +594,6 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 
 ---
 
-
 **文件：** `src/deerflow-harness/persistence/thread-meta/postgres-store.ts`
 
 ```sql
@@ -789,30 +788,30 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 
 ## 关键文件索引
 
-| 文件                                                          | 职责                                      |
-| ------------------------------------------------------------- | ----------------------------------------- |
-| `src/app/api/threads/_service.ts`                             | ThreadService 进程单例工厂                |
-| `src/app/api/v3/chat/[threadId]/route.ts`                     | 主聊天 API，三阶段管线                    |
-| `src/deerflow-harness/client.ts`                              | DeerFlowClient，Agent 缓存 + 流式调用     |
-| `src/deerflow-harness/runtime/service.ts`                     | ThreadService 接口定义与实现              |
-| `src/deerflow-harness/agents/factory.ts`                      | createBaseAgent + assembleFromFeatures    |
-| `src/deerflow-harness/agents/features.ts`                     | RuntimeFeatures + Next/Prev 装饰器        |
-| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts` | StreamBridge + ThreadChannel（缓冲回放）  |
-| `src/deerflow-harness/runtime/sse/client-event.ts`            | ClientAgentEvent 白名单协议（前后端共用） |
-| `src/deerflow-harness/runtime/sse/to-client-event.ts`         | 内部事件 → 客户端事件的过滤边界           |
-| `src/deerflow-harness/types/agent-event.ts`                   | AgentEvent 内部事件枚举                   |
-| `src/deerflow-harness/agents/memory/updater.ts`               | MemoryUpdater（LLM 驱动记忆更新）         |
-| `src/deerflow-harness/subagents/executor.ts`                  | SubagentExecutor（子代理执行，超时+取消） |
-| `src/deerflow-harness/extensions/config-store.ts`             | extensions_config.json 文件存储（MCP/skill 统一配置） |
-| `src/deerflow-harness/skills/loader.ts`                       | skill 加载器（扫描 SKILL.md + 合并启用状态）   |
-| `src/deerflow-harness/mcp/client.ts`                          | MCP 客户端封装（加载工具 + 失败容错 + 缓存）   |
-| `src/deerflow-harness/sandbox/provider-factory.ts`           | 沙箱后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker） |
-| `src/deerflow-harness/sandbox/docker/docker-sandbox-provider.ts` | Docker 后端（每线程加固容器 + 引用计数 + 空闲回收） |
-| `src/deerflow-harness/sandbox/docker/docker-coordinator.ts`  | 跨进程沙箱协调（Redis 计数/登记/锁，可降级进程内） |
-| `src/deerflow-harness/runtime/run-concurrency-gate.ts`       | run 级并发闸门（FIFO 信号量 + 跨进程占位）     |
-| `src/deerflow-harness/runtime/context.ts`                     | AsyncLocalStorage 上下文传播              |
-| `src/store/chat-session-store.ts`                             | 前端聊天会话状态（sessionRuntimes 分桶并行） |
-| `src/utils/chat/stream-chat-handler.ts`                       | 前端 SSE 流处理                           |
+| 文件                                                             | 职责                                                        |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| `src/app/api/threads/_service.ts`                                | ThreadService 进程单例工厂                                  |
+| `src/app/api/v3/chat/[threadId]/route.ts`                        | 主聊天 API，三阶段管线                                      |
+| `src/deerflow-harness/client.ts`                                 | DeerFlowClient，Agent 缓存 + 流式调用                       |
+| `src/deerflow-harness/runtime/service.ts`                        | ThreadService 接口定义与实现                                |
+| `src/deerflow-harness/agents/factory.ts`                         | createBaseAgent + assembleFromFeatures                      |
+| `src/deerflow-harness/agents/features.ts`                        | RuntimeFeatures + Next/Prev 装饰器                          |
+| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`    | StreamBridge + ThreadChannel（缓冲回放）                    |
+| `src/deerflow-harness/runtime/sse/client-event.ts`               | ClientAgentEvent 白名单协议（前后端共用）                   |
+| `src/deerflow-harness/runtime/sse/to-client-event.ts`            | 内部事件 → 客户端事件的过滤边界                             |
+| `src/deerflow-harness/types/agent-event.ts`                      | AgentEvent 内部事件枚举                                     |
+| `src/deerflow-harness/agents/memory/updater.ts`                  | MemoryUpdater（LLM 驱动记忆更新）                           |
+| `src/deerflow-harness/subagents/executor.ts`                     | SubagentExecutor（子代理执行，超时+取消）                   |
+| `src/deerflow-harness/extensions/config-store.ts`                | extensions_config.json 文件存储（MCP/skill 统一配置）       |
+| `src/deerflow-harness/skills/loader.ts`                          | skill 加载器（扫描 SKILL.md + 合并启用状态）                |
+| `src/deerflow-harness/mcp/client.ts`                             | MCP 客户端封装（加载工具 + 失败容错 + 缓存）                |
+| `src/deerflow-harness/sandbox/provider-factory.ts`               | 沙箱后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker） |
+| `src/deerflow-harness/sandbox/docker/docker-sandbox-provider.ts` | Docker 后端（每线程加固容器 + 引用计数 + 空闲回收）         |
+| `src/deerflow-harness/sandbox/docker/docker-coordinator.ts`      | 跨进程沙箱协调（Redis 计数/登记/锁，可降级进程内）          |
+| `src/deerflow-harness/runtime/run-concurrency-gate.ts`           | run 级并发闸门（FIFO 信号量 + 跨进程占位）                  |
+| `src/deerflow-harness/runtime/context.ts`                        | AsyncLocalStorage 上下文传播                                |
+| `src/store/chat-session-store.ts`                                | 前端聊天会话状态（sessionRuntimes 分桶并行）                |
+| `src/utils/chat/stream-chat-handler.ts`                          | 前端 SSE 流处理                                             |
 
 ---
 

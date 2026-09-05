@@ -4,13 +4,13 @@
 
 [LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) 是一个用于评估聊天助手**长期记忆能力**的基准测试，包含 **500 个高质量问题**，测试 5 大核心能力：
 
-| 能力 | 说明 | 问题数 |
-|------|------|--------|
-| **Information Extraction** | 从历史对话中直接提取事实 | 126 |
-| **Multi-Session Reasoning** | 跨多个会话推理 | 133 |
-| **Temporal Reasoning** | 理解时间顺序和跨度 | 133 |
-| **Knowledge Updates** | 处理随时间变化的信息 | 78 |
-| **Abstention** | 识别无法回答的问题并拒绝 | 30 |
+| 能力                        | 说明                     | 问题数 |
+| --------------------------- | ------------------------ | ------ |
+| **Information Extraction**  | 从历史对话中直接提取事实 | 126    |
+| **Multi-Session Reasoning** | 跨多个会话推理           | 133    |
+| **Temporal Reasoning**      | 理解时间顺序和跨度       | 133    |
+| **Knowledge Updates**       | 处理随时间变化的信息     | 78     |
+| **Abstention**              | 识别无法回答的问题并拒绝 | 30     |
 
 ## 快速开始
 
@@ -69,14 +69,14 @@ npx tsx benchmarks/longmem/run.ts --concurrency 1
 
 这是理解本基准的**核心**。同样是「测长期记忆」，两种模式考察的能力完全不同：
 
-| 维度 | **PREFIX**（默认） | **INGEST**（`--ingest`） |
-|------|-------------------|-------------------------|
-| 历史如何进入模型 | 全部 session 一次性**拼进 prompt** | 逐 session 喂给**记忆系统抽取/落盘** |
-| 提问时 | 模型从超长 prompt 里现读现答 | 模型从存储的记忆里**检索**作答（不再带历史） |
-| 实际考察 | 长 prompt 阅读理解 | **记忆写入 → 存储 → 跨 session 检索**端到端 |
-| 记忆系统是否真正参与 | 否（写入器空跑） | **是** |
-| LLM 调用量 | 1 次/题 | 1 次/session（写入）+ 1 次/题（提问），**显著更高** |
-| 贴近 LongMemEval 本意 | 部分 | **是** |
+| 维度                  | **PREFIX**（默认）                 | **INGEST**（`--ingest`）                            |
+| --------------------- | ---------------------------------- | --------------------------------------------------- |
+| 历史如何进入模型      | 全部 session 一次性**拼进 prompt** | 逐 session 喂给**记忆系统抽取/落盘**                |
+| 提问时                | 模型从超长 prompt 里现读现答       | 模型从存储的记忆里**检索**作答（不再带历史）        |
+| 实际考察              | 长 prompt 阅读理解                 | **记忆写入 → 存储 → 跨 session 检索**端到端         |
+| 记忆系统是否真正参与  | 否（写入器空跑）                   | **是**                                              |
+| LLM 调用量            | 1 次/题                            | 1 次/session（写入）+ 1 次/题（提问），**显著更高** |
+| 贴近 LongMemEval 本意 | 部分                               | **是**                                              |
 
 ```bash
 # 默认 PREFIX 模式：把历史拼进 prompt
@@ -101,12 +101,12 @@ npx tsx benchmarks/longmem/run.ts --ingest --limit 5
 ```
 
 要点：
+
 - **隔离**：每题独立 `userId`（`longmem_<question_id>`）→ 独立记忆文件，题目之间互不污染；开跑前会清空该题旧记忆。
 - **存储位置**：默认落到 `benchmarks/.memory-store/`（通过 `DEERFLOW_DATA_DIR`），不污染 `~/.deer-flow`，可直接删除清理。
 - **串行执行**：INGEST 模式强制 `concurrency=1`，保证写入顺序与日志清晰、规避 LLM 限流。
 - **抽取模型**：复用 agent 模型（非流式、低温度），无需额外配置。
 - 报告会多出一块 **Memory Ingestion** 指标（平均 session 数 / 抽取出的 fact 数 / 写入耗时）。
-
 
 ## 架构设计
 
@@ -148,19 +148,20 @@ LongMemEval JSON → 数据集适配器 → 格式化历史 → Agent (memory=ON
 
 ### 关键差异 vs 标准 Benchmark
 
-| 维度 | 标准 Benchmark (`research-qa/run.ts`) | LongMemEval (`longmem/run.ts`) |
-|------|--------------------------------------|-------------------------------|
-| 输入 | 单个 `query` | `query` + 完整聊天历史 |
-| Memory | 默认关闭 | **默认开启** |
-| 历史注入 | 无 | prefix / system / none 三种模式 |
-| 评估输出 | JSON + 自定义评分器 | JSON + **官方 JSONL 格式** |
-| 后续评估 | 内置 LLM Judge | 可选官方 GPT-4o 评估脚本 |
+| 维度     | 标准 Benchmark (`research-qa/run.ts`) | LongMemEval (`longmem/run.ts`)  |
+| -------- | ------------------------------------- | ------------------------------- |
+| 输入     | 单个 `query`                          | `query` + 完整聊天历史          |
+| Memory   | 默认关闭                              | **默认开启**                    |
+| 历史注入 | 无                                    | prefix / system / none 三种模式 |
+| 评估输出 | JSON + 自定义评分器                   | JSON + **官方 JSONL 格式**      |
+| 后续评估 | 内置 LLM Judge                        | 可选官方 GPT-4o 评估脚本        |
 
 ## 结果解读
 
 ### 输出文件
 
 1. **JSON 报告** (`benchmarks/results/longmem/latest.json`)
+
    ```json
    {
      "config": { "memoryEnabled": true, "historyMode": "prefix" },
@@ -238,6 +239,7 @@ done
 ## 故障排查
 
 ### 问题：`数据集文件不存在`
+
 ```bash
 # 手动下载数据集
 mkdir -p benchmarks/data
@@ -247,10 +249,13 @@ curl -L -o longmemeval_oracle.json "https://huggingface.co/datasets/xiaowu0162/l
 ```
 
 ### 问题：API Key 缺失
+
 确保 `.env.local` 中配置了至少以下变量：
+
 - `BENCHMARK_AGENT_API_KEY` 或 `DEEPSEEK_API_KEY`
 
 ### 问题：超时
+
 - 减小并发数：`--concurrency 1`
 - 使用 Oracle 版本：`--variant oracle`
 - 限制数量先验证：`--limit 10`

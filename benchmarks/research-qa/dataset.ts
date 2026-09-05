@@ -66,14 +66,7 @@ export const DATASET_V1: BenchmarkExample[] = [
       '对比分析 OpenAI GPT-4o、Anthropic Claude 3.5 Sonnet、Google Gemini 1.5 Pro 三款模型在 Agent 场景下的工具调用能力差异。',
     category: 'multi-hop',
     difficulty: 'medium',
-    expectedKeywords: [
-      'GPT-4o',
-      'Claude',
-      'Gemini',
-      '工具调用',
-      'function calling',
-      'JSON Schema',
-    ],
+    expectedKeywords: ['GPT-4o', 'Claude', 'Gemini', '工具调用', 'function calling', 'JSON Schema'],
   },
 
   // ── 时效性知识 (medium-hard) ──
@@ -107,14 +100,7 @@ export const DATASET_V1: BenchmarkExample[] = [
       'PostgreSQL 作为 LLM 应用的 Checkpoint 存储方案，相比 Redis 和纯文件存储有哪些优势和劣势？请结合 LangGraph 的 checkpoint-postgres 实际使用场景分析。',
     category: 'technical-deep-dive',
     difficulty: 'hard',
-    expectedKeywords: [
-      'PostgreSQL',
-      'Checkpoint',
-      'LangGraph',
-      'Redis',
-      'ACID',
-      '序列化',
-    ],
+    expectedKeywords: ['PostgreSQL', 'Checkpoint', 'LangGraph', 'Redis', 'ACID', '序列化'],
   },
 ];
 
@@ -128,12 +114,13 @@ export function toLangSmithFormat(examples: BenchmarkExample[]): Array<{
 }> {
   return examples.map((ex) => ({
     inputs: { query: ex.query },
-    outputs: ex.referenceAnswer || ex.expectedKeywords
-      ? {
-          ...(ex.referenceAnswer && { referenceAnswer: ex.referenceAnswer }),
-          ...(ex.expectedKeywords && { expectedKeywords: ex.expectedKeywords }),
-        }
-      : undefined,
+    outputs:
+      ex.referenceAnswer || ex.expectedKeywords
+        ? {
+            ...(ex.referenceAnswer && { referenceAnswer: ex.referenceAnswer }),
+            ...(ex.expectedKeywords && { expectedKeywords: ex.expectedKeywords }),
+          }
+        : undefined,
   }));
 }
 

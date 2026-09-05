@@ -14,11 +14,7 @@ export {
   type GrepResult,
 } from './sandbox';
 export { SandboxProvider } from './sandbox-provider';
-export {
-  getSandboxProvider,
-  resetSandboxProvider,
-  setSandboxProvider,
-} from './provider-factory';
+export { getSandboxProvider, resetSandboxProvider, setSandboxProvider } from './provider-factory';
 export { LocalSandboxProvider } from './local/local-sandbox-provider';
 export { LocalSandbox } from './local/local-sandbox';
 export { DockerSandboxProvider } from './docker/docker-sandbox-provider';

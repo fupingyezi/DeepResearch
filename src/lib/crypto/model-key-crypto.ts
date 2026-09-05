@@ -69,11 +69,7 @@ export function encryptKey(plain: string): EncryptedPayload {
  * 调用方需捕获并按语义降级（不得泄漏底层错误细节）。
  */
 export function decryptKey(payload: EncryptedPayload): string {
-  const decipher = createDecipheriv(
-    ALGORITHM,
-    getEncKey(),
-    Buffer.from(payload.iv, 'base64'),
-  );
+  const decipher = createDecipheriv(ALGORITHM, getEncKey(), Buffer.from(payload.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(payload.authTag, 'base64'));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(payload.ciphertext, 'base64')),

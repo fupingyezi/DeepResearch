@@ -84,18 +84,15 @@ interface LongMemArgs {
 function parseArgs(): LongMemArgs {
   const args = process.argv.slice(2);
   return {
-    type: args.find((a, i) => a === '--type')
-      ? args[args.indexOf('--type') + 1]
-      : undefined,
+    type: args.find((a, i) => a === '--type') ? args[args.indexOf('--type') + 1] : undefined,
     id: args.find((a, i) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
-    variant: (args.includes('--variant')
+    variant: args.includes('--variant')
       ? (args[args.indexOf('--variant') + 1] as 's' | 'm' | 'oracle')
-      : 's'),
+      : 's',
     noMemory: args.includes('--no-memory') || args.includes('--noMemory'),
     historyMode: (args.includes('--history-mode')
       ? (args[args.indexOf('--history-mode') + 1] as 'prefix' | 'system' | 'none')
-      : 'prefix'
-    ) as 'prefix' | 'system' | 'none',
+      : 'prefix') as 'prefix' | 'system' | 'none',
     // 默认关闭 websearch：测试纯记忆能力，避免消耗 Tavily API 额度
     webSearchEnabled: args.includes('--websearch'),
     // 默认开启 LLM judge 自动评估准确率，--no-judge 可跳过
@@ -195,7 +192,7 @@ async function runSingle(
   const textPreview = result.output.slice(0, 150) + (result.output.length > 150 ? '...' : '');
   console.log(
     `    [${status}] ${result.metrics.totalLatencyMs}ms | ` +
-    `${result.output.length} chars | tools=${result.metrics.toolCallCount}`,
+      `${result.output.length} chars | tools=${result.metrics.toolCallCount}`,
   );
   console.log(`    [Output] ${textPreview}`);
   console.log(`    [Answer ] ${example.referenceAnswer}`);
@@ -292,10 +289,7 @@ async function judgeOne(
 }
 
 /** 批量评估所有结果（带并发控制），就地写入 judgment 字段 */
-async function judgeAll(
-  results: LongMemResultItem[],
-  concurrency: number,
-): Promise<void> {
+async function judgeAll(results: LongMemResultItem[], concurrency: number): Promise<void> {
   const model = createJudgeModel();
   console.log(`\n[Judge] 开始评估 ${results.length} 条结果...`);
 
@@ -341,10 +335,7 @@ interface LongMemReport {
     /** 整体准确率 0-1（judgedCount>0 时有效） */
     accuracy: number;
     /** 按 question_type 分组的统计 */
-    byType: Record<
-      string,
-      { total: number; success: number; correct: number; avgLatency: number }
-    >;
+    byType: Record<string, { total: number; success: number; correct: number; avgLatency: number }>;
   };
   results: LongMemResultItem[];
 }
@@ -470,7 +461,9 @@ function printReport(report: LongMemReport): void {
   console.log(`  │ Errors         │ ${String(summary.errorCount).padStart(25)} │`);
   console.log(`  │ Avg Latency    │ ${(summary.avgLatencyMs / 1000).toFixed(1).padStart(25)}s │`);
   console.log(`  │ Avg TTFT       │ ${(summary.avgTtftMs / 1000).toFixed(1).padStart(25)}s │`);
-  console.log(`  │ Avg Output     │ ${String(Math.round(summary.avgOutputLength)).padStart(25)} chars │`);
+  console.log(
+    `  │ Avg Output     │ ${String(Math.round(summary.avgOutputLength)).padStart(25)} chars │`,
+  );
   console.log('  └────────────────┴─────────────────────────────┘');
 
   // ── 准确率（核心指标）──
@@ -479,7 +472,9 @@ function printReport(report: LongMemReport): void {
     console.log('\n  ┌──────────────────────────────────────────────┐');
     console.log('  │ Accuracy (LLM Judge)                        │');
     console.log('  ├────────────────┬─────────────────────────────┤');
-    console.log(`  │ Correct        │ ${`${summary.correctCount} / ${summary.judgedCount}`.padStart(25)} │`);
+    console.log(
+      `  │ Correct        │ ${`${summary.correctCount} / ${summary.judgedCount}`.padStart(25)} │`,
+    );
     console.log(`  │ Accuracy       │ ${`${accPct}%`.padStart(25)} │`);
     console.log('  └────────────────┴─────────────────────────────┘');
   } else {

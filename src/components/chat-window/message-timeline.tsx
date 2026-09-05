@@ -199,7 +199,9 @@ const ToolCallBubble: React.FC<{ step: ToolCallStep }> = ({ step }) => {
               {safeStringifyArgs(c.args)}
             </pre>
           )}
-          {c.errorMessage && <div className="wrap-break-word text-red-500">错误：{c.errorMessage}</div>}
+          {c.errorMessage && (
+            <div className="wrap-break-word text-red-500">错误：{c.errorMessage}</div>
+          )}
           {!searchResults && c.result !== undefined && (
             <pre className="scrollbar-slim max-h-60 w-full min-w-0 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-2.5 text-[12px] wrap-break-word whitespace-pre-wrap text-gray-600">
               {typeof c.result === 'string' ? c.result : safeStringifyArgs(c.result)}

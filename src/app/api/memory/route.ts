@@ -18,7 +18,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('[memory] get error:', error);
     return NextResponse.json(
-      { message: 'Get memory failed!', error: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        message: 'Get memory failed!',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 },
     );
   }
@@ -37,7 +40,10 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     console.error('[memory] clear error:', error);
     return NextResponse.json(
-      { message: 'Clear memory failed!', error: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        message: 'Clear memory failed!',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 },
     );
   }

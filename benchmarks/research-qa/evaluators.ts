@@ -39,8 +39,7 @@ export class KeywordCoverageEvaluator {
   readonly name = 'keyword_coverage';
 
   async evaluate(input: EvaluatorInput): Promise<EvaluationResult> {
-    const keywords =
-      input.referenceOutput?.expectedKeywords ?? [];
+    const keywords = input.referenceOutput?.expectedKeywords ?? [];
     if (keywords.length === 0) {
       return { key: this.name, score: 1, comment: '无期望关键词配置，默认满分' };
     }
@@ -76,9 +75,7 @@ export class NonEmptyEvaluator {
     return {
       key: this.name,
       score: hasContent ? 1 : 0,
-      comment: hasContent
-        ? `输出长度 ${text.length} 字符`
-        : `输出过短或为空 (${text.length} 字符)`,
+      comment: hasContent ? `输出长度 ${text.length} 字符` : `输出过短或为空 (${text.length} 字符)`,
     };
   }
 }
@@ -191,9 +188,7 @@ export class LlmJudgeEvaluator {
     this.model = new ChatOpenAI({
       model: judgeOptions.modelName,
       apiKey: judgeOptions.apiKey ?? process.env.BENCHMARK_JUDGE_API_KEY,
-      configuration: judgeOptions.baseUrl
-        ? { baseURL: judgeOptions.baseUrl }
-        : undefined,
+      configuration: judgeOptions.baseUrl ? { baseURL: judgeOptions.baseUrl } : undefined,
       temperature: judgeOptions.temperature ?? 0,
     });
   }

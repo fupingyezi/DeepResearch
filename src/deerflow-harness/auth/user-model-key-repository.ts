@@ -13,7 +13,12 @@
  */
 
 import { query } from '@/lib';
-import { decryptKey, encryptKey, maskKey, type EncryptedPayload } from '@/lib/crypto/model-key-crypto';
+import {
+  decryptKey,
+  encryptKey,
+  maskKey,
+  type EncryptedPayload,
+} from '@/lib/crypto/model-key-crypto';
 
 /** 已配置 provider 的对外安全视图（不含明文 / 密文）。 */
 export interface ConfiguredProvider {
@@ -78,10 +83,7 @@ export async function listConfiguredProviders(userId: string): Promise<Configure
  * 读取本人某 provider 的明文 Key（解密）。
  * 未配置返回 null；解密失败（密文被篡改 / 密钥变更）同样返回 null，由调用方降级处理。
  */
-export async function getDecryptedKey(
-  userId: string,
-  provider: string,
-): Promise<string | null> {
+export async function getDecryptedKey(userId: string, provider: string): Promise<string | null> {
   const res = await query(
     `select provider, enc_key, iv, auth_tag, key_masked
        from user_model_keys where user_id = $1 and provider = $2 limit 1;`,
