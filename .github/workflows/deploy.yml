@@ -1,11 +1,12 @@
-# 端到端流水线：质量门禁 → 构建镜像推送 TCR → SSH 部署到腾讯云（失败自动回滚）。
-# 镜像分发走腾讯云 TCR 个人版：CI push（首次全量，之后仅推变化的 app 层），
-# 服务器经内网 pull（免公网流量）。早期版本用 scp 直传镜像 tar，跨境线路
-# 极不稳定（曾 20 分钟 0 字节卡死），已废弃。
+# 端到端流水线：质量门禁 → 传源码包 → 服务器本地构建镜像并部署（失败自动回滚）。
+# 镜像分发历史方案与死因（2026-09 实测）：
+#   ① scp 直传镜像 tar —— 跨境 20 分钟 0 字节卡死
+#   ② push 腾讯云 TCR —— 层全部推完，最后的 manifest PUT 稳定挂起（带超时重试 5 次无果）
+# 终方案（Plan B）：CI 只传源码包（git archive，~0.5MB），docker build 全程在
+# 服务器本地完成（基础镜像经腾讯内网 mirror 拉取），零跨境镜像流量。
 # 触发：push/PR 到 main 均跑质量门禁；仅 push main 才触发部署 job。
-# Secrets（SSH 连接与镜像仓库凭证，业务密钥留在服务器 .env.production）：
+# Secrets（仅 SSH 连接凭证，业务密钥留在服务器 .env.production）：
 #   SSH_HOST / SSH_USER / SSH_KEY / SSH_PORT(可选,默认22) / DEPLOY_PATH
-#   TCR_USERNAME / TCR_PASSWORD（腾讯云容器镜像服务-个人版）
 name: deploy
 
 on:
@@ -55,7 +56,7 @@ jobs:
       - name: Build
         run: pnpm build
 
-  # ── job2：构建镜像并部署（仅 push main，质量门禁通过后）──
+  # ── job2：传源码到服务器，本地构建并部署（仅 push main，质量门禁通过后）──
   deploy:
     needs: quality
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -63,64 +64,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Set image tag
         id: meta
-        # 镜像推腾讯云 TCR 个人版（namespace/deepresearch），tag 用 git 短 sha
-        run: echo "tag=ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        # 服务器本地镜像，无 registry 前缀；tag 用 git 短 sha 便于回滚定位
+        run: echo "tag=deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Build image (standalone)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          tags: ${{ steps.meta.outputs.tag }}
-          load: true
-          # GitHub Actions 缓存加速 Docker layer
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Pack source
+        # git archive 只含 git 跟踪的文件（node_modules/.next/.env* 天然排除）
+        run: git archive --format=tar.gz -o source.tar.gz HEAD
 
-      - name: Login to TCR
-        run: echo "${{ secrets.TCR_PASSWORD }}" | docker login --username "${{ secrets.TCR_USERNAME }}" --password-stdin ccr.ccs.tencentyun.com
-
-      - name: Push image to TCR (带超时重试)
-        # 跨境推 TCR 偶发"层全部 Pushed 后 manifest PUT 停滞"（挂起而非失败）：
-        # 用 timeout 强制掐断单次尝试；层已存在时重试近乎零成本，只赌最后的 manifest
-        run: |
-          for i in 1 2 3 4 5; do
-            if timeout 300 docker push "${{ steps.meta.outputs.tag }}"; then
-              echo "push succeeded on attempt $i"
-              exit 0
-            fi
-            echo "push attempt $i failed/timed out, retry in 30s..."
-            sleep 30
-          done
-          echo "push failed after 5 attempts"
-          exit 1
-
-      - name: Copy deploy assets to server
+      - name: Upload source to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 只传编排文件与部署脚本（KB 级）；镜像经 TCR 分发，不再 scp
-          source: 'docker-compose.prod.yaml,scripts/deploy-remote.sh,scripts/health-check.sh,scripts/rollback.sh'
+          source: source.tar.gz
           target: ${{ secrets.DEPLOY_PATH }}
 
-      - name: Run remote deploy
+      - name: Build & deploy on server
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 远程执行部署脚本：docker pull → 起服务 → 健康检查 → 失败自动回滚
+          # 服务器端 docker build：首次需拉基础镜像 + pnpm install + next build，
+          # 可能 10 分钟+；后续 layer 缓存命中会明显变快。command_timeout 需放宽
+          command_timeout: 40m
+          # 远程执行：解包源码 → docker build → 起服务 → 健康检查 → 失败自动回滚
           script: |
             set -e
             cd "${{ secrets.DEPLOY_PATH }}"
-            chmod +x scripts/deploy-remote.sh scripts/health-check.sh scripts/rollback.sh
+            tar -xzf source.tar.gz
+            rm -f source.tar.gz
+            chmod +x scripts/*.sh
             bash scripts/deploy-remote.sh "${{ steps.meta.outputs.tag }}"

@@ -25,15 +25,14 @@ GitHub Actions（.github/workflows/deploy.yml）
   ├─ job quality：install --frozen-lockfile → lint → format:check
   │                → typecheck → test(占位) → build
   └─ job deploy（仅 push main，quality 通过后）
-       buildx 构建 standalone 镜像
-       （tag = ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:<git sha 前 12 位>）
-       → docker push 腾讯云 TCR 个人版（首次全量，之后仅推变化的 app 层）
-       → scp 上传 compose 文件 + 3 个脚本（KB 级）
-       → SSH 执行 deploy-remote.sh
+       git archive 打包源码（~0.5MB，git 跟踪文件）
+       → scp 上传源码包
+       → SSH：解包 → 服务器本地 docker build（基础镜像走腾讯内网 mirror）
+            → deploy-remote.sh（tag = deepresearch:<git sha 前 12 位>）
         │
         ▼
 腾讯云服务器 /opt/mini-deepresearch
-  docker pull（腾讯内网）→ 记录 .previous-image → compose up（PG/Redis 健康后才起 app）
+  docker build → 记录 .previous-image → compose up（PG/Redis 健康后才起 app）
   → 健康检查（30 次 × 3s，HTTP < 500 视为存活）
      ├─ 健康 → 发布成功，prune 清理
      └─ 失败 → 自动回滚 .previous-image → 复检 → 仍败则请求人工
@@ -41,11 +40,11 @@ GitHub Actions（.github/workflows/deploy.yml）
 
 **密钥分层**（本设计的核心原则）：
 
-| 层             | 存什么                                            | 在哪                                           |
-| -------------- | ------------------------------------------------- | ---------------------------------------------- |
-| GitHub Secrets | 仅 4~5 个 SSH 连接凭证（HOST/USER/KEY/PORT/PATH） | GitHub，CI 可读                                |
-| 业务密钥       | 模型 API key、DB 密码、JWT secret 等              | 只在服务器 `.env.production`                   |
-| 镜像           | 无任何密钥（运行期 env_file 注入）                | 腾讯云 TCR 个人版（CI push / 服务器内网 pull） |
+| 层             | 存什么                                            | 在哪                              |
+| -------------- | ------------------------------------------------- | --------------------------------- |
+| GitHub Secrets | 仅 4~5 个 SSH 连接凭证（HOST/USER/KEY/PORT/PATH） | GitHub，CI 可读                   |
+| 业务密钥       | 模型 API key、DB 密码、JWT secret 等              | 只在服务器 `.env.production`      |
+| 镜像           | 无任何密钥（运行期 env_file 注入）                | 服务器本地构建，不经任何 registry |
 
 ---
 
@@ -366,14 +365,14 @@ pm2 stop all && pm2 delete all && pm2 kill   # delete 防止开机 resurrect
 
 ## 11. 遗留事项与改进方向
 
-| 事项                            | 现状                                 | 建议                                                               |
-| ------------------------------- | ------------------------------------ | ------------------------------------------------------------------ |
-| CI 无 commitlint                | 本地钩子可 `--no-verify` 绕过        | quality job 加遍历 push commits 的校验                             |
-| SSH 暴露公网                    | auth.log 持续有爆破记录              | fail2ban / 安全组收窄来源                                          |
-| HTTP 明文                       | `DISABLE_SECURE_COOKIE=true`         | 域名 + HTTPS（Caddy 自动证书最省事）                               |
-| ~~镜像走 tar 传输（scp 卡死）~~ | **已解决**：改为腾讯云 TCR push/pull | 首次部署曾 scp 跨境传 tar 20 分钟 0 字节卡死，根治为 registry 分发 |
-| 回滚深度 = 1                    | `.previous-image` 只存一版           | 历史镜像都在 TCR，手动可回任意版                                   |
-| `pnpm install` 走官方源         | 国内极慢（实测 5 分钟+）             | `.npmrc` 固定 npmmirror                                            |
+| 事项                            | 现状                                 | 建议                                                                                                                                                                                                              |
+| ------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CI 无 commitlint                | 本地钩子可 `--no-verify` 绕过        | quality job 加遍历 push commits 的校验                                                                                                                                                                            |
+| SSH 暴露公网                    | auth.log 持续有爆破记录              | fail2ban / 安全组收窄来源                                                                                                                                                                                         |
+| HTTP 明文                       | `DISABLE_SECURE_COOKIE=true`         | 域名 + HTTPS（Caddy 自动证书最省事）                                                                                                                                                                              |
+| ~~镜像走 tar 传输（scp 卡死）~~ | **已解决（Plan B）**：服务器本地构建 | 两个镜像分发方案先后死于跨境线路：① scp 传 tar 20 分钟 0 字节；② TCR push 层全部推完但 manifest PUT 稳定挂起（timeout + 重试 5 次无果）。终态：CI 只传 ~0.5MB 源码包，docker build 全在服务器本地，零跨境镜像流量 |
+| 回滚深度 = 1                    | `.previous-image` 只存一版           | 历史镜像都在服务器本地，手动可回任意版                                                                                                                                                                            |
+| `pnpm install` 走官方源         | 国内极慢（实测 5 分钟+）             | `.npmrc` 固定 npmmirror                                                                                                                                                                                           |
 
 ---
 
