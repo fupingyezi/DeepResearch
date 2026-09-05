@@ -1,0 +1,46 @@
+# 构建上下文瘦身 + 防敏感文件进镜像层
+# 原则：只让构建真正需要的源码/配置进入上下文，密钥与运行期产物一律排除。
+
+# 依赖与构建产物（镜像内会重新安装/构建）
+node_modules
+.next
+out
+build
+
+# 版本控制与 IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# 环境与密钥（严禁进镜像层）
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+
+# 运行期生成的数据（不应打进镜像）
+.memory
+.sandbox
+extensions_config.json
+skills/custom
+
+# 评测数据与结果
+benchmarks/data
+benchmarks/results
+benchmarks/.memory-store
+
+# 日志与杂项
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+
+# 本仓库的 CI/文档/编排文件对镜像构建无用
+.github
+docs
+docker-compose.yaml
+docker-compose.prod.yaml
+Dockerfile
+.dockerignore

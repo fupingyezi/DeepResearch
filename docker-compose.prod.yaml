@@ -1,0 +1,111 @@
+# 生产编排：以 docker-compose.yaml 为基线派生，新增 app 服务。
+# 与开发版差异：
+#   - app 服务运行构建好的 standalone 镜像（tag 由部署脚本经 APP_IMAGE 注入）
+#   - 中间件凭证经 ${VAR} 插值取自 .env.production（部署脚本传 --env-file），
+#     本文件不写任何明文密码
+#   - 中间件端口只绑定 127.0.0.1：app 走 compose 内部网络访问，不对公网暴露；
+#     运维从服务器本地或 SSH 隧道直连
+#   - 依赖服务健康后才拉起 app，避免启动期连接失败
+#   - 运行期生成的数据（记忆/沙箱/扩展状态/自定义技能）挂卷持久化
+#     注：memory 与 extensions_config 的落盘位置由 app 的 environment 显式
+#     指到挂载目录内（代码默认值落在 ~ 与 cwd，不在卷上会丢数据）。
+
+services:
+  app:
+    # APP_IMAGE 由 scripts/deploy-remote.sh 设置为带 git sha 的 tag，
+    # 缺省回退到 :latest 便于手动起服务。
+    image: ${APP_IMAGE:-deepresearch:latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      # 长期记忆默认写 ~/.deer-flow，指到卷内目录防容器重建丢数据
+      DEERFLOW_DATA_DIR: /app/.memory
+      # MCP/skill 启用状态默认写 {cwd}/extensions_config.json，同样指到卷内
+      DEERFLOW_EXTENSIONS_CONFIG_PATH: /app/.data/extensions_config.json
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      # 长期记忆、沙箱工作区、扩展启用状态、自定义技能：容器重建后需保留
+      - app_memory:/app/.memory
+      - app_extensions:/app/.data
+      - app_sandbox:/app/.sandbox
+      - app_skills_custom:/app/skills/custom
+    healthcheck:
+      # slim 镜像无 curl，用 node 探无副作用公开路由；应用未就绪时非 0 退出
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/api/auth/setup-status',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: DeepResearch
+      POSTGRES_USER: ${POSTGRES_USER:-deepresearch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置（应来自 .env.production）}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # 仅本机可连；DATABASE_URL 中 app 走服务名 postgres 访问
+      - '127.0.0.1:5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-deepresearch} -d DeepResearch']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD 未设置（应来自 .env.production）}
+    environment:
+      # 仅供 healthcheck 容器内读取；$$ 转义交给 shell 展开
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD 未设置（应来自 .env.production）}
+    volumes:
+      - redis_data:/data
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-deepresearch}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD 未设置（应来自 .env.production）}
+    volumes:
+      - minio_data:/data
+    ports:
+      # API 与控制台均仅本机可连；app 走服务名 minio 访问
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  app_memory:
+  app_extensions:
+  app_sandbox:
+  app_skills_custom:

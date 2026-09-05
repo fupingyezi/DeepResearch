@@ -534,9 +534,7 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
     this.connected = false;
     if (!this.degradeWarned) {
       this.degradeWarned = true;
-      console.warn(
-        `${LOG} 降级为进程内协调（单进程正确，多进程尽力而为）。原因: ${reason}`,
-      );
+      console.warn(`${LOG} 降级为进程内协调（单进程正确，多进程尽力而为）。原因: ${reason}`);
     }
   }
 

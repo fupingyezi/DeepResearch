@@ -1,0 +1,109 @@
+# 端到端流水线：质量门禁 → 构建镜像 tar → SSH 部署到腾讯云（失败自动回滚）。
+# 触发：push/PR 到 main 均跑质量门禁；仅 push main 才触发部署 job。
+# Secrets（仅 SSH 连接凭证，业务密钥留在服务器 .env.production）：
+#   SSH_HOST / SSH_USER / SSH_KEY / SSH_PORT(可选,默认22) / DEPLOY_PATH
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支新提交取消旧运行，节省额度
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── job1：质量门禁（本地钩子同款校验，标准一致）──
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (占位)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  # ── job2：构建镜像并部署（仅 push main，质量门禁通过后）──
+  deploy:
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set image tag
+        id: meta
+        # 用 git 短 sha 作为版本 tag，便于回滚定位
+        run: echo "tag=deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image (standalone)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          tags: ${{ steps.meta.outputs.tag }}
+          load: true
+          # GitHub Actions 缓存加速 Docker layer
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image to tar.gz
+        run: |
+          docker save "${{ steps.meta.outputs.tag }}" | gzip > app-image.tar.gz
+          ls -lh app-image.tar.gz
+
+      - name: Copy image & deploy assets to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # 传输镜像产物、编排文件与部署脚本到服务器 DEPLOY_PATH
+          source: 'app-image.tar.gz,docker-compose.prod.yaml,scripts/deploy-remote.sh,scripts/health-check.sh,scripts/rollback.sh'
+          target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Run remote deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # 远程执行部署脚本：docker load → 起服务 → 健康检查 → 失败自动回滚
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            chmod +x scripts/deploy-remote.sh scripts/health-check.sh scripts/rollback.sh
+            bash scripts/deploy-remote.sh app-image.tar.gz "${{ steps.meta.outputs.tag }}"

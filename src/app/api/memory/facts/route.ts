@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
   }
 
   const rawCategory = typeof body?.category === 'string' ? body.category : 'context';
-  const category = (VALID_CATEGORIES.has(rawCategory as FactCategory)
-    ? rawCategory
-    : 'context') as FactCategory;
+  const category = (
+    VALID_CATEGORIES.has(rawCategory as FactCategory) ? rawCategory : 'context'
+  ) as FactCategory;
 
   const confidence =
     typeof body?.confidence === 'number' && body.confidence >= 0 && body.confidence <= 1
@@ -41,7 +41,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[memory] create fact error:', error);
     return NextResponse.json(
-      { message: 'Create fact failed!', error: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        message: 'Create fact failed!',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 },
     );
   }

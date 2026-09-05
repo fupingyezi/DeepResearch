@@ -49,7 +49,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
     console.error('[memory] update fact error:', error);
     return NextResponse.json(
-      { message: 'Update fact failed!', error: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        message: 'Update fact failed!',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 },
     );
   }
@@ -71,7 +74,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     }
     console.error('[memory] delete fact error:', error);
     return NextResponse.json(
-      { message: 'Delete fact failed!', error: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        message: 'Delete fact failed!',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 },
     );
   }

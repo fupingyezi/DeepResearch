@@ -36,6 +36,7 @@ export const useModelStore = create<ModelState>()(
  * 获取当前选中的模型预设
  */
 export function getCurrentModelPreset() {
-  const model = useModelStore((s) => s.model);
+  // 非 React 上下文不能调用 zustand hook（rules-of-hooks），用 getState() 直接读
+  const model = useModelStore.getState().model;
   return MODEL_PRESETS[model] || MODEL_PRESETS[DEFAULT_MODEL];
 }

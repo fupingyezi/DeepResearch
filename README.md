@@ -34,7 +34,7 @@
 | 检索       | Tavily（`@tavily/core`）                                                                    |
 | MCP        | `@langchain/mcp-adapters`                                                                   |
 | 状态管理   | Zustand + Immer                                                                             |
-| 校验       | Zod                                                                                          |
+| 校验       | Zod                                                                                         |
 | 导出       | jsPDF + html2canvas                                                                         |
 | 存储       | PostgreSQL、Redis、MinIO                                                                    |
 | 鉴权       | JWT（jsonwebtoken）、bcryptjs                                                               |
@@ -279,33 +279,33 @@ pnpm start
 
 ## 🔌 主要 API
 
-| 路由                                          | 方法         | 说明                                              |
-| --------------------------------------------- | ------------ | ------------------------------------------------- |
-| `/api/v3/chat/[threadId]`                     | POST         | ⭐ 主聊天入口，SSE 流。响应头 `X-Run-Id` 立即可读 |
-| `/api/threads`                                | POST/GET     | 创建线程；分页列出（`?limit=&offset=&status=`）   |
-| `/api/threads/[threadId]`                     | GET/DELETE   | 获取详情（可附带 checkpoint）/ 删除               |
-| `/api/threads/[threadId]/runs`                | GET          | 列出线程下的 run                                  |
-| `/api/threads/[threadId]/runs/[runId]/stream` | GET          | SSE 流回放                                        |
-| `/api/conversations/*`                        | GET/POST     | 获取所有会话 / 历史消息 / 更新会话                |
-| `/api/files/upload`                           | POST         | multipart 上传，存 MinIO 并解析内容               |
-| `/api/files/delete`                           | DELETE       | 从 MinIO 删除                                     |
-| `/api/memory`                                 | GET          | 查询记忆数据                                      |
-| `/api/memory/facts`                           | GET/POST     | 记忆事实列表 / 新建                               |
-| `/api/memory/facts/[id]`                      | PATCH/DELETE | 更新 / 删除记忆事实                               |
-| `/api/mcp`                                    | GET/POST     | MCP 服务器列表 / 新建                             |
-| `/api/mcp/[name]`                             | PATCH/DELETE | 修改 / 删除 MCP 服务器 + 启停切换                 |
-| `/api/skills`                                 | GET/POST     | 技能列表 / 新建自定义 skill                       |
-| `/api/skills/[name]`                          | PATCH        | 技能启用 / 禁用切换                               |
-| `/api/tools`                                  | GET          | 当前已绑定工具列表                                |
+| 路由                                          | 方法         | 说明                                                                 |
+| --------------------------------------------- | ------------ | -------------------------------------------------------------------- |
+| `/api/v3/chat/[threadId]`                     | POST         | ⭐ 主聊天入口，SSE 流。响应头 `X-Run-Id` 立即可读                    |
+| `/api/threads`                                | POST/GET     | 创建线程；分页列出（`?limit=&offset=&status=`）                      |
+| `/api/threads/[threadId]`                     | GET/DELETE   | 获取详情（可附带 checkpoint）/ 删除                                  |
+| `/api/threads/[threadId]/runs`                | GET          | 列出线程下的 run                                                     |
+| `/api/threads/[threadId]/runs/[runId]/stream` | GET          | SSE 流回放                                                           |
+| `/api/conversations/*`                        | GET/POST     | 获取所有会话 / 历史消息 / 更新会话                                   |
+| `/api/files/upload`                           | POST         | multipart 上传，存 MinIO 并解析内容                                  |
+| `/api/files/delete`                           | DELETE       | 从 MinIO 删除                                                        |
+| `/api/memory`                                 | GET          | 查询记忆数据                                                         |
+| `/api/memory/facts`                           | GET/POST     | 记忆事实列表 / 新建                                                  |
+| `/api/memory/facts/[id]`                      | PATCH/DELETE | 更新 / 删除记忆事实                                                  |
+| `/api/mcp`                                    | GET/POST     | MCP 服务器列表 / 新建                                                |
+| `/api/mcp/[name]`                             | PATCH/DELETE | 修改 / 删除 MCP 服务器 + 启停切换                                    |
+| `/api/skills`                                 | GET/POST     | 技能列表 / 新建自定义 skill                                          |
+| `/api/skills/[name]`                          | PATCH        | 技能启用 / 禁用切换                                                  |
+| `/api/tools`                                  | GET          | 当前已绑定工具列表                                                   |
 | `/api/sandbox/stats`                          | GET          | 沙箱运行态快照（容器/并发统计，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控） |
-| `/api/auth/register`                          | POST         | 用户注册                                          |
-| `/api/auth/login`                             | POST         | 用户登录（返回 JWT）                              |
-| `/api/auth/logout`                            | POST         | 登出                                              |
-| `/api/auth/me`                                | GET          | 当前用户信息                                      |
-| `/api/auth/change-password`                   | POST         | 修改密码                                          |
-| `/api/auth/initialize`                        | POST         | 初始化管理员账户                                  |
-| `/api/auth/setup-status`                      | GET          | 查询初始化状态                                    |
-| `/api/auth/oauth/[provider]`                  | GET          | OAuth 第三方登录回调                              |
+| `/api/auth/register`                          | POST         | 用户注册                                                             |
+| `/api/auth/login`                             | POST         | 用户登录（返回 JWT）                                                 |
+| `/api/auth/logout`                            | POST         | 登出                                                                 |
+| `/api/auth/me`                                | GET          | 当前用户信息                                                         |
+| `/api/auth/change-password`                   | POST         | 修改密码                                                             |
+| `/api/auth/initialize`                        | POST         | 初始化管理员账户                                                     |
+| `/api/auth/setup-status`                      | GET          | 查询初始化状态                                                       |
+| `/api/auth/oauth/[provider]`                  | GET          | OAuth 第三方登录回调                                                 |
 
 **主聊天请求体：**
 

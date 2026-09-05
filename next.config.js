@@ -6,6 +6,9 @@ const nextConfig = {
   // 性能优化
   swcMinify: true,
 
+  // 自托管容器化：产出 .next/standalone 精简运行时，供 Docker runner 阶段直接 `node server.js`
+  output: 'standalone',
+
   // 图片优化
   images: {
     domains: ['localhost'],

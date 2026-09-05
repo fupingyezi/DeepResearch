@@ -1,8 +1,8 @@
 import mammoth from 'mammoth';
-import minioClient from '@/lib/storage';
+import { getMinioClient } from '@/lib/storage';
 
 async function downloadFileFromMinio(bucket: string, key: string): Promise<Buffer> {
-  const stream = await minioClient.getObject(bucket, key);
+  const stream = await getMinioClient().getObject(bucket, key);
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
     chunks.push(chunk);

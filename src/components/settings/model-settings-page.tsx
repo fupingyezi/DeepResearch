@@ -146,7 +146,9 @@ export function ModelSettingsPage() {
             </span>
           </div>
         ) : (
-          <p className="text-[13px] text-[#9ca3af]">尚未选择，请在下方为模型配置 Key 并点击「设为当前」。</p>
+          <p className="text-[13px] text-[#9ca3af]">
+            尚未选择，请在下方为模型配置 Key 并点击「设为当前」。
+          </p>
         )}
       </section>
 
@@ -216,13 +218,11 @@ export function ModelSettingsPage() {
             {/* Key 输入 / 保存 / 清除 */}
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <KeyOutlined className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9ca3af]" />
+                <KeyOutlined className="absolute top-1/2 left-3 -translate-y-1/2 text-[#9ca3af]" />
                 <input
                   type="password"
                   value={drafts[provider] ?? ''}
-                  onChange={(e) =>
-                    setDrafts((prev) => ({ ...prev, [provider]: e.target.value }))
-                  }
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [provider]: e.target.value }))}
                   placeholder={masked ? '粘贴新 API Key 以覆盖' : '粘贴 API Key'}
                   className={`${inputClass} pl-9`}
                 />

@@ -73,22 +73,23 @@ const DATA_DIR = path.resolve(__dirname, '../data');
  * @returns 解析后的示例列表
  */
 export function loadLongMemDataset(variant: 's' | 'm' | 'oracle' = 's'): LongMemExample[] {
-  const filename = variant === 'm'
-    ? 'longmemeval_m_cleaned.json'
-    : variant === 'oracle'
-      ? 'longmemeval_oracle.json'
-      : 'longmemeval_s_cleaned.json';
+  const filename =
+    variant === 'm'
+      ? 'longmemeval_m_cleaned.json'
+      : variant === 'oracle'
+        ? 'longmemeval_oracle.json'
+        : 'longmemeval_s_cleaned.json';
 
   const filePath = path.join(DATA_DIR, filename);
 
   if (!fs.existsSync(filePath)) {
     throw new Error(
       `[LongMemEval] 数据集文件不存在: ${filePath}\n` +
-      `请运行以下命令下载:\n` +
-      `  mkdir -p benchmarks/data &&\n` +
-      `  cd benchmarks/data &&\n` +
-      `  curl -L -o longmemeval_s_cleaned.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json" &&\n` +
-      `  curl -L -o longmemeval_oracle.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json"`,
+        `请运行以下命令下载:\n` +
+        `  mkdir -p benchmarks/data &&\n` +
+        `  cd benchmarks/data &&\n` +
+        `  curl -L -o longmemeval_s_cleaned.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json" &&\n` +
+        `  curl -L -o longmemeval_oracle.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json"`,
     );
   }
 
@@ -144,9 +145,8 @@ function formatSessions(sessions: LongMemSessionMessage[][]): string {
       .map((msg) => {
         const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
         // 截断过长的消息以控制 token 消耗
-        const content = msg.content.length > 500
-          ? msg.content.slice(0, 500) + '... [truncated]'
-          : msg.content;
+        const content =
+          msg.content.length > 500 ? msg.content.slice(0, 500) + '... [truncated]' : msg.content;
         return `${roleLabel}: ${content}`;
       })
       .join('\n');

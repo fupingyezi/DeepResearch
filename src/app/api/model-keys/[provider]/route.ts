@@ -17,10 +17,7 @@ const VALID_PROVIDERS = new Set<string>(
   Object.values(MODEL_PRESETS).map((preset) => preset.provider),
 );
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { provider: string } },
-) {
+export async function DELETE(request: NextRequest, { params }: { params: { provider: string } }) {
   const user = await getCurrentUser(request);
   if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
