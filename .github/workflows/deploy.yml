@@ -85,16 +85,16 @@ jobs:
       - name: Login to TCR
         run: echo "${{ secrets.TCR_PASSWORD }}" | docker login --username "${{ secrets.TCR_USERNAME }}" --password-stdin ccr.ccs.tencentyun.com
 
-      - name: Push image to TCR (带重试)
-        # 跨境推 TCR 偶发"层全部 Pushed 后 manifest 停滞"：层已存在时重试近乎零成本，
-        # 每次重试只赌最后的 manifest PUT，多给几次机会
+      - name: Push image to TCR (带超时重试)
+        # 跨境推 TCR 偶发"层全部 Pushed 后 manifest PUT 停滞"（挂起而非失败）：
+        # 用 timeout 强制掐断单次尝试；层已存在时重试近乎零成本，只赌最后的 manifest
         run: |
           for i in 1 2 3 4 5; do
-            if docker push "${{ steps.meta.outputs.tag }}"; then
+            if timeout 300 docker push "${{ steps.meta.outputs.tag }}"; then
               echo "push succeeded on attempt $i"
               exit 0
             fi
-            echo "push attempt $i failed, retry in 30s..."
+            echo "push attempt $i failed/timed out, retry in 30s..."
             sleep 30
           done
           echo "push failed after 5 attempts"
