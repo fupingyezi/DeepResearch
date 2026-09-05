@@ -58,6 +58,31 @@ docker-compose up -d
 
 **注意：项目目前无单元测试。**
 
+**提交校验（husky，需先 `pnpm install` 激活）：**
+
+- `pre-commit` → lint-staged（staged 文件 eslint --fix + prettier --write）
+- `commit-msg` → commitlint（Conventional Commits；中文 subject 已放宽 case/长度，type-enum 见 `commitlint.config.mjs`）
+
+**CI 门禁与本地等价命令**（推 main 前建议本地全绿）：
+
+```bash
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm build
+```
+
+---
+
+## CI/CD 自动部署（push main 触发）
+
+流水线：`.github/workflows/deploy.yml`，目标腾讯云 Ubuntu 服务器（`/opt/mini-deepresearch`）。
+
+- **job quality**：lint / format:check / typecheck / build（PR 也跑）
+- **job deploy**（仅 push main）：`git archive` 打包源码（~0.5MB）→ scp → **服务器本地 `docker build`**（`scripts/deploy-remote.sh`）→ compose 起服务 → 健康检查（`/api/auth/setup-status`，30×3s，<500 即存活）→ 失败自动回滚 `.previous-image`
+- **镜像不在 CI 构建也不走 registry**：跨境 scp 镜像 tar 与推 TCR 均实测不可用（详见 `docs/cicd-notes.md` 踩坑实录）；服务器构建的依赖链路已配国内源（daemon registry mirror + Dockerfile 内 npmmirror）
+- **镜像 tag**：`deepresearch:<git sha 前 12 位>`，历史镜像保留在服务器本地，可手动回滚任意版本
+- **密钥分层**：GitHub Secrets 只放 4 个 SSH 凭证；业务密钥只在服务器 `DEPLOY_PATH/.env.production`（compose 经 `--env-file` 插值中间件凭证，`:?` 强制非空）；生产持久化卷见 `docker-compose.prod.yaml`（注意 memory/extensions 的落盘路径由 `environment:` 显式指到卷内）
+
+文档分工：`docs/deployment.md`（设计）→ `docs/deploy-runbook.md`（操作步骤）→ `docs/cicd-notes.md`（踩坑与排查方法论）。
+
 ---
 
 ## 环境变量
@@ -812,6 +837,10 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | `src/deerflow-harness/runtime/context.ts`                        | AsyncLocalStorage 上下文传播                                |
 | `src/store/chat-session-store.ts`                                | 前端聊天会话状态（sessionRuntimes 分桶并行）                |
 | `src/utils/chat/stream-chat-handler.ts`                          | 前端 SSE 流处理                                             |
+| `.github/workflows/deploy.yml`                                   | CI/CD 流水线（质量门禁 + 自动部署）                         |
+| `scripts/deploy-remote.sh`                                       | 服务器端部署（build→起服务→健康检查→失败回滚）              |
+| `docker-compose.prod.yaml`                                       | 生产编排（app + PG/Redis/MinIO，凭证 env 插值）             |
+| `docs/deploy-runbook.md` / `docs/cicd-notes.md`                  | 部署操作手册 / 技术沉淀（踩坑实录）                         |
 
 ---
 

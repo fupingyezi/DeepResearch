@@ -20,6 +20,7 @@
 - 🔒 **可插拔安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list/bash 等沙箱工具集。通过 `DEERFLOW_SANDBOX_BACKEND` 在 **local**（宿主文件系统直连）与 **docker**（每线程一个加固容器，内核级隔离）两种后端间切换。
 - 🐳 **Docker 沙箱 + 多对话并行编排**：docker 后端为每个 thread 分配长驻加固容器（`--cap-drop ALL` + `no-new-privileges` + 内存/CPU/pids 限额 + 非 root 降权），支持空闲回收、LRU 淘汰与容错重建；配套 **双层背压**（run 级并发闸门 + 容器级并发上限）与 Redis 跨进程协调（不可用时自动降级进程内），单机多进程 / PM2 场景可安全并行多对话。
 - 📊 **基准测试框架**：`benchmarks/` 内置评估系统 + 研究 QA 数据集，支持 Agent 质量打分与结果持久化。
+- 🚀 **CI/CD 自动部署**：push main 自动走「质量门禁（lint/format/typecheck/build）→ 打包源码 → 服务器本地构建镜像 → 起服务 → 健康检查失败自动回滚」全流程；本地配套 husky 提交校验（lint-staged + commitlint）。详见 [docs/deploy-runbook.md](./docs/deploy-runbook.md)。
 
 ## 🛠️ 技术栈
 
@@ -157,10 +158,20 @@ src/
 ├── middleware.ts                       # Next.js 中间件（鉴权守卫等）
 └── global.d.ts                         # 全局类型声明
 
-docker-compose.yaml                     # PostgreSQL + Redis + MinIO 一键启动
+docker-compose.yaml                     # PostgreSQL + Redis + MinIO 一键启动（开发）
 extensions_config.example.json          # MCP/Skills 扩展配置模板
 CLAUDE.md                               # 架构与协作指引（详细版）
 project.md                              # AI 协作代码规范
+
+# ── CI/CD 与生产部署 ──
+.github/workflows/deploy.yml            # 流水线：质量门禁 + 自动部署（仅 push main）
+Dockerfile                              # 多阶段 standalone 镜像构建（服务器本地执行）
+docker-compose.prod.yaml                # 生产编排（app + PG/Redis/MinIO，凭证走 .env.production 插值）
+.env.production.example                 # 生产环境变量模板
+.husky/ + commitlint.config.mjs         # 提交校验（lint-staged + Conventional Commits）
+scripts/deploy-remote.sh                # 服务器端部署（build→起服务→健康检查→失败回滚）
+scripts/health-check.sh                 # HTTP 探活
+scripts/rollback.sh                     # 回滚到上一版本镜像
 
 benchmarks/                             # 基准测试与评估框架
 ├── run.ts                              # 测试运行脚本
@@ -172,7 +183,10 @@ benchmarks/                             # 基准测试与评估框架
 
 docs/                                   # 设计文档
 ├── deerflow-alignment-plan.md          # DeerFlow 架构对齐计划
-└── sandbox-implementation.md           # 沙箱实现设计文档
+├── sandbox-implementation.md           # 沙箱实现设计文档
+├── deployment.md                       # 部署运维文档（系统设计视角）
+├── deploy-runbook.md                   # 部署操作手册（GitHub 端 + 服务器端步骤）
+└── cicd-notes.md                       # 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）
 
 skills/                                 # 内置技能定义（7 种）
 ├── deep-research/SKILL.md              # 深度研究（核心技能）
@@ -276,6 +290,26 @@ pnpm dev
 pnpm build
 pnpm start
 ```
+
+## 🚀 生产部署（CI/CD 自动化）
+
+push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ubuntu 服务器）：
+
+```
+本地提交（husky 校验：lint-staged + commitlint）
+  → job quality：lint / format:check / typecheck / build
+  → job deploy：git archive 打包源码(~0.5MB) → scp → 服务器本地 docker build
+      → compose 起服务 → 健康检查 → 失败自动回滚上一版本
+```
+
+**镜像在服务器本地构建**（不走镜像仓库）——跨境 scp 镜像 tar 与推 TCR 均实测不可用，
+详见 [cicd-notes.md](./docs/cicd-notes.md) 踩坑实录。首次配置只需 4 个 GitHub Secrets
+（SSH 凭证）+ 服务器上放一份 `.env.production`，具体步骤见
+[deploy-runbook.md](./docs/deploy-runbook.md)。
+
+三份文档分工：[deployment.md](./docs/deployment.md)（系统怎么设计）→
+[deploy-runbook.md](./docs/deploy-runbook.md)（我具体要做哪些操作）→
+[cicd-notes.md](./docs/cicd-notes.md)（为什么 + 坑在哪 + 怎么排）。
 
 ## 🔌 主要 API
 
@@ -429,6 +463,19 @@ JSON 与搜索结果带最大高度与细滚动条，不会撑破气泡。
 - 默认 opt-in（关闭），启用会产生额外 token 消耗
 
 ## 🛠️ 开发流程
+
+### 提交规范
+
+提交时自动过两道钩子：`pre-commit`（lint-staged 对暂存文件跑 eslint --fix + prettier）与
+`commit-msg`（commitlint 校验 Conventional Commits，中文 subject 已放宽长度/大小写）：
+
+```bash
+git commit -m "feat: 添加xxx"      # type ∈ feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert
+```
+
+> 新 clone 后需先 `pnpm install` 激活钩子（husky 经 prepare 脚本安装）。
+
+### 常用命令
 
 ```bash
 # 代码检查

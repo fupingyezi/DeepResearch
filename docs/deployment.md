@@ -134,18 +134,18 @@ bash scripts/rollback.sh
 
 ## 九、涉及文件清单
 
-| 文件                           | 作用                                          |
-| ------------------------------ | --------------------------------------------- |
-| `.github/workflows/deploy.yml` | CI/CD 主流水线                                |
-| `.husky/pre-commit`            | 提交前跑 lint-staged                          |
-| `.husky/commit-msg`            | 校验提交信息规范                              |
-| `commitlint.config.mjs`        | commit message 规则                           |
-| `Dockerfile`                   | 多阶段 standalone 镜像构建                    |
-| `.dockerignore`                | 排除密钥与运行期产物                          |
-| `docker-compose.prod.yaml`     | 生产编排（app + PG/Redis/MinIO）              |
-| `.env.production.example`      | 生产环境变量模板                              |
-| `docs/deploy-runbook.md`       | 部署操作手册（GitHub 端 + 服务器端具体步骤）  |
-| `docs/cicd-notes.md`           | 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）  |
-| `scripts/deploy-remote.sh`     | 服务器端部署（load→起服务→健康检查→失败回滚） |
-| `scripts/health-check.sh`      | HTTP 探活                                     |
-| `scripts/rollback.sh`          | 回滚到上一版本镜像                            |
+| 文件                           | 作用                                           |
+| ------------------------------ | ---------------------------------------------- |
+| `.github/workflows/deploy.yml` | CI/CD 主流水线                                 |
+| `.husky/pre-commit`            | 提交前跑 lint-staged                           |
+| `.husky/commit-msg`            | 校验提交信息规范                               |
+| `commitlint.config.mjs`        | commit message 规则                            |
+| `Dockerfile`                   | 多阶段 standalone 镜像构建                     |
+| `.dockerignore`                | 排除密钥与运行期产物                           |
+| `docker-compose.prod.yaml`     | 生产编排（app + PG/Redis/MinIO）               |
+| `.env.production.example`      | 生产环境变量模板                               |
+| `docs/deploy-runbook.md`       | 部署操作手册（GitHub 端 + 服务器端具体步骤）   |
+| `docs/cicd-notes.md`           | 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）   |
+| `scripts/deploy-remote.sh`     | 服务器端部署（build→起服务→健康检查→失败回滚） |
+| `scripts/health-check.sh`      | HTTP 探活                                      |
+| `scripts/rollback.sh`          | 回滚到上一版本镜像                             |

@@ -240,21 +240,25 @@ MINIO_ROOT_USER/PASSWORD ↔ MINIO_ACCESS_KEY/SECRET_KEY
 
 ---
 
-## 7. 服务器初始化的两个国内网络必配项
+## 7. 服务器初始化与构建链路的国内网络必配项
 
 ```bash
 # ① 装 Docker 本身走 Aliyun 镜像源（download.docker.com 国内超时）
 sudo sh get-docker.sh --mirror Aliyun
 
-# ② Docker Hub 拉取走腾讯云内网镜像（postgres/redis/minio 三个基础镜像必拉）
+# ② Docker Hub 拉取走腾讯云内网镜像（postgres/redis/minio/node 基础镜像必拉）
 sudo tee /etc/docker/daemon.json <<'EOF'
 { "registry-mirrors": ["https://mirror.ccs.tencentyun.com"] }
 EOF
 sudo systemctl restart docker
 ```
 
-②别省：app 镜像虽是 CI 传 tar 的（不走 Hub），但 compose 的中间件镜像默认从
-Docker Hub 拉，不配加速国内基本卡死。
+③ **Dockerfile 内 `pnpm install` 走 npmmirror**（`ENV npm_config_registry=https://registry.npmmirror.com`）：
+Plan B 把 `pnpm install` 挪到服务器上执行后，官方 npm 源在境内几乎不可用——
+镜像构建链路里的包管理器源和 Docker daemon 的 registry mirror 是两回事，各配各的。
+
+> 境内服务器跑构建的完整清单：docker 安装源 + daemon registry mirror + 包管理器源，
+> 三个都要对，缺一个就在某个环节卡死。
 
 ---
 
