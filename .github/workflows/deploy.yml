@@ -85,8 +85,20 @@ jobs:
       - name: Login to TCR
         run: echo "${{ secrets.TCR_PASSWORD }}" | docker login --username "${{ secrets.TCR_USERNAME }}" --password-stdin ccr.ccs.tencentyun.com
 
-      - name: Push image to TCR
-        run: docker push "${{ steps.meta.outputs.tag }}"
+      - name: Push image to TCR (带重试)
+        # 跨境推 TCR 偶发"层全部 Pushed 后 manifest 停滞"：层已存在时重试近乎零成本，
+        # 每次重试只赌最后的 manifest PUT，多给几次机会
+        run: |
+          for i in 1 2 3 4 5; do
+            if docker push "${{ steps.meta.outputs.tag }}"; then
+              echo "push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "push attempt $i failed, retry in 30s..."
+            sleep 30
+          done
+          echo "push failed after 5 attempts"
+          exit 1
 
       - name: Copy deploy assets to server
         uses: appleboy/scp-action@v0.1.7
