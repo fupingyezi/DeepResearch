@@ -7,6 +7,8 @@ FROM node:22-slim AS deps
 WORKDIR /app
 # corepack 固定 pnpm，避免全局安装带来的版本漂移
 RUN corepack enable && corepack prepare pnpm@11 --activate
+# 国内服务器构建：npm 走阿里镜像源，官方源在境内几乎不可用
+ENV npm_config_registry=https://registry.npmmirror.com
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
