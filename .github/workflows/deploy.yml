@@ -1,7 +1,11 @@
-# 端到端流水线：质量门禁 → 构建镜像 tar → SSH 部署到腾讯云（失败自动回滚）。
+# 端到端流水线：质量门禁 → 构建镜像推送 TCR → SSH 部署到腾讯云（失败自动回滚）。
+# 镜像分发走腾讯云 TCR 个人版：CI push（首次全量，之后仅推变化的 app 层），
+# 服务器经内网 pull（免公网流量）。早期版本用 scp 直传镜像 tar，跨境线路
+# 极不稳定（曾 20 分钟 0 字节卡死），已废弃。
 # 触发：push/PR 到 main 均跑质量门禁；仅 push main 才触发部署 job。
-# Secrets（仅 SSH 连接凭证，业务密钥留在服务器 .env.production）：
+# Secrets（SSH 连接与镜像仓库凭证，业务密钥留在服务器 .env.production）：
 #   SSH_HOST / SSH_USER / SSH_KEY / SSH_PORT(可选,默认22) / DEPLOY_PATH
+#   TCR_USERNAME / TCR_PASSWORD（腾讯云容器镜像服务-个人版）
 name: deploy
 
 on:
@@ -64,8 +68,8 @@ jobs:
 
       - name: Set image tag
         id: meta
-        # 用 git 短 sha 作为版本 tag，便于回滚定位
-        run: echo "tag=deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        # 镜像推腾讯云 TCR 个人版（namespace/deepresearch），tag 用 git 短 sha
+        run: echo "tag=ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Build image (standalone)
         uses: docker/build-push-action@v6
@@ -78,20 +82,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Save image to tar.gz
-        run: |
-          docker save "${{ steps.meta.outputs.tag }}" | gzip > app-image.tar.gz
-          ls -lh app-image.tar.gz
+      - name: Login to TCR
+        run: echo "${{ secrets.TCR_PASSWORD }}" | docker login --username "${{ secrets.TCR_USERNAME }}" --password-stdin ccr.ccs.tencentyun.com
 
-      - name: Copy image & deploy assets to server
+      - name: Push image to TCR
+        run: docker push "${{ steps.meta.outputs.tag }}"
+
+      - name: Copy deploy assets to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 传输镜像产物、编排文件与部署脚本到服务器 DEPLOY_PATH
-          source: 'app-image.tar.gz,docker-compose.prod.yaml,scripts/deploy-remote.sh,scripts/health-check.sh,scripts/rollback.sh'
+          # 只传编排文件与部署脚本（KB 级）；镜像经 TCR 分发，不再 scp
+          source: 'docker-compose.prod.yaml,scripts/deploy-remote.sh,scripts/health-check.sh,scripts/rollback.sh'
           target: ${{ secrets.DEPLOY_PATH }}
 
       - name: Run remote deploy
@@ -101,9 +106,9 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 远程执行部署脚本：docker load → 起服务 → 健康检查 → 失败自动回滚
+          # 远程执行部署脚本：docker pull → 起服务 → 健康检查 → 失败自动回滚
           script: |
             set -e
             cd "${{ secrets.DEPLOY_PATH }}"
             chmod +x scripts/deploy-remote.sh scripts/health-check.sh scripts/rollback.sh
-            bash scripts/deploy-remote.sh app-image.tar.gz "${{ steps.meta.outputs.tag }}"
+            bash scripts/deploy-remote.sh "${{ steps.meta.outputs.tag }}"

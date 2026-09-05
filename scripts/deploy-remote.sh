@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # 服务器端部署脚本（由 CI 经 SSH 调用，也可手动执行）。
-# 职责：加载新镜像 tar → 记录当前版本为 previous → 用新镜像起 app →
+# 职责：从 TCR pull 新镜像 → 记录当前版本为 previous → 用新镜像起 app →
 #       健康检查失败则自动回滚到 previous 并保留失败日志。
 # 每一步显式判退出码并输出上下文，杜绝“半启动”状态。
 #
 # 约定的参数：
-#   $1  新镜像 tar.gz 的路径（CI scp 上来的产物）
-#   $2  新镜像完整 tag（如 deepresearch:<git_sha>）
+#   $1  新镜像完整 tag（如 ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:<git_sha>）
+# 前置条件：服务器已 docker login ccr.ccs.tencentyun.com（凭证落盘后 pull 免密）。
 # 工作目录须为 DEPLOY_PATH（含 docker-compose.prod.yaml 与 .env.production）。
 
 set -Eeuo pipefail
@@ -15,8 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="docker-compose.prod.yaml"
 PREV_IMAGE_FILE=".previous-image"
 
-IMAGE_TAR="${1:?用法: deploy-remote.sh <image.tar.gz> <image:tag>}"
-NEW_IMAGE="${2:?缺少新镜像 tag 参数}"
+NEW_IMAGE="${1:?用法: deploy-remote.sh <image:tag>}"
 
 log()  { echo "[deploy] $*"; }
 fail() { echo "[deploy][ERROR] $*" >&2; exit 1; }
@@ -24,7 +23,6 @@ fail() { echo "[deploy][ERROR] $*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || fail "未找到 docker，请先在服务器安装 docker"
 [ -f "$COMPOSE_FILE" ]   || fail "当前目录缺少 $COMPOSE_FILE（请在 DEPLOY_PATH 下执行）"
 [ -f ".env.production" ] || fail "当前目录缺少 .env.production（业务密钥文件）"
-[ -f "$IMAGE_TAR" ]      || fail "镜像产物不存在: $IMAGE_TAR"
 
 # --env-file：compose 文件中的 ${POSTGRES_PASSWORD} 等中间件凭证插值自 .env.production
 compose() { docker compose --env-file .env.production -f "$COMPOSE_FILE" "$@"; }
@@ -38,8 +36,8 @@ else
   log "未检测到运行中的 app（首次部署），无 previous 版本"
 fi
 
-log "加载新镜像: $IMAGE_TAR"
-gzip -dc "$IMAGE_TAR" | docker load || fail "docker load 失败"
+log "拉取新镜像: $NEW_IMAGE"
+docker pull "$NEW_IMAGE" || fail "docker pull 失败（确认服务器已 docker login ccr.ccs.tencentyun.com）"
 
 log "以新镜像启动 app: $NEW_IMAGE"
 export APP_IMAGE="$NEW_IMAGE"

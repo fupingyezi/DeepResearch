@@ -20,15 +20,17 @@
 ### 2. 配置 Secrets
 
 仓库页面 → `Settings → Secrets and variables → Actions → New repository secret`，
-共 5 个：
+共 6 个（`SSH_PORT` 可选第 7 个）：
 
-| Secret        | 值                                         | 说明                          |
-| ------------- | ------------------------------------------ | ----------------------------- |
-| `SSH_HOST`    | `<IP>`                                     | 服务器公网 IP                 |
-| `SSH_USER`    | `ubuntu`（或你的登录用户）                 | 须能免 sudo 用 docker（见下） |
-| `SSH_KEY`     | 私钥**全文**（含首尾 `-----BEGIN/END...`） | 部署专用，不要复用个人密钥    |
-| `SSH_PORT`    | `22`                                       | 改过 SSH 端口才需要配         |
-| `DEPLOY_PATH` | `/opt/mini-deepresearch`                   | 与服务器目录一致              |
+| Secret         | 值                                         | 说明                          |
+| -------------- | ------------------------------------------ | ----------------------------- |
+| `SSH_HOST`     | `<IP>`                                     | 服务器公网 IP                 |
+| `SSH_USER`     | `ubuntu`（或你的登录用户）                 | 须能免 sudo 用 docker（见下） |
+| `SSH_KEY`      | 私钥**全文**（含首尾 `-----BEGIN/END...`） | 部署专用，不要复用个人密钥    |
+| `SSH_PORT`     | `22`                                       | 改过 SSH 端口才需要配         |
+| `DEPLOY_PATH`  | `/opt/mini-deepresearch`                   | 与服务器目录一致              |
+| `TCR_USERNAME` | `100045456818`（腾讯云账号 APPID）         | 容器镜像服务-个人版的用户名   |
+| `TCR_PASSWORD` | 开通个人版时自设的 registry 密码           | 别和腾讯云登录密码弄混        |
 
 生成部署专用密钥（在你本地电脑执行）：
 
@@ -107,7 +109,16 @@ cd /opt/mini-deepresearch && vim .env.production
 > `DISABLE_SECURE_COOKIE=true` 先保留（HTTP 部署必须，否则登录不生效），
 > 上 HTTPS 后删除该行。
 
-### 4. 安全组 / 防火墙
+### 4. 登录腾讯云镜像仓库（TCR）
+
+CI 把镜像推到 TCR 个人版，服务器从这里拉（内网速度快、免公网流量）：
+
+```bash
+docker login ccr.ccs.tencentyun.com --username=100045456818
+# 输入开通个人版时设置的 registry 密码；凭证落盘后以后 pull 免密
+```
+
+### 5. 安全组 / 防火墙
 
 腾讯云控制台 → 服务器 → 防火墙/安全组，只放行：
 
@@ -117,7 +128,7 @@ cd /opt/mini-deepresearch && vim .env.production
 **不要放行** `5432 / 6379 / 9000 / 9001`——生产编排里 PG/Redis/MinIO 只绑定
 `127.0.0.1`，公网本来就连不上，安全组也别开洞。
 
-### 5. 自检
+### 6. 自检
 
 ```bash
 cd /opt/mini-deepresearch && ls        # 应有 .env.production
@@ -167,8 +178,8 @@ git push origin main        # 推上去即自动发布
 cd /opt/mini-deepresearch && bash scripts/rollback.sh
 
 # 回滚到任意历史版本（镜像按 git sha 打 tag，都留着）
-docker images 'deepresearch:*'
-APP_IMAGE=deepresearch:<sha> docker compose --env-file .env.production \
+docker images 'ccr.ccs.tencentyun.com/deepresearch-yezi/*'
+APP_IMAGE=ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:<sha> docker compose --env-file .env.production \
   -f docker-compose.prod.yaml up -d app
 ```
 

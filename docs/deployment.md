@@ -12,11 +12,11 @@
         ▼ git push main
 GitHub Actions（.github/workflows/deploy.yml）
   ├─ job quality：pnpm install → lint → format:check → typecheck → test(占位) → build
-  └─ job deploy（仅 push main）：docker build(standalone) → docker save|gzip → scp → SSH 执行 deploy-remote.sh
+  └─ job deploy（仅 push main）：docker build(standalone) → push 腾讯云 TCR → scp 小文件 → SSH 执行 deploy-remote.sh
         │
         ▼
 腾讯云服务器
-  docker load → 记录 previous → docker compose up app → 健康检查
+  docker pull（内网）→ 记录 previous → docker compose up app → 健康检查
     ├─ 健康 → 发布成功
     └─ 不健康 → 自动回滚到 previous 镜像
 ```
@@ -25,15 +25,17 @@ GitHub Actions（.github/workflows/deploy.yml）
 
 ## 二、GitHub Secrets 配置
 
-在仓库 `Settings → Secrets and variables → Actions` 添加以下 Secrets（仅 SSH 连接凭证，**不含任何业务密钥**）：
+在仓库 `Settings → Secrets and variables → Actions` 添加以下 Secrets（SSH 连接凭证与镜像仓库凭证，**不含任何业务密钥**）：
 
-| Secret        | 说明                               | 示例                      |
-| ------------- | ---------------------------------- | ------------------------- |
-| `SSH_HOST`    | 腾讯云服务器公网 IP 或域名         | `123.45.67.89`            |
-| `SSH_USER`    | SSH 登录用户名                     | `ubuntu` / `root`         |
-| `SSH_KEY`     | SSH 私钥全文（PEM 格式，含首尾行） | `-----BEGIN ... KEY-----` |
-| `SSH_PORT`    | SSH 端口（可选，默认 22）          | `22`                      |
-| `DEPLOY_PATH` | 服务器上的部署目录（绝对路径）     | `/opt/mini-deepresearch`  |
+| Secret         | 说明                                                           | 示例                      |
+| -------------- | -------------------------------------------------------------- | ------------------------- |
+| `SSH_HOST`     | 腾讯云服务器公网 IP 或域名                                     | `123.45.67.89`            |
+| `SSH_USER`     | SSH 登录用户名                                                 | `ubuntu` / `root`         |
+| `SSH_KEY`      | SSH 私钥全文（PEM 格式，含首尾行）                             | `-----BEGIN ... KEY-----` |
+| `SSH_PORT`     | SSH 端口（可选，默认 22）                                      | `22`                      |
+| `DEPLOY_PATH`  | 服务器上的部署目录（绝对路径）                                 | `/opt/mini-deepresearch`  |
+| `TCR_USERNAME` | 腾讯云 TCR 个人版用户名（控制台「容器镜像服务-个人版」页显示） | `100045456818`            |
+| `TCR_PASSWORD` | TCR registry 密码（开通个人版时自行设置）                      | `（自设的密码）`          |
 
 > 生成部署专用密钥：`ssh-keygen -t ed25519 -C "deploy@mini-deepresearch"`，公钥追加到服务器 `~/.ssh/authorized_keys`，私钥全文填入 `SSH_KEY`。
 
@@ -76,17 +78,24 @@ GitHub Actions（.github/workflows/deploy.yml）
 
    > `.env.production` 只存在于服务器本地，不进仓库、不进镜像层（已被 `.gitignore` 与 `.dockerignore` 排除）。
 
+4. **登录腾讯云镜像仓库（TCR 个人版）**：
+
+   ```bash
+   docker login ccr.ccs.tencentyun.com --username=<TCR_USERNAME>
+   # 输入开通个人版时设置的 registry 密码；凭证落盘后 pull 免密
+   ```
+
 ## 四、首次部署
 
-配置好 Secrets 与服务器后，向 `main` 推送任意提交即触发全流程。首次部署时服务器无运行中的 app，脚本会跳过 previous 记录直接启动。
+配置好 Secrets 与服务器后，向 `main` 推送任意提交即触发全流程。首次部署时服务器无运行中的 app，脚本会跳过 previous 记录直接启动；首次 push 镜像为全量层，之后每次仅推变化的 app 层。
 
 也可在服务器手动执行（用于调试）：
 
 ```bash
 cd /opt/mini-deepresearch
-# 假设已通过 scp 拿到 app-image.tar.gz 与脚本、compose 文件
+# 前提：CI 已跑过 push（镜像在 TCR），compose 文件与脚本已就位
 chmod +x scripts/*.sh
-bash scripts/deploy-remote.sh app-image.tar.gz deepresearch:<git_sha>
+bash scripts/deploy-remote.sh ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:<git_sha>
 ```
 
 部署成功后访问 `http://<SSH_HOST>:3000`。
@@ -115,7 +124,7 @@ bash scripts/rollback.sh
 
 ## 七、版本机制
 
-- 镜像 tag 使用 git 短 sha（前 12 位）：`deepresearch:<git_sha>`。
+- 镜像 tag 使用 git 短 sha（前 12 位）：`ccr.ccs.tencentyun.com/deepresearch-yezi/deepresearch:<git_sha>`。
 - 每次部署前，脚本读取当前运行的 app 镜像并记入 `.previous-image`，作为回滚目标。
 - 部署成功后执行 `docker image prune -f` 清理 dangling 镜像，但保留带 tag 的历史镜像与 previous 版本。
 
@@ -129,7 +138,7 @@ bash scripts/rollback.sh
 | 本机/外部直连中间件失败   | 生产编排中间件端口仅绑定 `127.0.0.1`，公网不可达。服务器上 `docker compose -f docker-compose.prod.yaml exec postgres psql -U deepresearch -d DeepResearch`，或从本地 `ssh -L 5432:127.0.0.1:5432 ...` 隧道访问。 |
 | 健康检查一直失败          | 应用启动慢或端口不对。加大 `HEALTH_RETRIES`；确认容器 `PORT=3000` 且 compose 端口映射正确。                                                                                                                      |
 | CI 部署卡在 scp/ssh       | Secrets 配置错误（HOST/USER/KEY/PORT），或服务器防火墙未放行 SSH 端口。                                                                                                                                          |
-| `docker load` 失败        | 镜像 tar 传输不完整或磁盘空间不足。`df -h` 查空间，重跑流水线。                                                                                                                                                  |
+| CI push/pull TCR 失败     | `TCR_USERNAME`/`TCR_PASSWORD` 错误（个人版用户名为账号 APPID）；服务器 pull 失败先 `docker login ccr.ccs.tencentyun.com`；若提示 repository 不存在，去控制台在命名空间下新建仓库 `deepresearch`。                |
 | CI quality job 失败       | 本地先跑 `pnpm lint && pnpm format:check && pnpm typecheck && pnpm build` 复现并修复。                                                                                                                           |
 | commit 被拒（commit-msg） | 提交信息不符合 Conventional Commits。格式：`type(scope): 描述`，type 见 commitlint.config.mjs。                                                                                                                  |
 
@@ -146,6 +155,7 @@ bash scripts/rollback.sh
 | `docker-compose.prod.yaml`     | 生产编排（app + PG/Redis/MinIO）              |
 | `.env.production.example`      | 生产环境变量模板                              |
 | `docs/deploy-runbook.md`       | 部署操作手册（GitHub 端 + 服务器端具体步骤）  |
+| `docs/cicd-notes.md`           | 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）  |
 | `scripts/deploy-remote.sh`     | 服务器端部署（load→起服务→健康检查→失败回滚） |
 | `scripts/health-check.sh`      | HTTP 探活                                     |
 | `scripts/rollback.sh`          | 回滚到上一版本镜像                            |
