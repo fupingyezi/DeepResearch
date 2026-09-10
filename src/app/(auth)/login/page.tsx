@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
 import { useAuth } from '@/runtime/context/auth-provider';
+import type { UserResponse } from '@deerflow-harness/auth/types';
 import {
   AuthRequestError,
+  demoLogin,
   fetchSetupStatus,
   login as loginRequest,
   register as registerRequest,
@@ -22,24 +24,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // 服务器配置了体验账号（AUTH_DEMO_EMAIL/PASSWORD）时为该邮箱，否则 null
+  const [demoEmail, setDemoEmail] = useState<string | null>(null);
 
   // 无 admin 时引导到首启设置页
   useEffect(() => {
-    fetchSetupStatus().then((needsSetup) => {
-      if (needsSetup) router.replace('/setup');
+    fetchSetupStatus().then((status) => {
+      if (status.needs_setup) router.replace('/setup');
+      if (status.demo_login.enabled) setDemoEmail(status.demo_login.email);
     });
   }, [router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const runLogin = async (action: () => Promise<UserResponse>) => {
     setError('');
     setLoading(true);
     try {
-      const user =
-        mode === 'login'
-          ? await loginRequest(email, password)
-          : await registerRequest(email, password);
-      applyUser(user);
+      applyUser(await action());
       // 硬导航整页跳转：确保 HttpOnly cookie 已写入、middleware 重新放行 /，
       // 规避软导航命中 Router 缓存的"未登录重定向"导致 URL 停留 /login。
       window.location.assign('/');
@@ -48,6 +48,13 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runLogin(() =>
+      mode === 'login' ? loginRequest(email, password) : registerRequest(email, password),
+    );
   };
 
   return (
@@ -90,6 +97,24 @@ export default function LoginPage() {
             {loading ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
           </button>
         </form>
+
+        {demoEmail !== null && (
+          <>
+            <div className="mt-5 flex items-center gap-3" aria-hidden>
+              <span className="h-px flex-1 bg-[#e5e7eb]" />
+              <span className="text-[12px] text-[#9ca3af]">或</span>
+              <span className="h-px flex-1 bg-[#e5e7eb]" />
+            </div>
+            <button
+              type="button"
+              onClick={() => runLogin(demoLogin)}
+              disabled={loading}
+              className="mt-3 h-11 w-full rounded-xl border border-[#14b8a6] bg-white text-[14px] font-medium text-[#0f766e] transition-all hover:bg-[#f0fdfa] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {demoEmail ? `一键体验（${demoEmail}）` : '一键体验登录'}
+            </button>
+          </>
+        )}
 
         <div className="mt-5 text-center text-[13px] text-[#9ca3af]">
           {mode === 'login' ? (

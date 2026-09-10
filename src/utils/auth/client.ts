@@ -34,6 +34,11 @@ export async function login(email: string, password: string): Promise<UserRespon
   return postJson<UserResponse>('/api/auth/login', { email, password });
 }
 
+/** 体验账号一键登录：凭证在服务器 env，前端只发空请求体 */
+export async function demoLogin(): Promise<UserResponse> {
+  return postJson<UserResponse>('/api/auth/demo-login', {});
+}
+
 export async function register(email: string, password: string): Promise<UserResponse> {
   return postJson<UserResponse>('/api/auth/register', { email, password });
 }
@@ -64,9 +69,27 @@ export async function fetchMe(): Promise<UserResponse | null> {
   return (await res.json()) as UserResponse;
 }
 
-export async function fetchSetupStatus(): Promise<boolean> {
+export interface SetupStatus {
+  needs_setup: boolean;
+  /** 体验账号入口：enabled 时登录页显示"一键体验"按钮 */
+  demo_login: {
+    enabled: boolean;
+    /** 展示用邮箱；未配置时为 null（密码永远不下发） */
+    email: string | null;
+  };
+}
+
+export async function fetchSetupStatus(): Promise<SetupStatus> {
   const res = await fetch('/api/auth/setup-status', { credentials: 'include' });
-  if (!res.ok) return false;
-  const data = (await res.json()) as { needs_setup?: boolean };
-  return Boolean(data.needs_setup);
+  if (!res.ok) {
+    return { needs_setup: false, demo_login: { enabled: false, email: null } };
+  }
+  const data = (await res.json()) as Partial<SetupStatus>;
+  return {
+    needs_setup: Boolean(data.needs_setup),
+    demo_login: {
+      enabled: Boolean(data.demo_login?.enabled),
+      email: typeof data.demo_login?.email === 'string' ? data.demo_login.email : null,
+    },
+  };
 }

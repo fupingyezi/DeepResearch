@@ -107,6 +107,11 @@ cd /opt/mini-deepresearch && vim .env.production
 > `DISABLE_SECURE_COOKIE=true` 先保留（HTTP 部署必须，否则登录不生效），
 > 上 HTTPS 后删除该行。
 
+可选——体验账号（登录页"一键体验"入口）：先在应用里注册好账号（如 `test@qq.com`），
+再在 `.env.production` 加 `AUTH_DEMO_EMAIL` / `AUTH_DEMO_PASSWORD`（与账号同一对凭证）
+并 `docker compose --env-file .env.production -f docker-compose.prod.yaml up -d` 重启；
+删除两行即关闭入口。密码只存在服务器 env，不会进前端代码。
+
 ### 4. 安全组 / 防火墙
 
 腾讯云控制台 → 服务器 → 防火墙/安全组，只放行：
