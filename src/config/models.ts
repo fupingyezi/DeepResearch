@@ -45,7 +45,6 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     provider: 'deepseek',
     modelName: 'deepseek-reasoner',
     description: 'DeepSeek 推理模型（deepseek-reasoner），适合复杂推理',
-    isBeta: true,
   },
   'openai-4o': {
     key: 'openai-4o',
