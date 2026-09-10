@@ -60,11 +60,13 @@ function ensureMemoryModelFactory(): void {
 }
 
 /**
- * 把 chat model 工厂注入给 titleMiddleware。
+ * 把 chat model 工厂注入给 titleMiddleware / 提示词增强（共用同一条副链路入口）。
+ * 工厂第二参为采样参数覆盖：标题走缺省（64/0.3），提示词增强传更大 maxTokens。
+ * 导出供 /api/prompt/enhance 在 threadService 尚未初始化时也能确保工厂已注册。
  */
-function ensureTitleModelFactory(): void {
+export function ensureTitleModelFactory(): void {
   if (titleFactoryRegistered) return;
-  setTitleModelFactory((modelName) => {
+  setTitleModelFactory((modelName, options) => {
     let base: ModelConfig;
     if (modelName && MODEL_PRESETS[modelName as ModelPresetName]) {
       base = buildModelConfigFromPreset(modelName as ModelPresetName);
@@ -77,9 +79,9 @@ function ensureTitleModelFactory(): void {
     return createChatModel({
       ...base,
       streaming: false,
-      maxTokens: 64,
-      temperature: 0.3,
-      topP: 0.8,
+      maxTokens: options?.maxTokens ?? 64,
+      temperature: options?.temperature ?? 0.3,
+      topP: options?.topP ?? 0.8,
     });
   });
   titleFactoryRegistered = true;

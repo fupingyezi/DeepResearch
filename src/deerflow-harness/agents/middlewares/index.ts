@@ -47,8 +47,9 @@ export {
   titleMiddleware,
   setTitleModelFactory,
   getTitleModelFactory,
+  getPromptEnhanceModel,
 } from './title-middleware/title-middleware';
-export type { TitleModelFactory } from './title-middleware/title-middleware';
+export type { TitleModelFactory, TitleModelOptions } from './title-middleware/title-middleware';
 export { publishTitleUpdate, consumeTitleUpdate } from './title-middleware/title-bus';
 export type { TitleUpdatePayload } from './title-middleware/title-bus';
 export { memoryMiddleware } from './memory-middleware';

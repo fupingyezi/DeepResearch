@@ -40,7 +40,21 @@ interface TitleConfigRow {
 }
 
 // ── Title model factory injection（与 memory 子系统同模式） ───────────────────
-export type TitleModelFactory = (modelName: string | null | undefined) => BaseChatModel;
+
+/**
+ * 采样参数覆盖：同一条副链路工厂按用途差异化（标题短文本 vs 提示词增强长文本）。
+ * 缺省值由 factory 注册方决定（_service.ts 里标题场景为 maxTokens 64 / temp 0.3）。
+ */
+export interface TitleModelOptions {
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export type TitleModelFactory = (
+  modelName: string | null | undefined,
+  options?: TitleModelOptions,
+) => BaseChatModel;
 
 let _titleModelFactory: TitleModelFactory | null = null;
 
@@ -79,6 +93,36 @@ function getTitleModel(): BaseChatModel | null {
     return titleModelInstance;
   } catch (e) {
     console.error('[titleMiddleware] TitleModelFactory threw:', e);
+    return null;
+  }
+}
+
+let enhanceModelInstance: BaseChatModel | null = null;
+
+/**
+ * 提示词增强模型：复用标题生成的模型入口（同一 factory + TITLE_MODEL hint，
+ * 即同一条"副链路小模型"），仅放宽 maxTokens / temperature 以适配长文本改写。
+ * 与 title 单例分开缓存：两者采样参数不同，互不影响。
+ */
+export function getPromptEnhanceModel(): BaseChatModel | null {
+  if (enhanceModelInstance) return enhanceModelInstance;
+  const factory = _titleModelFactory;
+  if (!factory) {
+    if (!warnedNoFactory) {
+      console.warn(
+        '[promptEnhance] no TitleModelFactory registered; prompt enhance disabled. ' +
+          'Call setTitleModelFactory() at app bootstrap (see _service.ts).',
+      );
+      warnedNoFactory = true;
+    }
+    return null;
+  }
+  try {
+    const modelName = process.env.TITLE_MODEL ?? null;
+    enhanceModelInstance = factory(modelName, { maxTokens: 2048, temperature: 0.5 });
+    return enhanceModelInstance;
+  } catch (e) {
+    console.error('[promptEnhance] TitleModelFactory threw:', e);
     return null;
   }
 }

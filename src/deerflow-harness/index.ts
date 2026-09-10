@@ -152,7 +152,9 @@ export {
 export {
   setTitleModelFactory,
   getTitleModelFactory,
+  getPromptEnhanceModel,
   type TitleModelFactory,
+  type TitleModelOptions,
   consumeTitleUpdate,
   type TitleUpdatePayload,
 } from './agents/middlewares';

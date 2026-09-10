@@ -1,11 +1,38 @@
 import React, { useState, useRef } from 'react';
 import Image from 'next/image';
+import { LoadingOutlined } from '@ant-design/icons';
 
 import FileItem from '../files/file-items';
 
 import { ChatInputProps } from '@/types';
 import { useConversationStore } from '@/store';
 import { useFileUpload, useTextareaAutoHeight } from '@/hooks';
+import { enhancePrompt } from '@/utils/prompt';
+
+/** 增强提示词图标：主体四角星 + 右上角小四角星（fill 跟随 currentColor 变色） */
+const EnhanceStarIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M11.5 9.5 9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5z" />
+    <path d="m19 9 1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9z" />
+  </svg>
+);
+
+/** 撤销图标：钩形回退箭头（左向箭头 + 尾部下弯回勾，区别于"重试"式环形箭头） */
+const UndoHookIcon = ({ className }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
 
 const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
@@ -17,6 +44,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const currentAbortController = useConversationStore((s) => s.currentAbortController);
   const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
   const [inputValue, setInputValue] = useState('');
+  // 提示词增强：null = 当前文本未被增强（星星态）；非 null = 增强后的原文快照（撤销态）
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceOriginal, setEnhanceOriginal] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,7 +77,35 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const hasFiles = localUploadedFiles.length > 0;
       onSend(inputValue.trim(), { hasFiles });
       setInputValue('');
+      setEnhanceOriginal(null);
       clearFiles();
+    }
+  };
+
+  const canUndo = enhanceOriginal !== null;
+  const canEnhance =
+    !disabled && !isChating && !enhancing && !canUndo && inputValue.trim().length > 0;
+
+  const handleEnhanceClick = async () => {
+    // 撤销态：点击恢复增强前的原文，回到星星态
+    if (canUndo) {
+      setInputValue(enhanceOriginal);
+      setEnhanceOriginal(null);
+      return;
+    }
+    if (!canEnhance) return;
+    setEnhancing(true);
+    try {
+      const enhanced = await enhancePrompt(inputValue);
+      if (enhanced.trim()) {
+        setEnhanceOriginal(inputValue);
+        setInputValue(enhanced);
+      }
+    } catch (e) {
+      // 失败保持输入框原内容，仅记录日志（输入框内无错误提示位）
+      console.error('[chat-input] enhance prompt failed:', e);
+    } finally {
+      setEnhancing(false);
     }
   };
 
@@ -96,7 +154,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
       <textarea
         ref={textareaRef}
         value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
+        onChange={(e) => {
+          setInputValue(e.target.value);
+          // 用户手动编辑后撤销快照失效（增强后未点撤销又改过 → 不能再撤销）
+          setEnhanceOriginal(null);
+        }}
         onKeyDown={handleKeyDown}
         onCompositionStart={() => {
           isComposingRef.current = true;
@@ -135,19 +197,42 @@ const ChatInput: React.FC<ChatInputProps> = ({
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={disabled && !isChating}
-          className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95 disabled:cursor-not-allowed disabled:from-gray-300 disabled:to-gray-400 disabled:shadow-none disabled:hover:shadow-none disabled:active:scale-100`}
-        >
-          {isChating ? (
-            <div className="flex h-6 w-6 items-center justify-center">
-              <div className="h-3.5 w-3.5 rounded-xs bg-white"></div>
-            </div>
-          ) : (
-            <Image src="/send.svg" alt="发送" width={22} height={22} />
-          )}
-        </button>
+        <div className="flex items-center gap-1">
+          {/* 提示词增强：星星（待增强）→ 加载中 → 撤销（恢复原文） */}
+          <button
+            type="button"
+            onClick={handleEnhanceClick}
+            disabled={!canUndo && !canEnhance}
+            title={canUndo ? '撤销增强，恢复原提示词' : '增强提示词'}
+            className={`flex h-10 w-10 items-center justify-center rounded-full transition-all hover:cursor-pointer active:scale-95 ${
+              canUndo
+                ? 'text-teal-600 hover:bg-[#e6f7f4]'
+                : 'text-[#9ca3af] hover:bg-[#f3f4f6] hover:text-teal-600'
+            } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[#9ca3af] disabled:active:scale-100`}
+          >
+            {enhancing ? (
+              <LoadingOutlined spin className="text-[18px]" />
+            ) : canUndo ? (
+              <UndoHookIcon className="h-[18px] w-[18px]" />
+            ) : (
+              <EnhanceStarIcon className="h-[18px] w-[18px]" />
+            )}
+          </button>
+
+          <button
+            type="submit"
+            disabled={disabled && !isChating}
+            className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 shadow-[0_2px_8px_rgba(14,165,164,0.3)] transition-all hover:cursor-pointer hover:shadow-[0_4px_12px_rgba(14,165,164,0.45)] active:scale-95 disabled:cursor-not-allowed disabled:from-gray-300 disabled:to-gray-400 disabled:shadow-none disabled:hover:shadow-none disabled:active:scale-100`}
+          >
+            {isChating ? (
+              <div className="flex h-6 w-6 items-center justify-center">
+                <div className="h-3.5 w-3.5 rounded-xs bg-white"></div>
+              </div>
+            ) : (
+              <Image src="/send.svg" alt="发送" width={22} height={22} />
+            )}
+          </button>
+        </div>
       </div>
     </form>
   );
