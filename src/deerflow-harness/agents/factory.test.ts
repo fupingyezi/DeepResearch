@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+
+import { assembleFromFeatures } from './factory';
+import { DEFAULT_FEATURES } from './features';
+import { SUBAGENT_FEATURES } from '../subagents/executor';
+
+const toolNames = (extraTools: { name?: string }[]): string[] =>
+  extraTools.map((t) => t.name ?? '?');
+
+describe('assembleFromFeatures —— 防递归（task 工具可见性）', () => {
+  it('lead（DEFAULT_FEATURES）注入 task 工具', () => {
+    const { extraTools, chain } = assembleFromFeatures(DEFAULT_FEATURES, {});
+    expect(toolNames(extraTools)).toContain('task');
+    // 默认启用 subagents → 需要用量限额兜底
+    expect(chain.map((m) => m.name)).toContain('SubagentLimitMiddleware');
+  });
+
+  it('subagent（SUBAGENT_FEATURES）不注入 task 工具，也不挂 SubagentLimit', () => {
+    const { extraTools, chain } = assembleFromFeatures(SUBAGENT_FEATURES, {});
+    expect(toolNames(extraTools)).not.toContain('task');
+    expect(chain.map((m) => m.name)).not.toContain('SubagentLimitMiddleware');
+  });
+
+  it('features.subagents=false 不注入 task；未设置（undefined）则注入', () => {
+    expect(
+      toolNames(assembleFromFeatures({ ...DEFAULT_FEATURES, subagents: false }, {}).extraTools),
+    ).not.toContain('task');
+    expect(
+      toolNames(assembleFromFeatures({ ...DEFAULT_FEATURES, subagents: undefined }, {}).extraTools),
+    ).toContain('task');
+  });
+});
+
+describe('assembleFromFeatures —— 位序中间件装配', () => {
+  it('始终启用的中间件按 0→12 位序出现在链上', () => {
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, {});
+    const names = chain.map((m) => m.name);
+    // 位序 3 / 5 / 11 / 12 为始终启用项
+    expect(names).toContain('ToolCallIntegrityMiddleware');
+    expect(names).toContain('ToolErrorHandlingMiddleware');
+    expect(names).toContain('SubagentLimitMiddleware');
+    expect(names).toContain('LoopDetectionMiddleware');
+  });
+
+  it('features.sandbox=true 时注入 7 个沙箱工具并挂 SandboxMiddleware', () => {
+    const { chain, extraTools } = assembleFromFeatures({ ...DEFAULT_FEATURES, sandbox: true }, {});
+    expect(chain.map((m) => m.name)).toContain('SandboxMiddleware');
+    for (const name of ['bash', 'ls', 'glob', 'grep', 'read_file', 'write_file', 'str_replace']) {
+      expect(toolNames(extraTools)).toContain(name);
+    }
+  });
+});

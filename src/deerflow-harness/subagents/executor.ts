@@ -3,11 +3,22 @@ import { HumanMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
 
 import { createBaseAgent } from '../agents/factory';
+import { DEFAULT_FEATURES, type RuntimeFeatures } from '../agents/features';
 import { createChatModel, inferProvider } from '../models';
 import { getContext } from '../runtime/context';
 import { ModelConfig, SubagentEvent, SUBAGENT_STREAM_TAG } from '../types';
 import { SubagentConfig } from './config';
 import { extractSubagentReport } from './schema';
+
+/**
+ * subagent 专用 features：硬性关闭 subagents，装配层不注入 task 工具与
+ * subagentLimitMiddleware —— 子 agent 的 LLM 工具列表里没有 task，从根上
+ * 杜绝递归委派（不依赖 system prompt 的自律）。
+ */
+export const SUBAGENT_FEATURES: RuntimeFeatures = {
+  ...DEFAULT_FEATURES,
+  subagents: false,
+};
 
 export interface SubagentExecutorOptions {
   config: SubagentConfig;
@@ -387,6 +398,7 @@ export class SubagentExecutor {
         tools: this.tools,
         systemPrompt: config.systemPrompt,
         provider,
+        features: SUBAGENT_FEATURES,
       });
 
       // 5) 主循环：消费 LangGraph stream

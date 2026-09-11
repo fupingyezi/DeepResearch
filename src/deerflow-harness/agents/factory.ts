@@ -117,10 +117,10 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  *   guardrail(4 暂未挂) → toolErrorHandling(5) → summarization(6) → todo(7) →
  *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
  *
- * SubagentExecutor 内部调用 createBaseAgent 时同样会走这条路径，因此
- * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
- * 会过滤掉 task，最终绑定到 LLM 的工具列表里没有 task，模型不会调用它。
- * subagentLimitMiddleware 在 subagent 上下文中无害（不会拦到 task）。
+ * SubagentExecutor 内部调用 createBaseAgent 时显式传入 `SUBAGENT_FEATURES`
+ * （`subagents: false`），因此装配层不会注入 task 工具，也不会挂
+ * subagentLimitMiddleware —— 防递归由「工具可见性」硬保证：子 agent 的 LLM
+ * 工具列表里根本没有 task（system prompt 约束与用量限额仅作兜底）。
  */
 export function assembleFromFeatures(
   features: RuntimeFeatures,
@@ -204,8 +204,8 @@ export function assembleFromFeatures(
   // (12) 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
-  // task 工具按开关注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）。
-  // 关闭 subagents 时不注入 task
+  // task 工具按开关注入到 lead-agent 工具集；subagent 走 SUBAGENT_FEATURES
+  // （subagents=false），此处不注入 task，构成防递归硬保证。
   if (subagentsEnabled) {
     extraTools.push(taskTool as StructuredToolInterface);
   }
