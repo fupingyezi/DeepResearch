@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createMiddleware } from 'langchain';
 
 import { assembleFromFeatures } from './factory';
 import { DEFAULT_FEATURES } from './features';
@@ -47,6 +48,27 @@ describe('assembleFromFeatures —— 位序中间件装配', () => {
     expect(chain.map((m) => m.name)).toContain('SandboxMiddleware');
     for (const name of ['bash', 'ls', 'glob', 'grep', 'read_file', 'write_file', 'str_replace']) {
       expect(toolNames(extraTools)).toContain(name);
+    }
+  });
+
+  it('summarization 传实例时挂载在位序 6（toolErrorHandling 之后、todo 之前）', () => {
+    const instance = createMiddleware({ name: 'MySummarization' });
+    const { chain } = assembleFromFeatures(
+      { ...DEFAULT_FEATURES, summarization: instance as never },
+      {},
+    );
+    const names = chain.map((m) => m.name);
+    expect(names).toContain('MySummarization');
+    expect(names.indexOf('MySummarization')).toBeGreaterThan(
+      names.indexOf('ToolErrorHandlingMiddleware'),
+    );
+    expect(names.indexOf('MySummarization')).toBeLessThan(names.indexOf('SubagentLimitMiddleware'));
+  });
+
+  it('summarization 为 false/undefined 时不挂载（不允许 true 走默认实现）', () => {
+    for (const value of [false, undefined] as const) {
+      const { chain } = assembleFromFeatures({ ...DEFAULT_FEATURES, summarization: value }, {});
+      expect(chain.map((m) => m.name)).not.toContain('SummarizationMiddleware');
     }
   });
 });

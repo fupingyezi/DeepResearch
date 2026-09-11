@@ -5,6 +5,7 @@ import { BaseCheckpointSaver, Command } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
+import { createSummarizationMiddleware } from './agents/middlewares';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
@@ -24,6 +25,7 @@ interface RuntimeRunOptions {
   threadDataEnabled: boolean;
   uploadsEnabled: boolean;
   sandboxEnabled: boolean;
+  summarizationEnabled: boolean;
   mcpEnabled: boolean;
   subagentsEnabled: boolean;
   agentName: string;
@@ -44,6 +46,7 @@ function buildConfigKey(
     opts.threadDataEnabled,
     opts.uploadsEnabled,
     opts.sandboxEnabled,
+    opts.summarizationEnabled,
     opts.mcpEnabled,
     opts.subagentsEnabled,
     opts.agentName,
@@ -120,6 +123,7 @@ export class DeerFlowClient {
       threadDataEnabled: options?.threadDataEnabled ?? false,
       uploadsEnabled: options?.uploadsEnabled ?? false,
       sandboxEnabled: options?.sandboxEnabled ?? false,
+      summarizationEnabled: options?.summarizationEnabled ?? false,
       // MCP / subagent 默认开启，保持主应用历史行为；caller 可显式关闭以收紧工具集。
       mcpEnabled: options?.mcpEnabled ?? true,
       subagentsEnabled: options?.subagentsEnabled ?? true,
@@ -141,7 +145,8 @@ export class DeerFlowClient {
    *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled / sandboxEnabled。`agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
+   * uploadsEnabled / sandboxEnabled / summarizationEnabled。
+   * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
    * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
@@ -166,6 +171,10 @@ export class DeerFlowClient {
       sandboxEnabled: pickBooleanOverride(
         metadata?.sandboxEnabled,
         !!this.baseOptions.sandboxEnabled,
+      ),
+      summarizationEnabled: pickBooleanOverride(
+        metadata?.summarizationEnabled,
+        !!this.baseOptions.summarizationEnabled,
       ),
       mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
       subagentsEnabled: pickBooleanOverride(
@@ -262,6 +271,9 @@ export class DeerFlowClient {
         uploads: opts.uploadsEnabled,
         sandbox: opts.sandboxEnabled,
         subagents: opts.subagentsEnabled,
+        // summarization 需要 model 实例（会额外调用 LLM 生成摘要），
+        // features.summarization 不接受 true，须在此用当次 model 构造实例
+        summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
       },
     });
 
