@@ -113,7 +113,9 @@ MINIO_BUCKET=chat-files
 TAVILY_API_KEY=...
 
 # 沙箱后端（可选，默认 local）
-DEERFLOW_SANDBOX_BACKEND=local            # local（宿主直连）| docker（每线程加固容器）
+DEERFLOW_SANDBOX_BACKEND=local            # local（宿主直连）| docker（每线程加固容器）| remote（远程 SSH）
+DEERFLOW_REMOTE_HOST=                     # remote 后端必填，缺私钥/host 时启动报错
+DEERFLOW_REMOTE_PRIVATE_KEY_PATH=         # 或 DEERFLOW_REMOTE_PRIVATE_KEY（内容优先）
 DEERFLOW_ALLOW_HOST_BASH=false            # local 后端是否放行 host bash（docker 不受此门控）
 DEERFLOW_MAX_CONCURRENT_RUNS=16           # run 级并发上限，超限对话回传 queued
 DEERFLOW_DOCKER_IMAGE=python:3.12-slim-bookworm
@@ -122,6 +124,10 @@ DEERFLOW_DOCKER_CPUS=1.5
 DEERFLOW_DOCKER_NETWORK=bridge            # bridge（联网）| none（断网）
 DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS=32    # 容器级并发上限
 DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌（未设则接口返回 401）
+
+# 护栏（规则式，零依赖）
+DEERFLOW_GUARDRAIL_ENABLED=true           # 总开关
+DEERFLOW_GUARDRAIL_BLOCK=none             # none（默认，仅告警）| injection | output | all
 ```
 
 > 完整变量清单（含鉴权相关变量、模型密钥加密、Docker 沙箱的全部 `DEERFLOW_DOCKER_*` 项）见仓库根 `.env.example`。
@@ -332,7 +338,7 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 
 **文件：** `src/deerflow-harness/runtime/sse/client-event.ts`
 
-对外暴露的白名单协议（9 种），前端通过 `src/runtime/protocol/client-event.ts` 直接 re-export 复用：
+对外暴露的白名单协议（10 种），前端通过 `src/runtime/protocol/client-event.ts` 直接 re-export 复用：
 
 | eventType         | payload                                         | 说明                        |
 | ----------------- | ----------------------------------------------- | --------------------------- |
@@ -341,6 +347,7 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 | `tool_call`       | `{ toolCallId, toolName, arguments? }`          | 工具调用开始                |
 | `tool_result`     | `{ toolCallId, toolName, result, success }`     | 工具调用结果                |
 | `task_progress`   | `{ taskId, status, message?, result?, error? }` | 折叠 6 种 task\_\* 内部事件 |
+| `todo_update`     | `{ todos: {content, status}[] }`                | 任务清单更新（latest-wins） |
 | `human_interrupt` | `{ question, details }`                         | 等待人工决策                |
 | `error`           | `{ errorCode, errorMessage, recoverable }`      | 执行错误                    |
 | `end`             | `{}`                                            | 流式会话结束                |
@@ -404,7 +411,7 @@ StreamBridge（单例 streamBridge）
 
 #### 中间件组装规则（`assembleFromFeatures`）
 
-按 `ORDERED_MIDDLEWARES` 位序装配（位序留白处为暂未挂的占位 guardrail 等）：
+按 `ORDERED_MIDDLEWARES` 位序装配（下表「服务级默认」指 `_service.ts` 的 sharedClientOptions）：
 
 | 位序 | 中间件                           | 触发条件                                                                                                        |
 | ---- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -412,10 +419,11 @@ StreamBridge（单例 streamBridge）
 | 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                |
 | 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）       |
 | 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）   |
-| 3    | `DanglingToolCallMiddleware`     | 始终启用                                                                                                        |
+| 3    | `ToolCallIntegrityMiddleware`    | 始终启用（悬空调用 + 未知调用两条子规则）                                                                       |
+| 4    | `GuardrailMiddleware`            | `features.guardrail=true`（走 createGuardrailMiddleware 默认规则）或传自定义实例；**服务级默认开**（仅告警）    |
 | 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                        |
-| 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware()` 实例（不允许 true）                                |
-| 7    | `TodoMiddleware`                 | `features.todo=true`（默认关闭，开启后注入 `write_todos` 工具 + ThreadState.todos）                             |
+| 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware(model)` 实例（不允许 true）；**服务级默认开**         |
+| 7    | `TodoMiddleware`                 | `features.todo=true`（注入 `write_todos` + ThreadState.todos）；**服务级默认开**，清单经 `todo_update` 下发前端 |
 | 8    | `TitleMiddleware`                | `features.autoTitle=true`（服务级默认 true）；afterAgent 用固定小模型异步生成标题，落 chat_session/threads_meta |
 | 9    | `MemoryMiddleware`               | `features.memory=true`（服务级默认 true）                                                                       |
 | 10   | `ViewImageMiddleware`            | `features.vision=true`（默认关闭；当前为占位 + 启用警告，等视觉模型适配再做）                                   |
@@ -438,12 +446,15 @@ interface RuntimeFeatures {
   autoTitle?: FeatureToggle;
   threadData?: FeatureToggle; // 装载 file_metadata 到 state.uploadedFiles
   uploads?: FeatureToggle; // 注入 uploadedFiles 到 prompt（SystemMessage）
-  guardrail?: FeatureToggle; // 不允许 true
+  guardrail?: FeatureToggle; // true=默认规则实现（createGuardrailMiddleware），或传自定义实例
   qwenToolCallRecovery?: FeatureToggle;
 }
 ```
 
-`Next<T>` / `Prev<T>` 装饰器可为自定义中间件指定插入锚点（插入到某中间件之前/之后）。
+`Next` / `Prev` 装饰器为自定义中间件指定插入锚点（插到某中间件之前/之后），锚点可为
+中间件**类**（装饰类用法）或**实例**（内置中间件多为 `createMiddleware()` 实例）。经
+`createBaseAgent({ extraMiddlewares: [...] })` 传入，`assembleFromFeatures` 解析锚点插入链中；
+无锚点或锚点不在链上时追加到链尾（不丢中间件）。
 
 ---
 
@@ -542,6 +553,27 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 
 校正提示（`correctionDetected` / `reinforcementDetected`）：检测对话中的纠错/正强化信号时自动注入额外的 LLM 提示，提升记忆更新质量。
 
+#### 注入模式（inject / retrieve）
+
+`buildMemoryContext` 支持两种模式，由请求体 `configuration.memoryMode` 选择（默认 inject）：
+
+| 模式       | 行为                                                                                     |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `inject`   | 全量注入：所有 section + facts 按 confidence 降序、在 `maxInjectionTokens`（2000）内截断 |
+| `retrieve` | 按本轮用户输入检索：关键词打分取 top-K facts + 最相关的一段 history，注入预算 800 tokens |
+
+检索实现（`memory/retrieval.ts`，零外部依赖纯函数）：
+
+- 分词：latin 词（小写、去停用词）+ CJK 单字与二元组（bigram，让「量子」能命中「量子计算」）
+- `scoreFact = 重叠率(|fact∩query| / |query|) × (0.5 + 0.5 × confidence)`
+- 取舍：facts 取 top-K（默认 8）；workContext / personalContext 视为身份信息恒保留；
+  topOfMind 按相关性取舍；history 三段只保留最相关的一段
+- query 为空或全部落空 → 不注入（避免无关记忆干扰模型）
+
+**定位说明**：这是**词面**相关性（关键词重叠），不是语义检索（无 embedding / 向量库）。
+对「用户提到记忆中已有的实体名」最有效，对同义改写无能为力，故检索模式为可选，
+默认仍是注入模式。检索参数见 `MemoryConfig.retrieveTopK` / `retrieveMaxTokens`。
+
 #### Memory 手动 CRUD API
 
 ```typescript
@@ -605,10 +637,11 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 
 - `local`（默认）：`LocalSandboxProvider`，宿主文件系统直连；bash 直接在宿主执行，受 `DEERFLOW_ALLOW_HOST_BASH` 门控。
 - `docker`：`DockerSandboxProvider`，每 thread 一个长驻加固容器；bash 在容器内执行，具内核级隔离，**不受 host-bash 门控**。
+- `remote`：`RemoteSandboxProvider`，每 thread 一条 SSH 长连接，命令与文件 IO 都在远程主机执行；远程即隔离边界，**不受 host-bash 门控**。
 
-依赖方向 `factory → local / docker`、`docker → local`（`DockerSandbox extends LocalSandbox`，仅重写 `executeCommand` 走 `docker exec`），均单向无循环。
+依赖方向 `factory → local / docker / remote`、`docker → local`（`DockerSandbox extends LocalSandbox`，仅重写 `executeCommand` 走 `docker exec`），均单向无循环。
 
-`SandboxProvider` 基类关键方法：`acquire` / `release`（abstract）+ 默认 no-op 的 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId` + `isSecureIsolation()`（默认 `false`，Docker 覆盖为 `true`，用于 `bashTool` 判断是否跳过 host-bash 门控）。
+`SandboxProvider` 基类关键方法：`acquire` / `release`（abstract）+ 默认 no-op 的 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId` + `isSecureIsolation()`（默认 `false`，Docker / Remote 覆盖为 `true`，用于 `bashTool` 判断是否跳过 host-bash 门控）+ `threadDirectories(threadId)` / `ensureThreadDirectories(dirs)`（后端各自的 thread 目录解析，工具层据此把虚拟路径映射到本后端真实路径）。
 
 #### Docker 后端（docker/）
 
@@ -616,6 +649,15 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 - `docker-cli.ts`：`runDocker()` 用 `execFile` + 参数数组（禁 shell 拼接防注入），另有 `dockerPsByPrefix` / `dockerStats` / `runDockerWithRetry`。
 - `docker-sandbox-provider.ts`：每 thread 一个 `sleep infinity` 加固容器（`--cap-drop ALL` + `--security-opt no-new-privileges` + `--memory/--cpus/--pids-limit` + `--user 1000:1000` 降权）；卷挂载 `{threadDir}/user-data → /mnt/user-data`（不暴露宿主真实路径，`DockerSandbox` 内做路径反向映射）；引用计数 + 空闲回收 + LRU + 容器消失时 reprovision 重建。
 - `docker-coordinator.ts`：跨进程协调。Redis 原子计数（containers/runs count 用 Lua RESERVE/RELEASE）、thread→container 登记 Hash、`SET NX PX` 分布式锁；**Redis 不可用自动降级进程内 Map**。
+
+#### Remote 后端（remote/）
+
+- `remote-config.ts`：env-only 配置（前缀 `DEERFLOW_REMOTE_*`）：host/port/user/私钥（内容或路径）/passphrase/baseDir/并发上限/空闲回收/命令超时/keepalive/单文件写上限。**缺 host 或私钥时构造即抛错**，避免静默降级到宿主直连。
+- `ssh-connection-manager.ts`：per-thread SSH 长连接池（ssh2）——幂等复用 + 引用计数 + 空闲回收（定时器 `unref`）+ keepalive + 进程内并发信号量；建连时 `mkdir -p` 远程 thread 目录；命令输出限内存上限；`shellQuote` 单引号转义防注入。
+- `remote-sandbox.ts`：与 Docker 的关键差异是远程文件系统与宿主完全分离，故**全部 IO 方法**都经 SSH 往返——`executeCommand`（命令作 `sh -c` 单参数）、`readFile`（base64 往返保编码/二进制安全）、`writeFile`（走 stdin，超 `DEERFLOW_REMOTE_MAX_WRITE_BYTES` 拒绝）、`listDir` / `glob` / `grep`（远端 `find` / `grep`，输出对齐既有 `{matches, truncated}` 契约并把远程路径还原为 `/mnt/user-data`）。
+- `remote-sandbox-provider.ts`：`acquire` 同步返回 id（建连异步，各 IO 方法前 await 就绪），`threadDirectories` 返回远程布局，`ensureThreadDirectories` 为 no-op（建连时已创建）。
+
+**并发语义**：远程后端**不做跨进程协调**（连接无法像容器那样被他进程回收），`DEERFLOW_REMOTE_MAX_CONCURRENT` 为进程内上限，多进程部署时按进程独立计。
 
 #### 多对话并行编排（双层背压）
 
@@ -864,4 +906,9 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 1. StreamBridge 为进程内总线，不支持多实例水平扩展（需替换为 Redis pub/sub）
 2. ThreadChannel 的 buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧的非关键帧（`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
-4. 单元测试覆盖建设中（vitest 已接入，当前覆盖中间件装配等核心纯逻辑）
+4. 单元测试覆盖建设中（vitest 已接入，当前覆盖中间件装配、防递归、guardrail 规则、
+   记忆检索、checkpoint 行为约束、remote 沙箱等核心纯逻辑）
+5. 记忆检索模式（`memoryMode: 'retrieve'`）为关键词相关性（无 embedding / 向量库），
+   对同义改写无效；需要语义检索时得另接向量存储
+6. remote 沙箱的并发上限按进程独立计（不做跨进程协调），多进程部署时实际连接数 = 上限 × 进程数
+7. ViewImage 中间件仍为占位（启用仅打印警告），待视觉模型适配

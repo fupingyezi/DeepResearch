@@ -11,7 +11,7 @@
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按 `agentName + userId` 分文件持久化到 `.memory/`；支持通过 API 或设置界面手动 CRUD 记忆事实。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
-- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 9 种 `ClientAgentEvent`。
+- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
 - 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、ViewImage、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
@@ -85,8 +85,8 @@ src/
 │   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
 │   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
-│   │   ├── middlewares/                # 位序中间件实现（含 tool-call-integrity 子目录）
-│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储与队列
+│   │   ├── middlewares/                # 位序中间件实现（含 tool-call-integrity / guardrail 子目录）
+│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储/队列 + retrieval（检索模式）
 │   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
 │   ├── skills/                         # Skill 加载器（frontmatter 解析 + prompt 注入）
@@ -104,7 +104,7 @@ src/
 │   ├── auth/                           # 认证模块
 │   ├── config/                         # 应用配置
 │   ├── sandbox/                        # 可插拔安全沙箱（路径校验、文件操作锁、异常隔离）
-│   │   ├── provider-factory.ts         # ⭐ 后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker）
+│   │   ├── provider-factory.ts         # ⭐ 后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker/remote）
 │   │   ├── sandbox-provider.ts         # SandboxProvider 基类（acquire/release/retain/isSecureIsolation）
 │   │   ├── sandbox-monitor.ts          # 沙箱运行态快照（供 stats API）
 │   │   ├── tools.ts                    # 沙箱内置工具集（读/写/搜索/list/bash 等）
@@ -114,12 +114,17 @@ src/
 │   │   ├── path-utils.ts               # 路径安全处理
 │   │   ├── exceptions.ts               # 异常定义
 │   │   ├── local/                      # 本地文件系统沙箱实现
-│   │   └── docker/                     # ⭐ Docker 沙箱后端
-│   │       ├── docker-config.ts        # env-only 配置（镜像/限额/网络/并发/锁 TTL）
-│   │       ├── docker-cli.ts           # execFile 封装 docker CLI（禁 shell 拼接）
-│   │       ├── docker-sandbox.ts       # DockerSandbox（仅重写 executeCommand 走 docker exec）
-│   │       ├── docker-sandbox-provider.ts # 每 thread 长驻容器 + 引用计数 + 空闲回收
-│   │       └── docker-coordinator.ts   # 跨进程协调（Redis 原子计数/登记/分布式锁，可降级进程内）
+│   │   ├── docker/                     # ⭐ Docker 沙箱后端
+│   │   │   ├── docker-config.ts        # env-only 配置（镜像/限额/网络/并发/锁 TTL）
+│   │   │   ├── docker-cli.ts           # execFile 封装 docker CLI（禁 shell 拼接）
+│   │   │   ├── docker-sandbox.ts       # DockerSandbox（仅重写 executeCommand 走 docker exec）
+│   │   │   ├── docker-sandbox-provider.ts # 每 thread 长驻容器 + 引用计数 + 空闲回收
+│   │   │   └── docker-coordinator.ts   # 跨进程协调（Redis 原子计数/登记/分布式锁，可降级进程内）
+│   │   └── remote/                     # ⭐ Remote SSH 沙箱后端
+│   │       ├── remote-config.ts        # env-only 配置（host/私钥/并发/超时/写上限）
+│   │       ├── ssh-connection-manager.ts # per-thread SSH 连接池（复用/回收/并发闸门）
+│   │       ├── remote-sandbox.ts       # 远程执行与文件 IO（全部经 SSH 往返）
+│   │       └── remote-sandbox-provider.ts # 远程 Provider（isSecureIsolation=true）
 │   └── types/                          # AgentEvent 等共享类型
 │
 ├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
@@ -372,9 +377,9 @@ interface ChatStreamBody {
 }
 ```
 
-**SSE 客户端事件白名单（9 种）：**
+**SSE 客户端事件白名单（10 种）：**
 
-`start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `human_interrupt` / `error` / `end` / `heartbeat`
+`start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `todo_update` / `human_interrupt` / `error` / `end` / `heartbeat`
 
 协议定义：`src/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/runtime/protocol/client-event.ts` re-export 复用。
 
@@ -457,6 +462,8 @@ JSON 与搜索结果带最大高度与细滚动条，不会撑破气泡。
 - `facts[]`：带 `category` / `confidence` / `source` 的事实条目
 
 每轮对话由 `MemoryUpdater` 通过 LLM 提取并增量更新（含 JSON 修复、上传内容清洗、置信度过滤、casefold 去重）。也可通过设置界面手动管理记忆事实。
+
+记忆注入支持两种模式（请求体 `configuration.memoryMode`）：`inject`（默认，全量注入 + token 预算截断）与 `retrieve`（按本轮输入关键词检索 top-K facts 与最相关历史段，预算更小）。检索为词面相关性（零外部依赖，无向量库），详见 `CLAUDE.md`。
 
 ### MCP 扩展
 
@@ -564,7 +571,12 @@ npx tsx benchmarks/longmem/run.ts
 
 1. StreamBridge 为进程内总线，多实例水平扩展需替换为 Redis pub/sub
 2. 单次请求只能使用一个模型
-3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
+3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配、防递归、护栏规则、
+   记忆检索、checkpoint 行为约束、remote 沙箱等核心纯逻辑；`benchmarks/` 提供研究 QA
+   与长期记忆两套离线评估）
+4. 记忆检索（`memoryMode: 'retrieve'`）为关键词相关性，不支持语义/同义改写检索
+5. remote 沙箱并发上限按进程独立计（多进程部署时实际连接数 = 上限 × 进程数）
+6. ViewImage 中间件为占位（规划中），启用仅打印警告
 
 ## 📝 License
 
