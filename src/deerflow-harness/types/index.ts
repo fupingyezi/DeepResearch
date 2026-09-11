@@ -45,6 +45,8 @@ export interface ClientOptions {
    * 开启后历史触达阈值时会额外调用一次 LLM 生成摘要，产生 token 费用。
    */
   summarizationEnabled?: boolean;
+  /** 是否启用 GuardrailMiddleware（features.guardrail）。默认 false；服务级建议 true。 */
+  guardrailEnabled?: boolean;
   /** 是否加载并绑定 MCP 工具。默认 true。*/
   mcpEnabled?: boolean;
   /** 是否注入 task 工具与 subagent 能力（features.subagents）。默认 true。*/

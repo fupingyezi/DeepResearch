@@ -23,6 +23,7 @@ import {
   sandboxMiddleware,
   viewImageMiddleware,
   createSubagentLimitMiddleware,
+  createGuardrailMiddleware,
   loopDetectionMiddleware,
   qwenToolCallRecoveryMiddleware,
   withCallLogAll,
@@ -120,7 +121,7 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  *
  * 装配顺序严格按 `middlewares/index.ts` 中 ORDERED_MIDDLEWARES 编排：
  *   threadData(0) → uploads(1) → sandbox(2 features.sandbox) → toolCallIntegrity(3) →
- *   guardrail(4 暂未挂) → toolErrorHandling(5) → summarization(6) → todo(7) →
+ *   guardrail(4 features.guardrail) → toolErrorHandling(5) → summarization(6) → todo(7) →
  *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
  *
  * SubagentExecutor 内部调用 createBaseAgent 时显式传入 `SUBAGENT_FEATURES`
@@ -168,6 +169,15 @@ export function assembleFromFeatures(
 
   // (3) 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
+
+  // (4) 可选：规则式护栏。features.guardrail=true 走默认实现（createGuardrailMiddleware），
+  // 或传入自定义中间件实例。默认关闭（库级安全默认），服务级由 _service.ts 开启。
+  const guardrailFeat = features.guardrail;
+  if (guardrailFeat === true) {
+    chain.push(createGuardrailMiddleware());
+  } else if (typeof guardrailFeat === 'object' && guardrailFeat !== null) {
+    chain.push(guardrailFeat as AgentMiddleware);
+  }
 
   // (5) 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);

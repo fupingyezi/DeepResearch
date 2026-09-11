@@ -177,6 +177,7 @@ async function build(): Promise<ThreadService> {
   //   - sandboxEnabled:   true  → 获取沙箱并注入文件工具集（bash 默认禁用，需 env 开启）。
   //   - summarizationEnabled: true → 历史触达阈值（12000 tokens）时自动摘要旧消息，
   //                                保留近 8 条；会额外调用一次 LLM。
+  //   - guardrailEnabled: true  → 规则式护栏默认开启（仅告警不拦截）。
   // 单次请求可通过 body.configuration.<key> 显式覆盖（见 v3/chat route.ts）。
   const sharedClientOptions = {
     agentName: 'lead' as const,
@@ -186,6 +187,7 @@ async function build(): Promise<ThreadService> {
     uploadsEnabled: true,
     sandboxEnabled: true,
     summarizationEnabled: true,
+    guardrailEnabled: true,
     checkpointer,
   };
 

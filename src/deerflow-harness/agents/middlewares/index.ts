@@ -38,7 +38,8 @@ export {
   DEFAULT_INTEGRITY_RULES,
 } from './tool-call-integrity';
 export type { IntegrityRule, RuleContext, ToolCallIntegrityOptions } from './tool-call-integrity';
-export { guardrailMiddleware } from './guardrail-middleware';
+export { guardrailMiddleware, createGuardrailMiddleware } from './guardrail-middleware';
+export type { GuardrailOptions, GuardrailBlockMode } from './guardrail-middleware';
 export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 export { summarizationMiddleware, createSummarizationMiddleware } from './summarization-middleware';
 export type { SummarizationOptions } from './summarization-middleware';

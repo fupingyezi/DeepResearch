@@ -16,7 +16,8 @@ export interface RuntimeFeatures {
   threadData?: FeatureToggle;
   /** UploadsMiddleware：把 state.uploadedFiles 渲染为 SystemMessage 注入 prompt。 */
   uploads?: FeatureToggle;
-  guardrail?: FeatureToggle; // 不允许 true
+  /** GuardrailMiddleware：规则式护栏（提示注入 + 敏感输出）。true=默认规则实现。 */
+  guardrail?: FeatureToggle;
   qwenToolCallRecovery?: FeatureToggle;
   /** 是否注入 task 工具 + subagentLimit 中间件（subagent 委派能力）。*/
   subagents?: FeatureToggle;

@@ -26,6 +26,7 @@ interface RuntimeRunOptions {
   uploadsEnabled: boolean;
   sandboxEnabled: boolean;
   summarizationEnabled: boolean;
+  guardrailEnabled: boolean;
   mcpEnabled: boolean;
   subagentsEnabled: boolean;
   agentName: string;
@@ -47,6 +48,7 @@ function buildConfigKey(
     opts.uploadsEnabled,
     opts.sandboxEnabled,
     opts.summarizationEnabled,
+    opts.guardrailEnabled,
     opts.mcpEnabled,
     opts.subagentsEnabled,
     opts.agentName,
@@ -124,6 +126,7 @@ export class DeerFlowClient {
       uploadsEnabled: options?.uploadsEnabled ?? false,
       sandboxEnabled: options?.sandboxEnabled ?? false,
       summarizationEnabled: options?.summarizationEnabled ?? false,
+      guardrailEnabled: options?.guardrailEnabled ?? false,
       // MCP / subagent 默认开启，保持主应用历史行为；caller 可显式关闭以收紧工具集。
       mcpEnabled: options?.mcpEnabled ?? true,
       subagentsEnabled: options?.subagentsEnabled ?? true,
@@ -145,7 +148,7 @@ export class DeerFlowClient {
    *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled / sandboxEnabled / summarizationEnabled。
+   * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled。
    * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
@@ -175,6 +178,10 @@ export class DeerFlowClient {
       summarizationEnabled: pickBooleanOverride(
         metadata?.summarizationEnabled,
         !!this.baseOptions.summarizationEnabled,
+      ),
+      guardrailEnabled: pickBooleanOverride(
+        metadata?.guardrailEnabled,
+        !!this.baseOptions.guardrailEnabled,
       ),
       mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
       subagentsEnabled: pickBooleanOverride(
@@ -274,6 +281,7 @@ export class DeerFlowClient {
         // summarization 需要 model 实例（会额外调用 LLM 生成摘要），
         // features.summarization 不接受 true，须在此用当次 model 构造实例
         summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
+        guardrail: opts.guardrailEnabled,
       },
     });
 
