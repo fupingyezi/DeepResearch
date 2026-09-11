@@ -64,11 +64,16 @@ export class SshConnectionManager {
     this.config = config ?? getRemoteSandboxConfig();
   }
 
-  /** 获取（或建立）thread 的连接，引用计数 +1。 */
+  /**
+   * 获取（或建立）thread 的连接。
+   *
+   * 幂等命中只刷新活跃时间，**不动引用计数**——refCount 表示「正在使用该连接的
+   * run/agent 层数」，由 retain/markIdle 成对驱动；若 acquire 也累加，subagent /
+   * 工具层的惰性 acquire 会造成计数泄漏（与 docker 后端同约定）。
+   */
   async acquire(threadId: string): Promise<SshConnection> {
     const existing = this.connections.get(threadId);
     if (existing) {
-      existing.refCount += 1;
       existing.lastActiveAt = Date.now();
       await existing.ready;
       return this.toConnection(existing);
@@ -77,7 +82,6 @@ export class SshConnectionManager {
     const pendingEntry = this.pending.get(threadId);
     if (pendingEntry) {
       const entry = await pendingEntry;
-      entry.refCount += 1;
       entry.lastActiveAt = Date.now();
       return this.toConnection(entry);
     }
@@ -87,7 +91,8 @@ export class SshConnectionManager {
     this.pending.set(threadId, creating);
     try {
       const entry = await creating;
-      entry.refCount = 1;
+      // 初值为 0：交由 sandbox-middleware 的 retain/markIdle 成对驱动（同 docker）
+      entry.refCount = 0;
       this.connections.set(threadId, entry);
       this.ensureReaper();
       return this.toConnection(entry);
@@ -97,6 +102,14 @@ export class SshConnectionManager {
     } finally {
       this.pending.delete(threadId);
     }
+  }
+
+  /** 引用计数 +1（run/agent 层开始持有）。与 markIdle 成对。 */
+  retain(threadId: string): void {
+    const entry = this.connections.get(threadId);
+    if (!entry) return;
+    entry.refCount += 1;
+    entry.lastActiveAt = Date.now();
   }
 
   /** 引用计数 -1；归零后交由空闲回收器处理（不立即断开，吸收同 thread 后续 run）。 */

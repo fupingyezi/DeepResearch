@@ -32,6 +32,42 @@ describe('assembleFromFeatures —— 防递归（task 工具可见性）', () =
   });
 });
 
+describe('assembleFromFeatures —— 服务级开关装配一致性', () => {
+  // 与 src/app/api/threads/_service.ts 的 sharedClientOptions 对应：
+  // 任一开关在装配层被静默丢弃（历史上 guardrail/summarization/todo 都发生过），
+  // 该用例即失败，避免「文档说装了、代码没装」再次出现。
+  it('服务级默认的 7 个可选开关全部落到链上', () => {
+    const summarization = createMiddleware({ name: 'SummarizationMiddleware' });
+    const { chain } = assembleFromFeatures(
+      {
+        threadData: true,
+        uploads: true,
+        sandbox: true,
+        summarization: summarization as never,
+        todo: true,
+        autoTitle: true,
+        memory: true,
+        guardrail: true,
+      },
+      {},
+    );
+    const names = chain.map((m) => m.name);
+    for (const expected of [
+      'ThreadDataMiddleware',
+      'UploadsMiddleware',
+      'SandboxMiddleware',
+      'SummarizationMiddleware',
+      // 框架现成实现，name 为小写 todoListMiddleware
+      'todoListMiddleware',
+      'TitleMiddleware',
+      'MemoryMiddleware',
+      'GuardrailMiddleware',
+    ]) {
+      expect(names).toContain(expected);
+    }
+  });
+});
+
 describe('assembleFromFeatures —— 位序中间件装配', () => {
   it('始终启用的中间件按 0→12 位序出现在链上', () => {
     const { chain } = assembleFromFeatures(DEFAULT_FEATURES, {});

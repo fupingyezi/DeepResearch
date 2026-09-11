@@ -10,26 +10,35 @@
 import { Sandbox } from '../sandbox';
 import { SandboxProvider } from '../sandbox-provider';
 import type { ThreadDirectories } from '../paths';
-import { getRemoteSandboxConfig, getRemoteThreadDirectories } from './remote-config';
+import {
+  getRemoteSandboxConfig,
+  getRemoteThreadDirectories,
+  type RemoteSandboxConfig,
+} from './remote-config';
 import { SshConnectionManager, type SshConnection } from './ssh-connection-manager';
 import { RemoteSandbox } from './remote-sandbox';
 
-/** 远程路径与本地路径同构（都是 posix），故直接复用 ThreadDirectories 形状。 */
-function toThreadDirectories(threadId: string): ThreadDirectories {
-  const { baseDir } = getRemoteSandboxConfig();
-  return getRemoteThreadDirectories(threadId, baseDir);
-}
-
 export class RemoteSandboxProvider extends SandboxProvider {
   private readonly manager: SshConnectionManager;
+  private readonly config: RemoteSandboxConfig;
   /** threadId → 该 thread 的沙箱实例（连接句柄的就绪 Promise 在内部 await）。 */
   private readonly sandboxes = new Map<string, RemoteSandbox>();
   /** 建立中的连接（防并发重复建连，也让 acquire 保持同步签名）。 */
   private readonly connecting = new Map<string, Promise<SshConnection>>();
 
-  constructor(manager?: SshConnectionManager) {
+  /**
+   * @param manager 连接管理器；缺省新建（读 env 配置）。测试可注入假实现。
+   * @param config  运行配置；缺省从 env 读取（缺 host / 私钥时抛错）
+   */
+  constructor(manager?: SshConnectionManager, config?: RemoteSandboxConfig) {
     super();
-    this.manager = manager ?? new SshConnectionManager();
+    this.config = config ?? getRemoteSandboxConfig();
+    this.manager = manager ?? new SshConnectionManager(this.config);
+  }
+
+  /** 远程路径与本地路径同构（都是 posix），故直接复用 ThreadDirectories 形状。 */
+  private toThreadDirectories(threadId: string): ThreadDirectories {
+    return getRemoteThreadDirectories(threadId, this.config.baseDir);
   }
 
   /**
@@ -41,12 +50,14 @@ export class RemoteSandboxProvider extends SandboxProvider {
   acquire(threadId?: string): string {
     const id = sandboxId(threadId);
     if (this.sandboxes.has(id)) {
-      this.manager.markIdle(id); // 幂等命中：只 touch，不增引用计数
+      // 幂等复用：仅刷新活跃时间；引用计数由 retain/markIdle 成对驱动，
+      // 不随每次 acquire（含 subagent 惰性 acquire）累加，避免 refCount 泄漏。
+      this.manager.heartbeat(id);
       return id;
     }
 
     const effectiveThreadId = id;
-    const dirs = toThreadDirectories(effectiveThreadId);
+    const dirs = this.toThreadDirectories(effectiveThreadId);
     const connectionPromise = this.manager.acquire(effectiveThreadId);
     this.connecting.set(effectiveThreadId, connectionPromise);
     connectionPromise.catch((e) => {
@@ -56,7 +67,12 @@ export class RemoteSandboxProvider extends SandboxProvider {
       console.error(`[remote-sandbox] failed to connect thread=${effectiveThreadId}:`, e?.message);
     });
 
-    const sandbox = new RemoteSandbox(id, makeDeferredConnection(connectionPromise), dirs);
+    const sandbox = new RemoteSandbox(
+      id,
+      makeDeferredConnection(connectionPromise),
+      dirs,
+      this.config,
+    );
     this.sandboxes.set(id, sandbox);
     return id;
   }
@@ -77,8 +93,7 @@ export class RemoteSandboxProvider extends SandboxProvider {
   }
 
   override retain(sandboxId: string): void {
-    // 引用计数由连接管理器持有；这里只需确保连接还活着
-    this.manager.heartbeat(sandboxId);
+    this.manager.retain(sandboxId);
   }
 
   override markIdle(sandboxId: string): void {
@@ -96,14 +111,14 @@ export class RemoteSandboxProvider extends SandboxProvider {
 
   /** 该后端 thread 工作目录的解析（远程路径，替代宿主 `.sandbox` 布局）。 */
   override threadDirectories(threadId: string): ThreadDirectories {
-    return toThreadDirectories(threadId);
+    return this.toThreadDirectories(threadId);
   }
 
   /**
    * 远程目录由连接管理器在建立连接时 `mkdir -p`（见 SshConnectionManager.createEntry），
    * 此处无需重复操作。
    */
-  override async ensureThreadDirectories(): Promise<void> {
+  override async ensureThreadDirectories(_dirs: ThreadDirectories): Promise<void> {
     // no-op：建连时已创建
   }
 
