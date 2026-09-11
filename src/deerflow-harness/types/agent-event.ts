@@ -22,6 +22,8 @@ export enum AgentEventType {
   NODE_EXIT = 'node_exit',
   /** 任务进度更新 */
   TASK_PROGRESS = 'task_progress',
+  /** 任务清单更新（write_todos 更新 state.todos） */
+  TODO_UPDATE = 'todo_update',
   /** Sub-agent 调度事件 */
   SUB_AGENT_DISPATCH = 'sub_agent_dispatch',
   /** Harness 生命周期事件 */
@@ -326,6 +328,20 @@ export interface NodeExitEvent extends BaseAgentEvent {
   payload: NodeExitPayload;
 }
 
+/** 任务清单更新 payload：write_todos 后的完整清单（latest-wins 全量替换）。 */
+export interface TodoUpdatePayload {
+  todos: Array<{
+    content: string;
+    status: 'pending' | 'in_progress' | 'completed';
+  }>;
+}
+
+/** 任务清单更新事件 */
+export interface TodoUpdateEvent extends BaseAgentEvent {
+  eventType: AgentEventType.TODO_UPDATE;
+  payload: TodoUpdatePayload;
+}
+
 /** 任务进度事件 */
 export interface TaskProgressEvent extends BaseAgentEvent {
   eventType: AgentEventType.TASK_PROGRESS;
@@ -403,6 +419,7 @@ export type AgentEvent =
   | NodeEnterEvent
   | NodeExitEvent
   | TaskProgressEvent
+  | TodoUpdateEvent
   | SubAgentDispatchEvent
   | HarnessLifecycleEvent
   | TaskStartedEvent

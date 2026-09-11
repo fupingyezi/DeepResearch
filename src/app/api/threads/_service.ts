@@ -178,6 +178,7 @@ async function build(): Promise<ThreadService> {
   //   - summarizationEnabled: true → 历史触达阈值（12000 tokens）时自动摘要旧消息，
   //                                保留近 8 条；会额外调用一次 LLM。
   //   - guardrailEnabled: true  → 规则式护栏默认开启（仅告警不拦截）。
+  //   - todoEnabled:      true  → 注入 write_todos 工具，清单经 todo_update 事件下发前端。
   // 单次请求可通过 body.configuration.<key> 显式覆盖（见 v3/chat route.ts）。
   const sharedClientOptions = {
     agentName: 'lead' as const,
@@ -188,6 +189,7 @@ async function build(): Promise<ThreadService> {
     sandboxEnabled: true,
     summarizationEnabled: true,
     guardrailEnabled: true,
+    todoEnabled: true,
     checkpointer,
   };
 

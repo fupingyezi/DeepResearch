@@ -27,6 +27,7 @@ interface RuntimeRunOptions {
   sandboxEnabled: boolean;
   summarizationEnabled: boolean;
   guardrailEnabled: boolean;
+  todoEnabled: boolean;
   mcpEnabled: boolean;
   subagentsEnabled: boolean;
   agentName: string;
@@ -49,6 +50,7 @@ function buildConfigKey(
     opts.sandboxEnabled,
     opts.summarizationEnabled,
     opts.guardrailEnabled,
+    opts.todoEnabled,
     opts.mcpEnabled,
     opts.subagentsEnabled,
     opts.agentName,
@@ -127,6 +129,7 @@ export class DeerFlowClient {
       sandboxEnabled: options?.sandboxEnabled ?? false,
       summarizationEnabled: options?.summarizationEnabled ?? false,
       guardrailEnabled: options?.guardrailEnabled ?? false,
+      todoEnabled: options?.todoEnabled ?? false,
       // MCP / subagent 默认开启，保持主应用历史行为；caller 可显式关闭以收紧工具集。
       mcpEnabled: options?.mcpEnabled ?? true,
       subagentsEnabled: options?.subagentsEnabled ?? true,
@@ -148,7 +151,7 @@ export class DeerFlowClient {
    *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled。
+   * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。
    * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
@@ -183,6 +186,7 @@ export class DeerFlowClient {
         metadata?.guardrailEnabled,
         !!this.baseOptions.guardrailEnabled,
       ),
+      todoEnabled: pickBooleanOverride(metadata?.todoEnabled, !!this.baseOptions.todoEnabled),
       mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
       subagentsEnabled: pickBooleanOverride(
         metadata?.subagentsEnabled,
@@ -282,6 +286,7 @@ export class DeerFlowClient {
         // features.summarization 不接受 true，须在此用当次 model 构造实例
         summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
         guardrail: opts.guardrailEnabled,
+        todo: opts.todoEnabled,
       },
     });
 
@@ -796,6 +801,23 @@ export class DeerFlowClient {
         }
 
         for (const nodeName of Object.keys(payload)) {
+          // todos state delta：write_todos 工具经 Command({update:{todos}}) 写回 state，
+          // 因此清单变化会自然出现在 updates 的节点 delta 里，无需中间件额外推 custom 事件。
+          // 注意：必须在下方 `!Array.isArray(msgs) → continue` 之前判定——只更新 todos
+          // 的节点 payload 不含 messages，会被该 continue 跳过。
+          const todosDelta = (payload[nodeName] as { todos?: unknown } | undefined)?.todos;
+          if (Array.isArray(todosDelta)) {
+            const ev = emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TODO_UPDATE,
+                agentId,
+                { todos: todosDelta },
+                { sessionId: effectiveThreadId, ...metadata },
+              ),
+            );
+            if (ev) yield ev;
+          }
+
           const msgs = payload[nodeName]?.messages;
 
           if (!Array.isArray(msgs)) continue;

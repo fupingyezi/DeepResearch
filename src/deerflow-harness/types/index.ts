@@ -47,6 +47,8 @@ export interface ClientOptions {
   summarizationEnabled?: boolean;
   /** 是否启用 GuardrailMiddleware（features.guardrail）。默认 false；服务级建议 true。 */
   guardrailEnabled?: boolean;
+  /** 是否启用 TodoMiddleware（write_todos 工具 + state.todos）。默认 false；服务级建议 true。 */
+  todoEnabled?: boolean;
   /** 是否加载并绑定 MCP 工具。默认 true。*/
   mcpEnabled?: boolean;
   /** 是否注入 task 工具与 subagent 能力（features.subagents）。默认 true。*/
