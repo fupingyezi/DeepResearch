@@ -34,22 +34,43 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
   guardrail: false,
 };
 
+/**
+ * 插入锚点：既接受中间件**类**（`@Next(LoopDetectionMiddleware)` 装饰类），
+ * 也接受中间件**实例**（内置中间件多为 `createMiddleware()` 实例，如
+ * `loopDetectionMiddleware`）。装配时先按同一性匹配，再退化按 `name` 匹配。
+ */
+export type MiddlewareAnchor = AgentMiddleware | (new (...args: any[]) => AgentMiddleware);
+
 export interface PositionedMiddleware extends AgentMiddleware {
-  _nextAnchor?: new (...args: any[]) => AgentMiddleware;
-  _prevAnchor?: new (...args: any[]) => AgentMiddleware;
+  _nextAnchor?: MiddlewareAnchor;
+  _prevAnchor?: MiddlewareAnchor;
 }
 
 /**
- *  标记中间件插入锚点的位置：前/后
+ * 标记中间件插入锚点的位置：插到 anchor 之后。
+ *
+ * 用法一（装饰器，锚点写在类上）：
+ * ```ts
+ * @Next(LoopDetectionMiddleware)
+ * class MyMiddleware extends AgentMiddleware {}
+ * ```
+ * 用法二（实例，锚点写在实例上）：
+ * ```ts
+ * const middleware = createMiddleware({ name: 'MyMiddleware' });
+ * Object.assign(middleware, { _nextAnchor: LoopDetectionMiddleware });
+ * ```
+ * 两种都经 `extraMiddlewares` 传入 `assembleFromFeatures` 生效；锚点不在链上时
+ * 退化为追加链尾。
  */
-export function Next<T extends new (...args: any[]) => AgentMiddleware>(anchor: T) {
+export function Next(anchor: MiddlewareAnchor) {
   return function <U extends new (...args: any[]) => AgentMiddleware>(target: U): U {
     (target as PositionedMiddleware)._nextAnchor = anchor;
     return target;
   };
 }
 
-export function Prev<T extends new (...args: any[]) => AgentMiddleware>(anchor: T) {
+/** 标记中间件插入锚点的位置：插到 anchor 之前（用法同 {@link Next}）。 */
+export function Prev(anchor: MiddlewareAnchor) {
   return function <U extends new (...args: any[]) => AgentMiddleware>(target: U): U {
     (target as PositionedMiddleware)._prevAnchor = anchor;
     return target;
