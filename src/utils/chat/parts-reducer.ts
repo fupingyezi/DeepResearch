@@ -11,6 +11,7 @@
  *    把 status / result / success / errorMessage 写回（极端时序错乱时
  *    作为独立 tool_result part 兜底）
  *  - subagent_task：upsert by taskId；reasoning 累积；children 维护工具调用 history
+ *  - TODO_UPDATE → upsert 单条 todo part（latest-wins 全量替换，不追加多份）
  *  - HUMAN_INTERRUPT → 写顶层 interrupt（不入 parts）
  *  - START / END / HEARTBEAT / ERROR → 状态不变（ERROR 由调用方在 catch 处理）
  */
@@ -30,6 +31,7 @@ type ToolCallPart = Extract<MessagePart, { type: 'tool_call' }>;
 type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
 type TextPart = Extract<MessagePart, { type: 'text' }>;
 type ReasoningPart = Extract<MessagePart, { type: 'reasoning' }>;
+type TodoPart = Extract<MessagePart, { type: 'todo' }>;
 
 /**
  * 不可变聚合状态。
@@ -104,6 +106,9 @@ export function reducePartsState(state: PartsState, event: ClientAgentEvent): Pa
 
     case Et.TASK_PROGRESS:
       return upsertSubagentTask(state, event.payload);
+
+    case Et.TODO_UPDATE:
+      return upsertTodo(state, event.payload.todos);
 
     case Et.HUMAN_INTERRUPT:
       return {
@@ -456,6 +461,35 @@ function applySubagentToolEvent(
     ...working,
     parts: replaceAt(working.parts, idx, updated),
     lastPartType: 'subagent_task',
+  };
+}
+
+/**
+ * upsert todo part：write_todos 每轮下发全量清单，同一条 assistant 消息内
+ * 只保留一份 todo part（latest-wins 覆盖），避免清单更新时堆叠多份快照。
+ */
+function upsertTodo(state: PartsState, todos: TodoPart['content']['todos']): PartsState {
+  const existingIndex = state.parts.findIndex((p) => p.type === 'todo');
+  if (existingIndex >= 0) {
+    const existing = state.parts[existingIndex] as TodoPart;
+    return {
+      ...state,
+      parts: replaceAt(state.parts, existingIndex, {
+        ...existing,
+        content: { todos: todos.map((t) => ({ ...t })) },
+      }),
+    };
+  }
+  const part: TodoPart = {
+    partId: uuidv4(),
+    type: 'todo',
+    createdAt: Date.now(),
+    content: { todos: todos.map((t) => ({ ...t })) },
+  };
+  return {
+    ...state,
+    parts: [...state.parts, part],
+    lastPartType: 'todo',
   };
 }
 

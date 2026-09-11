@@ -34,7 +34,7 @@ import { getFileIcon } from '@/utils/files/file-info-handler';
 /**
  * 从 parts[] 派生：
  *   - bodyText：所有 text part 拼接（用于正文渲染 + 复制 + 下载兜底）
- *   - timelineSteps：reasoning / tool_call / subagent_task 三类 part 子集
+ *   - timelineSteps：reasoning / tool_call / subagent_task / todo 四类 part 子集
  *   - artifactPart：第一个 artifact part（点击右侧入口卡片打开 ArtifactPanel）
  *   - taskSummaryPart：第一个 task_summary part（多 agent 工作流的任务总结）
  *   - isMultiAgent：本轮是否为多 agent 工作流（存在 ≥1 个 subagent_task part）
@@ -59,7 +59,12 @@ function deriveFromParts(parts: MessagePart[]): {
       if (part.content.text.length > 0) textSegments.push(part.content.text);
       continue;
     }
-    if (isReasoningPart(part) || isToolCallPart(part) || isSubagentTaskPart(part)) {
+    if (
+      isReasoningPart(part) ||
+      isToolCallPart(part) ||
+      isSubagentTaskPart(part) ||
+      part.type === 'todo'
+    ) {
       if (isSubagentTaskPart(part)) isMultiAgent = true;
       timelineSteps.push(part);
       continue;
