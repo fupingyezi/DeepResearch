@@ -76,10 +76,19 @@ export {
 import { getMemoryConfig as _gmc } from './config';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
+import { retrieveMemory } from './retrieval';
 
 export interface BuildMemoryContextOptions {
   agentName?: string | null;
   userId?: string | null;
+  /**
+   * 注入模式：
+   * - 'inject'（默认）：全量注入所有 section 与预算内 facts；
+   * - 'retrieve'：按 query 检索相关 facts / section，用更小预算注入。
+   */
+  mode?: 'inject' | 'retrieve';
+  /** retrieve 模式的检索 query（通常为最近一条用户输入）。 */
+  query?: string;
 }
 
 /**
@@ -97,6 +106,17 @@ export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): 
       agentName: opts.agentName ?? null,
       userId: opts.userId ?? null,
     });
+
+    // retrieve 模式：先按 query 收敛出相关子集，再用更小的预算格式化。
+    // 检索无命中（或 query 为空）时不注入，避免无关记忆干扰模型。
+    if (opts.mode === 'retrieve') {
+      const picked = retrieveMemory(data, opts.query ?? '', { topK: config.retrieveTopK });
+      if (!picked) return '';
+      const pickedText = _fmt(picked, config.retrieveMaxTokens);
+      if (!pickedText.trim()) return '';
+      return `<memory mode="retrieve">\n${pickedText}\n</memory>\n`;
+    }
+
     const text = _fmt(data, config.maxInjectionTokens);
     if (!text.trim()) return '';
     return `<memory>\n${text}\n</memory>\n`;

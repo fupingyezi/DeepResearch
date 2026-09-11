@@ -21,6 +21,8 @@ import { getEnabledSkillsSignature } from './skills';
 
 interface RuntimeRunOptions {
   memoryEnabled: boolean;
+  /** 记忆注入模式：inject（默认，全量）/ retrieve（关键词检索 top-K）。 */
+  memoryMode: 'inject' | 'retrieve';
   autoTitleEnabled: boolean;
   threadDataEnabled: boolean;
   uploadsEnabled: boolean;
@@ -67,6 +69,36 @@ function buildConfigKey(
  */
 function pickBooleanOverride(metadataValue: unknown, fallback: boolean): boolean {
   return typeof metadataValue === 'boolean' ? metadataValue : fallback;
+}
+
+/**
+ * 提取本轮输入文本（仅首轮 HumanMessage 形态有；resume 的 Command 返回 undefined）。
+ * 用于 retrieve 模式的记忆检索 query。
+ */
+function extractInputText(input: { messages: HumanMessage[] } | Command): string | undefined {
+  if (!input || typeof input !== 'object' || !('messages' in input)) return undefined;
+  const messages = (input as { messages?: HumanMessage[] }).messages;
+  const first = Array.isArray(messages) ? messages[0] : undefined;
+  const content = first?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) =>
+        block && typeof block === 'object' && typeof (block as { text?: string }).text === 'string'
+          ? (block as { text: string }).text
+          : '',
+      )
+      .join('\n');
+  }
+  return undefined;
+}
+
+/**
+ * memoryMode 覆盖：只接受 'inject' / 'retrieve' 两个字面量，其它值（含 undefined）
+ * 一律回落 baseOptions，避免拼写错误静默改变记忆行为。
+ */
+function pickMemoryMode(value: unknown, fallback: 'inject' | 'retrieve'): 'inject' | 'retrieve' {
+  return value === 'retrieve' || value === 'inject' ? value : fallback;
 }
 
 /**
@@ -123,6 +155,7 @@ export class DeerFlowClient {
     this.baseOptions = {
       agentName: options?.agentName ?? 'lead',
       memoryEnabled: options?.memoryEnabled ?? false,
+      memoryMode: options?.memoryMode ?? 'inject',
       autoTitleEnabled: options?.autoTitleEnabled ?? false,
       threadDataEnabled: options?.threadDataEnabled ?? false,
       uploadsEnabled: options?.uploadsEnabled ?? false,
@@ -162,6 +195,7 @@ export class DeerFlowClient {
     const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
     return {
       memoryEnabled: pickBooleanOverride(metadata?.memoryEnabled, !!this.baseOptions.memoryEnabled),
+      memoryMode: pickMemoryMode(metadata?.memoryMode, this.baseOptions.memoryMode ?? 'inject'),
       autoTitleEnabled: pickBooleanOverride(
         metadata?.autoTitleEnabled,
         !!this.baseOptions.autoTitleEnabled,
@@ -209,6 +243,7 @@ export class DeerFlowClient {
   private async resolveSystemPrompt(
     opts: RuntimeRunOptions,
     mcpTools: StructuredToolInterface[],
+    memoryQuery?: string,
   ): Promise<string> {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
@@ -222,6 +257,8 @@ export class DeerFlowClient {
         userId: opts.userId,
         injectMemory: opts.memoryEnabled,
         mcpToolsSection: buildMcpToolsSection(mcpTools),
+        memoryMode: opts.memoryMode,
+        memoryQuery,
       });
     } catch (e) {
       console.warn(
@@ -374,7 +411,9 @@ export class DeerFlowClient {
     // 保证「模型在提示里看到的 MCP 工具」与「实际可调用的工具」严格一致。
     // mcpEnabled=false 时本轮不加载任何 MCP 工具（既不绑定也不写进提示），用于收紧工具集。
     const mcpTools = runOpts.mcpEnabled ? await loadMcpTools() : [];
-    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools);
+    // 检索模式的 query 取本轮用户输入（resume 的 Command 输入无文本 → 回落全量注入）
+    const memoryQuery = extractInputText(input);
+    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools, memoryQuery);
     const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
 
     // 3. lifecycle start

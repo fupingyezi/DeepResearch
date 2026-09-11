@@ -32,6 +32,11 @@ export interface ClientOptions {
   agentName?: string;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
+  /**
+   * 记忆注入模式。默认 'inject'（全量注入）。
+   * 'retrieve' 按本轮用户输入检索相关 facts/section（关键词打分，非语义检索）。
+   */
+  memoryMode?: 'inject' | 'retrieve';
   /** 是否启用 autoTitle（features.autoTitle）。默认 false；服务级建议 true。 */
   autoTitleEnabled?: boolean;
   /** 是否启用 ThreadDataMiddleware（features.threadData）。默认 false；服务级建议 true。 */

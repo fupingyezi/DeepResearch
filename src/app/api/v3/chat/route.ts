@@ -64,6 +64,11 @@ interface ChatStreamBody {
     model?: { value?: string };
     /** 本次请求是否启用长期记忆；不传 = 走服务级默认（_service.ts 注入 true）。 */
     memoryEnabled?: boolean;
+    /**
+     * 记忆注入模式：'inject'（默认，全量）/ 'retrieve'（按本轮输入检索 top-K）。
+     * 不传 = 走服务级默认；
+     */
+    memoryMode?: 'inject' | 'retrieve';
     [k: string]: unknown;
   } | null;
   message: { contents: ContentBlock[] };
@@ -256,9 +261,19 @@ export async function POST(request: NextRequest) {
     typeof body.configuration?.memoryEnabled === 'boolean'
       ? body.configuration.memoryEnabled
       : undefined;
+  // 记忆注入模式：仅接受两个字面量，拼写错误不改变默认（全量注入）行为
+  const memoryModeOverride =
+    body.configuration?.memoryMode === 'retrieve' || body.configuration?.memoryMode === 'inject'
+      ? body.configuration.memoryMode
+      : undefined;
   const runMetadata: Record<string, unknown> | undefined =
-    typeof memoryEnabledOverride === 'boolean'
-      ? { memoryEnabled: memoryEnabledOverride }
+    typeof memoryEnabledOverride === 'boolean' || memoryModeOverride !== undefined
+      ? {
+          ...(typeof memoryEnabledOverride === 'boolean'
+            ? { memoryEnabled: memoryEnabledOverride }
+            : {}),
+          ...(memoryModeOverride !== undefined ? { memoryMode: memoryModeOverride } : {}),
+        }
       : undefined;
 
   // —— 幂等创建 thread ——
