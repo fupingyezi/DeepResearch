@@ -21,6 +21,19 @@ export { DockerSandboxProvider } from './docker/docker-sandbox-provider';
 export { DockerSandbox } from './docker/docker-sandbox';
 export { isDockerAvailable } from './docker/docker-cli';
 export { getDockerSandboxConfig, type DockerSandboxConfig } from './docker/docker-config';
+export { RemoteSandboxProvider } from './remote/remote-sandbox-provider';
+export { RemoteSandbox } from './remote/remote-sandbox';
+export {
+  SshConnectionManager,
+  type SshConnection,
+  type ExecOutcome,
+} from './remote/ssh-connection-manager';
+export {
+  getRemoteSandboxConfig,
+  getRemoteThreadDirectories,
+  type RemoteSandboxConfig,
+  type RemoteThreadDirectories,
+} from './remote/remote-config';
 export {
   SandboxError,
   SandboxNotFoundError,

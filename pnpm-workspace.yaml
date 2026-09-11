@@ -1,3 +1,11 @@
+# pnpm 配置（pnpm 10+ 起，包管理设置从 package.json 的 "pnpm" 字段迁移至此）。
+#
+# allowBuilds：依赖的 postinstall 构建脚本白名单。
+#   - core-js / unrs-resolver：原有用到的构建脚本。
+#   - cpu-features / ssh2：ssh2 的可选原生加速（cpu-features），纯 JS 模式功能完整，
+#     故禁用其构建脚本 —— 避免在 CI/服务器构建镜像时引入 node-gyp 工具链依赖。
 allowBuilds:
   core-js: true
+  cpu-features: false
+  ssh2: false
   unrs-resolver: true

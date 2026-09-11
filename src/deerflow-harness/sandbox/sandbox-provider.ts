@@ -15,7 +15,10 @@
  * 无需实现；仅 Docker 后端覆盖以驱动回收与监控。
  */
 
+import * as fsp from 'node:fs/promises';
+
 import { Sandbox } from './sandbox';
+import { getThreadDirectories, type ThreadDirectories } from './paths';
 
 export abstract class SandboxProvider {
   /** 获取（或复用）一个沙箱，返回其 id。 */
@@ -64,5 +67,26 @@ export abstract class SandboxProvider {
    */
   isSecureIsolation(): boolean {
     return false;
+  }
+
+  /**
+   * 该后端下 thread 工作目录的解析。
+   *
+   * 工具层据此把虚拟路径（/mnt/user-data/*）映射为「本后端的真实路径」：
+   * local/docker 为宿主 `.sandbox` 布局（docker 再经挂载映射到容器），
+   * remote 为远程主机上的同构布局。默认本地实现。
+   */
+  threadDirectories(threadId: string): ThreadDirectories {
+    return getThreadDirectories(threadId);
+  }
+
+  /**
+   * 确保 thread 目录存在。默认本地 mkdir；远程后端覆盖为经 SSH 创建
+   * （由连接管理器在建连时完成，此处为 no-op）。
+   */
+  async ensureThreadDirectories(dirs: ThreadDirectories): Promise<void> {
+    for (const dir of [dirs.workspace, dirs.uploads, dirs.outputs]) {
+      if (dir) await fsp.mkdir(dir, { recursive: true });
+    }
   }
 }

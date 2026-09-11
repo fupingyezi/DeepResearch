@@ -8,7 +8,6 @@
  * 获取沙箱、按需创建 thread 目录——保证 lead 与 subagent 都能直接使用。
  */
 
-import * as fsp from 'node:fs/promises';
 import { tool, type ToolRuntime } from 'langchain';
 import z from 'zod';
 
@@ -16,7 +15,6 @@ import type { SandboxState, ThreadDataState } from '../agents/thread-state';
 import { getContext } from '../runtime/context';
 import { SandboxError, SandboxRuntimeError } from './exceptions';
 import { withFileLock } from './file-operation-lock';
-import { getThreadDirectories } from './paths';
 import {
   maskLocalPathsInOutput,
   replaceVirtualPathsInCommand,
@@ -124,7 +122,7 @@ function resolveThreadData(runtime: ToolRuntime): ThreadDataState {
   if (!threadId) {
     throw new SandboxRuntimeError('Thread ID not available in runtime for sandbox tool');
   }
-  const dirs = getThreadDirectories(threadId);
+  const dirs = getSandboxProvider().threadDirectories(threadId);
   return {
     workspacePath: dirs.workspace,
     uploadsPath: dirs.uploads,
@@ -132,17 +130,16 @@ function resolveThreadData(runtime: ToolRuntime): ThreadDataState {
   };
 }
 
-async function ensureThreadDirectories(threadData: ThreadDataState): Promise<void> {
-  for (const dir of [threadData.workspacePath, threadData.uploadsPath, threadData.outputsPath]) {
-    if (dir) await fsp.mkdir(dir, { recursive: true });
-  }
-}
-
 /** 惰性获取沙箱 + 解析 threadData + 创建 thread 目录。 */
 async function ensureSandbox(runtime: ToolRuntime): Promise<ResolvedSandboxContext> {
-  const threadData = resolveThreadData(runtime);
-  await ensureThreadDirectories(threadData);
   const provider = getSandboxProvider();
+  const threadData = resolveThreadData(runtime);
+  await provider.ensureThreadDirectories({
+    userData: '',
+    workspace: threadData.workspacePath ?? '',
+    uploads: threadData.uploadsPath ?? '',
+    outputs: threadData.outputsPath ?? '',
+  });
   const sandboxId = provider.acquire(resolveThreadId(runtime) ?? undefined);
   const sandbox = provider.get(sandboxId);
   if (sandbox === null) {

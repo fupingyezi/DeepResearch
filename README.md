@@ -17,7 +17,7 @@
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
-- 🔒 **可插拔安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list/bash 等沙箱工具集。通过 `DEERFLOW_SANDBOX_BACKEND` 在 **local**（宿主文件系统直连）与 **docker**（每线程一个加固容器，内核级隔离）两种后端间切换。
+- 🔒 **可插拔安全沙箱**：内置路径安全校验、文件操作锁（并发控制）、异常隔离的受限执行环境；支持读写/搜索/list/bash 等沙箱工具集。通过 `DEERFLOW_SANDBOX_BACKEND` 在 **local**（宿主文件系统直连）/ **docker**（每线程一个加固容器，内核级隔离）/ **remote**（每线程一条 SSH 长连接，命令与文件 IO 都在远程主机执行）三种后端间切换。
 - 🐳 **Docker 沙箱 + 多对话并行编排**：docker 后端为每个 thread 分配长驻加固容器（`--cap-drop ALL` + `no-new-privileges` + 内存/CPU/pids 限额 + 非 root 降权），支持空闲回收、LRU 淘汰与容错重建；配套 **双层背压**（run 级并发闸门 + 容器级并发上限）与 Redis 跨进程协调（不可用时自动降级进程内），单机多进程 / PM2 场景可安全并行多对话。
 - 📊 **基准测试框架**：`benchmarks/` 内置评估系统 + 研究 QA 数据集，支持 Agent 质量打分与结果持久化。
 - 🚀 **CI/CD 自动部署**：push main 自动走「质量门禁（lint/format/typecheck/build）→ 打包源码 → 服务器本地构建镜像 → 起服务 → 健康检查失败自动回滚」全流程；本地配套 husky 提交校验（lint-staged + commitlint）。详见 [docs/deploy-runbook.md](./docs/deploy-runbook.md)。
