@@ -1,5 +1,5 @@
 /**
- * Middleware execution order（必须严格按 0 → 13 编排）：
+ * Middleware execution order（必须严格按 0 → 12 编排）：
  *
  *  0. ThreadDataMiddleware              (基础设施)
  *  1. UploadsMiddleware                 (基础设施)

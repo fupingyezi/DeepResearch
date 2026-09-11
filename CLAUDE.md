@@ -56,7 +56,7 @@ pnpm format:check
 docker-compose up -d
 ```
 
-**注意：项目目前无单元测试。**
+**单元测试（vitest）：**`pnpm test` 运行 `src/**/*.test.ts`，测试文件与被测文件同目录。
 
 **提交校验（husky，需先 `pnpm install` 激活）：**
 
@@ -66,7 +66,7 @@ docker-compose up -d
 **CI 门禁与本地等价命令**（推 main 前建议本地全绿）：
 
 ```bash
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm build
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 ```
 
 ---
@@ -75,7 +75,7 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm build
 
 流水线：`.github/workflows/deploy.yml`，目标腾讯云 Ubuntu 服务器（`/opt/mini-deepresearch`）。
 
-- **job quality**：lint / format:check / typecheck / build（PR 也跑）
+- **job quality**：lint / format:check / typecheck / test / build（PR 也跑）
 - **job deploy**（仅 push main）：`git archive` 打包源码（~0.5MB）→ scp → **服务器本地 `docker build`**（`scripts/deploy-remote.sh`）→ compose 起服务 → 健康检查（`/api/auth/setup-status`，30×3s，<500 即存活）→ 失败自动回滚 `.previous-image`
 - **镜像不在 CI 构建也不走 registry**：跨境 scp 镜像 tar 与推 TCR 均实测不可用（详见 `docs/cicd-notes.md` 踩坑实录）；服务器构建的依赖链路已配国内源（daemon registry mirror + Dockerfile 内 npmmirror）
 - **镜像 tag**：`deepresearch:<git sha 前 12 位>`，历史镜像保留在服务器本地，可手动回滚任意版本
@@ -121,8 +121,10 @@ DEERFLOW_DOCKER_MEMORY=2g
 DEERFLOW_DOCKER_CPUS=1.5
 DEERFLOW_DOCKER_NETWORK=bridge            # bridge（联网）| none（断网）
 DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS=32    # 容器级并发上限
-DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌（未设则禁用）
+DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌（未设则接口返回 401）
 ```
+
+> 完整变量清单（含鉴权相关变量、模型密钥加密、Docker 沙箱的全部 `DEERFLOW_DOCKER_*` 项）见仓库根 `.env.example`。
 
 ---
 
@@ -147,7 +149,7 @@ DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌�
                           │ HTTP + SSE
           ┌───────────────┴────────────────┐
           │        API Routes              │
-          │  POST /api/v3/chat/[threadId]  │  ← 主入口
+          │  POST /api/v3/chat             │  ← 主入口（sessionId 走 body）
           │  POST/GET /api/threads/...     │
           │  POST /api/files/upload        │
           └───────────────┬────────────────┘
@@ -157,7 +159,7 @@ DEERFLOW_SANDBOX_STATS_TOKEN=...          # GET /api/sandbox/stats 访问令牌�
 │  进程级单例，通过 getThreadService() 获取               │
 │  8 个操作：createThread / listThreads / getThread /     │
 │  deleteThread / submitRun / subscribe /                 │
-│  getCheckpoint / resume（未实现）                       │
+│  getCheckpoint / resume（Command 续跑人工中断）          │
 └────┬─────────────────┬──────────────────┬──────────────┘
      │                 │                  │
      ▼                 ▼                  ▼
@@ -189,13 +191,13 @@ StreamBridge（进程内 EventEmitter 总线）
 
 ### 1. API 路由层
 
-#### `POST /api/v3/chat/[threadId]`（主聊天接口）
+#### `POST /api/v3/chat`（主聊天接口）
 
-**文件：** `src/app/api/v3/chat/[threadId]/route.ts`
+**文件：** `src/app/api/v3/chat/route.ts`
 
 三阶段管线：
 
-1. **幂等创建线程**：以 `threadId` 为主键，若已存在则直接复用。
+1. **幂等创建线程**：请求体 `sessionId` 缺省时新建会话（UUID），存在则复用。
 2. **提交 Run（fire-and-forget）**：`submitRun()` 立即返回 `run_id`，Agent 在后台异步执行。
 3. **注入 START 帧并返回 SSE 流**：在 StreamBridge 订阅之上先 `yield` 一个携带 `run_id` 和 `thread_id` 的 START 事件，再转发后续事件。
 
@@ -207,18 +209,31 @@ Response Headers：
 请求体：
 
 ```typescript
-interface ChatBody {
-  input: string; // 必填
-  agentType?: string; // Agent 标识，默认 'lead'
-  displayName?: string; // 线程显示名
-  metadata?: Record<string, any>; // 运行期开关，见 DeerFlowClient
+interface ChatStreamBody {
+  sessionId?: string; // 缺省 = 新建会话；存在 = 已有会话
+  configuration?: {
+    model?: { value?: string }; // 选择 MODEL_PRESETS 预设
+    memoryEnabled?: boolean; // 单次请求覆盖服务级记忆开关
+  } | null;
+  message: {
+    contents: Array<
+      | { type: 'text'; text: string }
+      | { type: 'file'; fileId: string }
+      | { type: 'image'; fileId: string }
+    >;
+  };
+  stream?: true;
+  operation?: 'resume' | 'recall' | 'reEditCall';
 }
 ```
 
-`metadata` 中的运行期开关（影响本次 Agent 行为，不修改 baseOptions）：
+`configuration` 中的运行期开关（影响本次 Agent 行为，不修改 baseOptions）：
 
-- `modelKey: string` → 选择 MODEL_PRESETS 中的预设模型（不传走默认 preset）
-- 其它业务字段（如 `sessionId`、`hasFiles`、`uploadedFiles`）按需透传
+- `model.value: string` → 选择 MODEL_PRESETS 中的预设模型（不传走默认 preset）
+- `memoryEnabled: boolean` → 覆盖服务级记忆开关（严格布尔判定）
+
+`operation` 取值：`resume`（续跑人工中断，携带 `HumanDecision`）、`recall`（重发）、
+`reEditCall`（编辑后重发）。
 
 > 注：自 deer-flow 2.0 重构起，旧版 `is_plan_mode` / `subagent_enabled` /
 > `agent_name` 三开关已废弃；lead-agent 永远启用 subagent 能力，由 agent 自主
@@ -250,7 +265,7 @@ ThreadService 是整个系统的门面，装配 DeerFlowClient + Checkpointer + 
   - 成功：`runs.setStatus('succeeded')` + `threads.updateStatus('idle')`
   - 失败：catch 中 publish ERROR 事件 → `runs.setStatus('failed')` + `threads.updateStatus('error')`
   - 兜底：finally 始终 publish END 事件（channel 自身对已关闭状态的 publish 是 no-op）
-- `resume()` 目前为占位，调用直接抛异常
+- `resume()`：经 `resumeStream()` 以 LangGraph `Command({ resume: decision })` 续跑人工中断（HTTP `operation: 'resume'` 触发）
 
 **线程状态机：**
 
@@ -317,7 +332,7 @@ OpenAI 兼容模型流式输出时，同一工具调用的 `tool_call_chunks` �
 
 **文件：** `src/deerflow-harness/runtime/sse/client-event.ts`
 
-对外暴露的白名单协议（10 种），前端通过 `src/runtime/protocol/client-event.ts` 直接 re-export 复用：
+对外暴露的白名单协议（9 种），前端通过 `src/runtime/protocol/client-event.ts` 直接 re-export 复用：
 
 | eventType         | payload                                         | 说明                        |
 | ----------------- | ----------------------------------------------- | --------------------------- |
@@ -688,7 +703,7 @@ CREATE TABLE runs (
 ### 11. 前端 SSE 事件处理链
 
 ```
-fetch() POST /api/v3/chat/[threadId]
+fetch() POST /api/v3/chat
     ↓
 src/utils/chat/stream-chat-handler.ts（StreamChatHandler）
     ↓
@@ -732,20 +747,20 @@ runWithContext(ctx, async () => {
 });
 ```
 
-SubagentExecutor 通过 `getContext()?.thread_id` 读取父线程 ID，实现父子共用 Checkpoint。
+SubagentExecutor 通过 `getContext()?.thread_id` 读取父线程 ID，透传给子图（checkpointer 接线见 §7）。
 
 ### 3. 中间件定位装饰器
 
 ```typescript
-// 可将自定义中间件插入到指定中间件之前/之后
+// 可将自定义中间件插入到指定中间件之前/之后（由 assembleFromFeatures 解析锚点）
 @Next(LoopDetectionMiddleware)  // 插入到 LoopDetection 之后
-@Prev(ClarificationMiddleware)  // 插入到 Clarification 之前
+@Prev(MemoryMiddleware)         // 插入到 Memory 之前
 class MyCustomMiddleware extends AgentMiddleware { ... }
 ```
 
 ### 4. 幂等线程创建
 
-前端生成 `threadId`（UUID）后调用 `POST /api/v3/chat/[threadId]`。`createThread()` 先查询再决定是否写入，外部指定 ID 的场景天然支持请求重试。
+前端生成 `sessionId`（UUID）后作为请求体字段调用 `POST /api/v3/chat`。`createThread()` 先查询再决定是否写入，外部指定 ID 的场景天然支持请求重试。
 
 ---
 
@@ -816,7 +831,7 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | 文件                                                             | 职责                                                        |
 | ---------------------------------------------------------------- | ----------------------------------------------------------- |
 | `src/app/api/threads/_service.ts`                                | ThreadService 进程单例工厂                                  |
-| `src/app/api/v3/chat/[threadId]/route.ts`                        | 主聊天 API，三阶段管线                                      |
+| `src/app/api/v3/chat/route.ts`                                   | 主聊天 API，三阶段管线（sessionId 走 body）                 |
 | `src/deerflow-harness/client.ts`                                 | DeerFlowClient，Agent 缓存 + 流式调用                       |
 | `src/deerflow-harness/runtime/service.ts`                        | ThreadService 接口定义与实现                                |
 | `src/deerflow-harness/agents/factory.ts`                         | createBaseAgent + assembleFromFeatures                      |
@@ -846,8 +861,7 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 
 ## 已知限制
 
-1. `resume()` 尚未实现，调用直接抛出异常（interrupt/resume 工作流待完成）
-2. StreamBridge 为进程内总线，不支持多实例水平扩展（需替换为 Redis pub/sub）
-3. ThreadChannel 的 buffer 无上限，超长运行的线程可能积累大量事件
-4. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
-5. `x-user-id` 仅用于数据过滤，无真正的鉴权机制
+1. StreamBridge 为进程内总线，不支持多实例水平扩展（需替换为 Redis pub/sub）
+2. ThreadChannel 的 buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧的非关键帧（`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
+3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
+4. 单元测试覆盖建设中（vitest 已接入，当前覆盖中间件装配等核心纯逻辑）

@@ -32,8 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
-# 生产环境变量模板需要入库（.dockerignore 同款例外）
+# 环境变量模板需要入库（.dockerignore 同款例外）
+!.env.example
 !.env.production.example
+!benchmarks/.env.example
 
 # vercel
 .vercel

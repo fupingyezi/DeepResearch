@@ -11,9 +11,9 @@
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按 `agentName + userId` 分文件持久化到 `.memory/`；支持通过 API 或设置界面手动 CRUD 记忆事实。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
-- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
+- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 9 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父子 subagent 共用 thread checkpoint）；Redis 缓存；MinIO 存上传文件。
-- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复、ToolError、Memory、SubagentLimit、LoopDetection、Guardrail、Title、Todo、Summarization、Clarification、ViewImage、Uploads、ThreadData、Sandbox 等），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。
+- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、ViewImage、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 📝 **完整 Markdown 渲染**：GFM、KaTeX 数学公式、代码高亮、长 URL/表格安全换行。
@@ -50,7 +50,7 @@ src/
 │   │   └── page.tsx                    # ⭐ 主页（聊天 + Artifact 浮窗）
 │   ├── (auth)/                         # 认证路由组（公开页面）
 │   ├── api/                            # API 路由
-│   │   ├── v3/chat/[threadId]/         # ⭐ 主聊天入口（SSE 流）
+│   │   ├── v3/chat/                    # ⭐ 主聊天入口（SSE 流，threadId 走请求体 sessionId）
 │   │   ├── threads/                    # 线程 CRUD / runs 列表 / SSE 流回放
 │   │   ├── conversations/              # 对话会话管理（获取/历史/更新）
 │   │   ├── files/                      # 文件上传 / 删除
@@ -69,12 +69,13 @@ src/
 │   ├── model-selector/                 # 模型切换
 │   ├── files/                          # 文件列表项
 │   ├── process/                        # Artifact 浮窗产物面板 + 人工决策节点
-│   ├── settings/                       # ⭐ 设置弹窗（5 个页面）
+│   ├── settings/                       # ⭐ 设置弹窗（账户 / 模型 / 记忆 / 技能 / 工具页）
 │   │   ├── account-settings-page.tsx   # 账户设置
-│   │   ├── mcp-servers-section.tsx     # MCP 服务器管理
+│   │   ├── model-settings-page.tsx     # 模型选择
 │   │   ├── memory-settings-page.tsx    # 记忆/知识库管理
 │   │   ├── skill-settings-page.tsx     # 技能管理
-│   │   └── tools-settings-page.tsx     # 工具查看
+│   │   ├── tools-settings-page.tsx     # 工具查看（含 MCP 服务器管理）
+│   │   └── mcp-servers-section.tsx     # MCP 服务器管理（工具页内嵌）
 │   └── sider/                          # 左侧会话侧边栏
 │
 ├── deerflow-harness/                   # ⭐ 多智能体编排核心
@@ -84,7 +85,7 @@ src/
 │   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
 │   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
-│   │   ├── middlewares/                # 14 种中间件实现（含 tool-call-integrity 子目录）
+│   │   ├── middlewares/                # 位序中间件实现（含 tool-call-integrity 子目录）
 │   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储与队列
 │   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
@@ -174,12 +175,21 @@ scripts/health-check.sh                 # HTTP 探活
 scripts/rollback.sh                     # 回滚到上一版本镜像
 
 benchmarks/                             # 基准测试与评估框架
-├── run.ts                              # 测试运行脚本
-├── agent-wrapper.ts                    # Agent 包装器
-├── config.ts                           # 测试配置
-├── evaluators/                         # 评估器（质量打分）
-├── datasets/research-qa.ts             # 研究 QA 数据集
-└── results/                            # 评估结果持久化
+├── config.ts                           # 测试配置（模型 / 评分 / 并发，读 .env）
+├── load-env.ts                         # .env 加载
+├── tsconfig.bench.json                 # benchmarks 独立 tsconfig
+├── longmem/                            # ⭐ LongMemEval 长期记忆基准（ICLR 2025）
+│   ├── README.md                       # 数据准备 / 两阶段运行说明
+│   ├── run.ts                          # 评测主脚本（--ingest 两阶段模式）
+│   ├── agent.ts                        # Agent 包装器（PREFIX / INGEST 两种历史模式）
+│   ├── dataset.ts                      # 官方数据集格式适配
+│   └── ingest.ts                       # 记忆预写入（逐 session 落盘 memory）
+└── research-qa/                        # 研究 QA 评估
+    ├── README.md                       # 运行说明
+    ├── run.ts                          # 评测主脚本
+    ├── agent.ts                        # Agent 包装器
+    ├── dataset.ts                      # 研究 QA 数据集
+    └── evaluators.ts                   # 评估器（质量打分）
 
 docs/                                   # 设计文档
 ├── deerflow-alignment-plan.md          # DeerFlow 架构对齐计划
@@ -266,7 +276,7 @@ AUTH_JWT_SECRET=please_change_this_to_a_long_random_secret
 AUTH_TOKEN_EXPIRY_DAYS=7
 ```
 
-> `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设位于 `src/deerflow-harness/models`，可通过请求 `metadata.modelKey` 切换。
+> `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设位于 `src/deerflow-harness/models`，可通过聊天请求体 `configuration.model.value` 切换。
 
 ### 启动基础设施
 
@@ -315,7 +325,7 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 
 | 路由                                          | 方法         | 说明                                                                 |
 | --------------------------------------------- | ------------ | -------------------------------------------------------------------- |
-| `/api/v3/chat/[threadId]`                     | POST         | ⭐ 主聊天入口，SSE 流。响应头 `X-Run-Id` 立即可读                    |
+| `/api/v3/chat`                                | POST         | ⭐ 主聊天入口，SSE 流。threadId 走请求体 `sessionId`                 |
 | `/api/threads`                                | POST/GET     | 创建线程；分页列出（`?limit=&offset=&status=`）                      |
 | `/api/threads/[threadId]`                     | GET/DELETE   | 获取详情（可附带 checkpoint）/ 删除                                  |
 | `/api/threads/[threadId]/runs`                | GET          | 列出线程下的 run                                                     |
@@ -344,21 +354,25 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 **主聊天请求体：**
 
 ```typescript
-interface ChatBody {
-  input: string; // 必填
-  agentType?: string; // 默认 'lead'
-  displayName?: string; // 线程显示名
-  metadata?: {
-    modelKey?: string; // 切换 MODEL_PRESETS 中的模型
-    sessionId?: string;
-    hasFiles?: boolean;
-    uploadedFiles?: unknown[];
-    [k: string]: unknown;
+interface ChatStreamBody {
+  sessionId?: string; // 缺省 = 新建会话；存在 = 已有会话
+  configuration?: {
+    model?: { value?: string }; // 切换 MODEL_PRESETS 中的模型
+    memoryEnabled?: boolean; // 单次请求覆盖服务级记忆开关
+  } | null;
+  message: {
+    contents: Array<
+      | { type: 'text'; text: string }
+      | { type: 'file'; fileId: string }
+      | { type: 'image'; fileId: string }
+    >;
   };
+  stream?: true;
+  operation?: 'resume' | 'recall' | 'reEditCall'; // 续跑人工中断 / 重发 / 编辑重发
 }
 ```
 
-**SSE 客户端事件白名单（10 种）：**
+**SSE 客户端事件白名单（9 种）：**
 
 `start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `human_interrupt` / `error` / `end` / `heartbeat`
 
@@ -370,13 +384,13 @@ interface ChatBody {
 前端（React/Next.js + Zustand + EventBus + 设置管理）
         │ HTTP + SSE
         ▼
-API Routes（/api/v3/chat/[threadId] 等）
+API Routes（/api/v3/chat 等）
         │
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ ├── RunConcurrencyGate（run 级并发闸门：FIFO 信号量 + 跨进程占位，超限先回传 queued）
    │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用 + MCP/Skill 工具加载）
-   │ │      └── createBaseAgent + 中间件管线（最多 14 层，含 Sandbox 中间件 retain/markIdle）
+   │ │      └── createBaseAgent + 中间件管线（13 层位序 + Qwen 恢复层，含 Sandbox 中间件 retain/markIdle）
    │ │             ├── 工具：task / search_web / clarification / sandbox(读写/搜索/bash) / ...
    │ │             │         └── SubagentExecutor（父子共用 checkpoint）
    │ │             └── SandboxProvider（local 宿主直连 / docker 每线程加固容器 + 容器级并发）
@@ -392,7 +406,7 @@ StreamBridge（进程内 EventEmitter 总线）
 
 - ThreadService 状态机与不变量（`try / catch / finally` 三段式收敛）
 - Tool Call Chunk 缓冲机制（OpenAI 流式分片按 index 拼接）
-- 中间件组装顺序与 `RuntimeFeatures` 开关（14 层中间件 + Tool Call 完整性子规则）
+- 中间件组装顺序与 `RuntimeFeatures` 开关（13 层位序中间件 + Qwen 恢复层 + Tool Call 完整性子规则）
 - Memory LLM 更新流程（含显式 `callbacks: []` 切断回调链的关键约束）
 - ThreadMetaStore / RunStore 的 PG schema
 - MCP 客户端连接与工具加载缓存策略
@@ -502,7 +516,7 @@ MEMORY_DEBUG=1 pnpm dev
 
 其它运行期可调环境变量：
 
-- `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认无上限）
+- `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认 2000；超限丢弃最旧非关键帧，`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
 - `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
 
@@ -520,24 +534,21 @@ MEMORY_DEBUG=1 pnpm dev
 
 ## 📊 基准测试
 
-项目内置评估框架（`benchmarks/`），用于对 Agent 研究质量进行自动化打分：
+项目内置两个评估套件（`benchmarks/`），从项目根目录运行（先复制 `benchmarks/.env.example` 为 `benchmarks/.env` 并填写模型凭证）：
 
 ```bash
-# 运行基准测试
-cd benchmarks && npx tsx run.ts
+# 研究 QA 评估：Agent 研究质量自动化打分
+npx tsx benchmarks/research-qa/run.ts
 
-# 或从项目根目录（需先配置 benchmarks/.env.local）
-npx tsx benchmarks/run.ts
+# LongMemEval 长期记忆基准（ICLR 2025）：两阶段（--ingest 预写记忆 → 评测）
+npx tsx benchmarks/longmem/run.ts --ingest
+npx tsx benchmarks/longmem/run.ts
 ```
 
-测试流程：
+- **research-qa**：研究 QA 数据集 → Agent 包装器调用 → `evaluators.ts` 质量打分
+- **longmem**：官方数据集格式适配 + PREFIX（历史拼 prompt）/ INGEST（记忆落盘后检索作答）两种历史模式，输出 JSONL 兼容官方 `evaluate_qa.py`
 
-1. 从 `datasets/research-qa.ts` 加载研究 QA 数据集
-2. 通过 `agent-wrapper.ts` 包装 Agent 调用
-3. `evaluators/` 对输出进行质量打分
-4. 结果持久化到 `results/latest.json` / `.jsonl`
-
-详见 [`benchmarks/README.md`](./benchmarks/README.md)。
+各套件详情见 [`benchmarks/README.md`](./benchmarks/README.md) 及子目录 README。
 
 ## 🧭 协作规范
 
@@ -551,11 +562,9 @@ npx tsx benchmarks/run.ts
 
 ## ⚠️ 已知限制
 
-1. `resume()` 尚未实现，调用直接抛异常（interrupt/resume 工作流待完成）
-2. StreamBridge 为进程内总线，多实例水平扩展需替换为 Redis pub/sub
-3. ThreadChannel buffer 无上限，超长运行的线程可能积累大量事件
-4. 单次请求只能使用一个模型
-5. 项目目前无单元测试（已内置 `benchmarks/` 评估框架，覆盖研究 QA 场景）
+1. StreamBridge 为进程内总线，多实例水平扩展需替换为 Redis pub/sub
+2. 单次请求只能使用一个模型
+3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
 
 ## 📝 License
 

@@ -1,5 +1,5 @@
 /**
- * ClientAgentEvent —— 前后端共享的对外事件协议（白名单 10 项）
+ * ClientAgentEvent —— 前后端共享的对外事件协议（白名单 9 项）
  *
  * 设计原则：
  * - 这是后端发往前端的事件「白名单」，前端 `src/runtime/protocol/client-event.ts`
@@ -13,7 +13,7 @@
  * 复用。
  */
 
-/** 客户端事件类型枚举（白名单 10 项，与前端严格一致） */
+/** 客户端事件类型枚举（白名单 9 项，与前端严格一致） */
 export enum ClientAgentEventType {
   /** 流式会话开始 */
   START = 'start',
