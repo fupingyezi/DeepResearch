@@ -12,7 +12,7 @@
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 9 种 `ClientAgentEvent`。
-- 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父子 subagent 共用 thread checkpoint）；Redis 缓存；MinIO 存上传文件。
+- 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
 - 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、ViewImage、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
@@ -392,7 +392,7 @@ ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用 + MCP/Skill 工具加载）
    │ │      └── createBaseAgent + 中间件管线（13 层位序 + Qwen 恢复层，含 Sandbox 中间件 retain/markIdle）
    │ │             ├── 工具：task / search_web / clarification / sandbox(读写/搜索/bash) / ...
-   │ │             │         └── SubagentExecutor（父子共用 checkpoint）
+   │ │             │         └── SubagentExecutor（thread 上下文透传，状态不落盘）
    │ │             └── SandboxProvider（local 宿主直连 / docker 每线程加固容器 + 容器级并发）
    │ ├── Checkpointer（PostgreSQL）
    │ └── Stores（threads / runs）

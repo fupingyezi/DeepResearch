@@ -20,6 +20,33 @@ export const SUBAGENT_FEATURES: RuntimeFeatures = {
   subagents: false,
 };
 
+/**
+ * 构造子 agent 流式调用时的 `configurable`。
+ *
+ * **子图不挂 checkpointer，也不做命名空间隔离** —— 三条路径均经实测证伪，
+ * 结论记录于此，避免后人重复尝试：
+ *
+ * 1. 传 `checkpoint_ns`：无效。LangGraph 对**非嵌套（顶层）**图强制把 ns 置空
+ *    （`@langchain/langgraph/dist/pregel/loop.js` 中 `!isNested && ... → checkpoint_ns: ""`），
+ *    子 agent 是独立 top-level `agent.stream()`，不是父图的 subgraph。
+ * 2. 改用合成 thread id（`{parent}#sub:{taskId}`）：会让沙箱目录解析错位。
+ *    沙箱工具优先读 `configurable.thread_id` 推导 thread 目录
+ *    （`sandbox/tools.ts` 的 resolveThreadId），子 agent 的产出会落到另一个
+ *    thread 目录，lead 侧读不到。
+ * 3. 共用父 thread_id 落盘：破坏父线程状态。实测父子图写同一 (thread_id, ns='')
+ *    后，父图 `getState()` 返回的是子 agent 的 messages（父线程历史被覆盖），
+ *    并使 resume / checkpoint 回放错乱。
+ *
+ * 因此 `thread_id` 仍然透传（供工具层解析同一沙箱/线程上下文），但子图状态不
+ * 落盘；子 agent 的唯一持久化产物是它在父图中留下的 task 工具结果（ToolMessage）。
+ */
+export function buildSubagentStreamConfig(
+  threadId: string | undefined,
+): { thread_id: string } | undefined {
+  if (!threadId) return undefined;
+  return { thread_id: threadId };
+}
+
 export interface SubagentExecutorOptions {
   config: SubagentConfig;
   tools: StructuredToolInterface[];
@@ -416,8 +443,9 @@ export class SubagentExecutor {
         // 子 agent 自身（本流）不做该过滤，task_running 照常推送。
         tags: [SUBAGENT_STREAM_TAG],
       };
-      if (ctxThreadId) {
-        streamOpts.configurable = { thread_id: ctxThreadId };
+      const subagentConfig = buildSubagentStreamConfig(ctxThreadId);
+      if (subagentConfig) {
+        streamOpts.configurable = subagentConfig;
       }
       // input 形状由 LangGraph ReAct agent 自身的 state schema 决定，但当前 typing
       // 返回的是 ThreadStateAnnotation 联合（带 sandbox/threadData/uploads 等可选字段）。

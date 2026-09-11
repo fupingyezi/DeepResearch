@@ -464,7 +464,7 @@ interface RuntimeFeatures {
 
 终态事件（至多 yield 一次）：`completed` / `failed` / `timed_out` / `cancelled`。
 
-父子共用 Checkpoint：若处于 thread 上下文中，`ctxThreadId` 会透传给子图，使父子 Agent 共用同一 checkpoint thread。
+thread_id 透传（**非**父子共用 Checkpoint）：若处于 thread 上下文中，`ctxThreadId` 会透传给子图，使子 agent 的工具层解析到与父级相同的线程上下文（同一沙箱目录等）。但**子图状态不落 checkpoint** —— 子 agent 是独立 top-level `agent.stream()`，挂 checkpointer 会污染父线程状态（实测证据与三条被证伪的隔离路径见 `subagents/executor.ts` 的 `buildSubagentStreamConfig` 注释，行为约束由 `subagent-checkpoint-quirks.integration.test.ts` 锁定）。子 agent 的唯一持久化产物是它在父图中留下的 `task` 工具结果（ToolMessage）。
 
 #### 内置工具与 task\_\* 自定义事件
 
