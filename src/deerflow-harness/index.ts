@@ -144,6 +144,17 @@ export {
   resetMemoryQueue,
   type AddArgs as MemoryQueueAddArgs,
   type ConversationContext as MemoryConversationContext,
+  // embeddings（语义检索）
+  backfillFactEmbeddings,
+  cosineSimilarity,
+  EMBEDDING_BATCH_LIMIT,
+  embedQuery,
+  embedTexts,
+  getMemoryEmbeddingsFactory,
+  isCompatibleVector,
+  resetMemoryEmbeddingsFactory,
+  setMemoryEmbeddingsFactory,
+  type MemoryEmbeddingsFactory,
   // facade
   buildMemoryContext,
   type BuildMemoryContextOptions,

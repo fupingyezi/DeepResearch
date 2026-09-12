@@ -34,6 +34,19 @@ export type { MemoryStorage } from './storage';
 export { FileMemoryStorage, getMemoryStorage, resetMemoryStorage } from './storage';
 
 export {
+  backfillFactEmbeddings,
+  cosineSimilarity,
+  EMBEDDING_BATCH_LIMIT,
+  embedQuery,
+  embedTexts,
+  getMemoryEmbeddingsFactory,
+  isCompatibleVector,
+  resetMemoryEmbeddingsFactory,
+  setMemoryEmbeddingsFactory,
+  type MemoryEmbeddingsFactory,
+} from './embeddings';
+
+export {
   countTokens,
   formatConversationForUpdate,
   formatMemoryForInjection,

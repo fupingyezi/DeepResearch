@@ -13,11 +13,16 @@ import {
   createChatModel,
   createThreadService,
   makeCheckpointer,
+  EMBEDDING_BATCH_LIMIT,
+  getMemoryConfig,
+  setMemoryConfig,
+  setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
   setTitleModelFactory,
   type ThreadService,
   type ModelConfig,
 } from '@/deerflow-harness';
+import { OpenAIEmbeddings } from '@langchain/openai';
 import {
   buildModelConfigFromPreset,
   buildModelConfigForUser,
@@ -31,6 +36,7 @@ let service: ThreadService | null = null;
 let initPromise: Promise<ThreadService> | null = null;
 let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
+let embeddingsFactoryRegistered = false;
 
 /**
  * 把 chat model 工厂注入给 memory 子系统（updater）。
@@ -85,6 +91,38 @@ export function ensureTitleModelFactory(): void {
     });
   });
   titleFactoryRegistered = true;
+}
+
+/**
+ * 把智谱 embedding-3 客户端注入给 memory 子系统（语义检索）。
+ * 无 DEERFLOW_EMBEDDING_API_KEY / ZHIPU_API_KEY 时工厂返回 null，
+ * 检索自动退回关键词词面打分（不报错）。导出供测试与提前初始化使用。
+ */
+export function ensureMemoryEmbeddingsFactory(): void {
+  if (embeddingsFactoryRegistered) return;
+  embeddingsFactoryRegistered = true;
+  setMemoryEmbeddingsFactory(() => {
+    const apiKey = process.env.DEEPFLOW_EMBEDDING_API_KEY || process.env.ZHIPU_API_KEY;
+    if (!apiKey) return null;
+    const { embeddingDimensions } = getMemoryConfig();
+    return new OpenAIEmbeddings({
+      model: process.env.DEEPFLOW_EMBEDDING_MODEL || 'embedding-3',
+      apiKey,
+      dimensions: embeddingDimensions,
+      batchSize: EMBEDDING_BATCH_LIMIT, // 智谱单请求 64 条上限
+      configuration: {
+        baseURL: process.env.DEEPFLOW_EMBEDDING_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+      },
+    });
+  });
+  // env 维度覆盖合并进 MemoryConfig 单例（clamp 256..2048）
+  const dims = Number(process.env.DEEPFLOW_EMBEDDING_DIMENSIONS);
+  if (Number.isFinite(dims) && dims > 0) {
+    setMemoryConfig({
+      ...getMemoryConfig(),
+      embeddingDimensions: Math.min(2048, Math.max(256, Math.round(dims))),
+    });
+  }
 }
 
 /**
@@ -166,6 +204,7 @@ async function build(): Promise<ThreadService> {
 
   ensureMemoryModelFactory();
   ensureTitleModelFactory();
+  ensureMemoryEmbeddingsFactory();
 
   const defaultModelConfig = getDefaultModelConfig();
 
