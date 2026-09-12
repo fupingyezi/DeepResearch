@@ -43,10 +43,15 @@ ensure_disk_space() {
 
 # 部署成功后的回收：镜像只留最近 3 个版本（回滚只需要上一版，留 3 个够用），构建缓存
 # 保留 2G 以维持构建速度。不回收的话磁盘只增不减（每次部署多一份全量镜像）。
+#
+# 注意 --format 必须直接产出 repository:tag 完整引用：曾用 '{{.Tag}}' 只取裸 tag，
+# docker rmi 会把 12 位 hex 的 tag 当成「镜像 ID 前缀:latest」解析 → No such image，
+# 回收从未生效（服务器上积了 12 个历史镜像）——错误被 '|| true' 吞掉，只在真机上复现
+# 才现形。grep -v '<none>' 兜底悬空 tag。
 cleanup_after_deploy() {
   docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
-  docker images --filter reference='deepresearch' --format '{{.CreatedAt}}\t{{.Tag}}' \
-    | sort -r | tail -n +4 | awk '{print $NF}' \
+  docker images --filter reference='deepresearch' --format '{{.Repository}}:{{.Tag}}' \
+    | grep -v ':<none>' | sort -r | tail -n +4 \
     | xargs -r docker rmi >/dev/null 2>&1 || true
   docker image prune -f >/dev/null 2>&1 || true
   log "已回收：构建缓存保留 2G，镜像保留最近 3 个版本"
