@@ -864,9 +864,17 @@ CREATE TABLE runs (
    chat-window 传的是 `disabled={isChating || guardDisabled}`，聊天中 `disabled` 恒为 true，
    顺序反了就是一个点了完全没反应的死按钮；按钮自身 `disabled={disabled && !isChating}` 也印证
    了「聊天中必须可点」。
-2. 停止要做两件事：`abortCurrentChat()`（本地 fetch + 收起运行态）+ `cancelRunOnServer(sessionId)`
-   （`POST /api/conversations/cancel_run`）。只 abort 本地的话服务端 run 会继续生成并把**完整回答**
-   落库。store 的 `abortCurrentChat` 不能因为「拿不到 abortController」而整个 no-op。
+2. 停止要做两件事，且**先发取消请求、再 abort**：`cancelRunOnServer(sessionId)`
+   （`POST /api/conversations/cancel_run`）+ `abortCurrentChat()`（本地 fetch + 收起运行态）。
+   只 abort 本地的话服务端 run 会继续生成并把**完整回答**落库。store 的 `abortCurrentChat`
+   不能因为「拿不到 abortController」而整个 no-op。
+3. 取消后消息要收尾：新增 `cancelled` part（文案「用户已取消」/「已被新消息取代」）——
+   前端在 abort 分支追加（否则模型还没吐 token 时 parts 为空，气泡会永远转圈）；
+   服务端在落库前用 `waitRunError(run_id)` 等 run 落到终态、判定取消后把同一条标记补进
+   parts 末尾（**落库 parts 才是刷新后的真相源**，前端加而服务端不加，刷新就丢）。
+   服务端那条必须等：客户端是先断流再（几乎同时）发 cancel，断流那一刻 run 还在 running。
+   气泡的转圈条件也收紧为「parts 为空 **且** isChating 且是最后一条 assistant」——空 parts
+   的已结束消息不再无限转圈。
 
 #### fileUploadStore
 

@@ -57,12 +57,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内
   useTextareaAutoHeight(textareaRef, inputValue, 100);
 
-  // 停止：两件事都要做。① abort 本地 fetch 让 UI 立刻停住；② 通知服务端取消在跑的 run
-  // —— 服务端 run 是 fire-and-forget，只断 SSE 的话它会继续生成并把完整回答落库。
+  // 停止：两件事都要做，且**先发取消请求再 abort**。
+  // 服务端 run 是 fire-and-forget，只断 SSE 的话它会继续生成并把完整回答落库；而服务端在
+  // 落库 assistant 消息前会等 run 落到终态再判断这轮是否被取消（见 waitRunError），
+  // 先发的取消请求正好落进那个窗口，取消标记才能一起写进 parts（刷新后仍在）。
   const handleStop = () => {
-    abortCurrentChat();
     const sid = String(currentSessionId);
     if (sid) void cancelRunOnServer(sid);
+    abortCurrentChat();
   };
 
   const handleSubmit = (e: React.FormEvent) => {

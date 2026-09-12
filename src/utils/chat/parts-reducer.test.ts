@@ -4,7 +4,12 @@ import { ClientAgentEventType } from '@deerflow-harness/runtime/sse/client-event
 import type { ClientAgentEvent } from '@deerflow-harness/runtime/sse/client-event';
 import type { MessagePart } from '@/types';
 
-import { finalizePartsState, initialPartsState, reducePartsState } from './parts-reducer';
+import {
+  appendCancelledPart,
+  finalizePartsState,
+  initialPartsState,
+  reducePartsState,
+} from './parts-reducer';
 
 type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -27,6 +32,13 @@ function chunkEvent(text: string): ClientAgentEvent {
 }
 
 const todoParts = (parts: readonly MessagePart[]) => parts.filter((p) => p.type === 'todo');
+
+/** 取最后一条取消标记的文案（顺带做类型收窄，避免 union content 直接取属性报错）。 */
+function cancelledTextOf(parts: readonly MessagePart[]): string | null {
+  const last = parts.at(-1);
+  if (!last || last.type !== 'cancelled') return null;
+  return last.content.text;
+}
 
 describe('reducePartsState —— TODO_UPDATE', () => {
   it('首次事件创建一个 todo part', () => {
@@ -155,5 +167,31 @@ describe('finalizePartsState —— 收尾闭合未完成的 todo', () => {
     const { parts } = finalizePartsState(state);
     const todos = parts.find((p) => p.type === 'todo')?.content.todos ?? [];
     expect(todos.map((t) => t.status)).toEqual(['completed', 'pending']);
+  });
+});
+
+describe('appendCancelledPart —— 用户取消标记', () => {
+  it('追加到末尾且独立成 part（不与正文合并）', () => {
+    const withText = reducePartsState(initialPartsState, chunkEvent('已经产出的正文'));
+    const state = appendCancelledPart(withText, '用户已取消');
+
+    expect(state.parts.map((p) => p.type)).toEqual(['text', 'cancelled']);
+    expect(cancelledTextOf(state.parts)).toBe('用户已取消');
+    expect(state.lastPartType).toBe('cancelled');
+  });
+
+  it('finalize 后标记仍在（不被 task_summary / artifact 抽取吞掉）', () => {
+    const withText = reducePartsState(initialPartsState, chunkEvent('# 报告\n\n正文'));
+    const state = appendCancelledPart(withText, '用户已取消');
+    const { parts } = finalizePartsState(state);
+
+    expect(parts.at(-1)?.type).toBe('cancelled');
+    expect(cancelledTextOf(parts)).toBe('用户已取消');
+  });
+
+  it('空 parts 也能加标记（前端取消早于首个 token 时不再停在转圈态）', () => {
+    const state = appendCancelledPart(initialPartsState, '用户已取消');
+    expect(state.parts).toHaveLength(1);
+    expect(state.parts[0].type).toBe('cancelled');
   });
 });

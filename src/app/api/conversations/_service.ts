@@ -310,6 +310,26 @@ export async function deleteMessagesAtOrAfter(
   ]);
 }
 
+/**
+ * 取某 run 的 error 文本（用于判断这轮是不是被取消），run 不存在返回 null。
+ *
+ * 为什么要等：客户端「停止」的时序是先 abort 本地 SSE、再 POST cancel_run，所以断流那一刻
+ * run 往往还是 running —— 不等终态就把 assistant 消息落库，取消标记永远写不上去。
+ * 正常跑完的场景状态早已是终态，不会产生等待。超时（默认 1s）按「未取消」处理。
+ */
+export async function waitRunError(runId: string, timeoutMs = 1000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await query(`select status, error from runs where run_id = $1;`, [runId]);
+    const row = res.rows[0];
+    if (!row) return null;
+    const status = String(row.status ?? '');
+    if (status !== 'running' && status !== 'pending') return (row.error as string | null) ?? null;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 export interface LatestMessageRow {
   id: string;
   role: 'user' | 'assistant';

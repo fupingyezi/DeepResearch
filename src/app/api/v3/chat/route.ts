@@ -48,6 +48,7 @@ import {
   resolveFilesByIds,
   deleteMessagesAtOrAfter,
   getLatestMessageByRole,
+  waitRunError,
   type ChatSessionRecord,
   type SavedFileMetadata,
 } from '../../conversations/_service';
@@ -163,6 +164,22 @@ function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined
   if (!a) return b;
   if (!b) return a;
   return a.getTime() <= b.getTime() ? a : b;
+}
+
+/**
+ * run 的 error 文本 → 「本轮被取消」标记文案；不是取消则返回 null。
+ *
+ * 文案与 harness 侧 ThreadService 写入的取消原因一一对应（runtime/service.ts 的
+ * RUN_CANCELLED_* 常量）：用户点停止 / 被新消息抢占 / 对话被删（后者用户看不到，
+ * 会话本身都没了）。前端停止时也会就地加同一条标记，两边文案保持一致。
+ */
+function cancelledMarkerText(runError: string | null): string | null {
+  // 用 includes 而非 startsWith：取消原因可能被 LangChain 的中间件链包一层前缀
+  // （实测 `Error in middleware "SubagentLimitMiddleware": cancelled: stopped by user`）
+  if (!runError || !runError.includes('cancelled:')) return null;
+  if (runError.includes('stopped by user')) return '用户已取消';
+  if (runError.includes('superseded by a new run')) return '已被新消息取代';
+  return '本轮已取消';
 }
 
 export async function POST(request: NextRequest) {
@@ -473,8 +490,13 @@ export async function POST(request: NextRequest) {
       }
     } finally {
       if (collector && typeof assistantMessageId === 'string') {
+        // 这轮是被取消的吗？落库的 parts 才是刷新后的真相源，取消标记必须服务端也写一份，
+        // 否则「已产出内容 + 用户已取消」只在当前页面上存在，刷新就没了。
+        // run_id 在下方 submitRun 之后才赋值，但本段在流消费结束时才执行，届时必然已就绪
+        const cancelledText = cancelledMarkerText(await waitRunError(run_id));
+
         const finalized: { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } =
-          collector.finalize(inputText);
+          collector.finalize(inputText, cancelledText);
         if (finalized.parts.length > 0) {
           try {
             if (shouldUpdateOnResume) {

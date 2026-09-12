@@ -12,6 +12,7 @@ import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 import { buildAttachmentParts } from './attachment-parts';
 import { buildChatConfiguration } from './chat-configuration';
 import {
+  appendCancelledPart,
   appendStandaloneText,
   createPartsStateFromExisting,
   finalizePartsState,
@@ -502,6 +503,11 @@ export class StreamChatHandler {
   private async handleError(error: unknown): Promise<void> {
     const err = error as { name?: string; message?: string };
     if (err?.name === 'AbortError' || err?.name === 'AGENT_STREAM_ABORTED') {
+      // 用户点了停止：已产出的内容原样保留，正文后单独一行「用户已取消」。
+      // 不加这一行的话，模型还没吐出任何 token 时 parts 为空 —— 气泡的转圈条件正是
+      // 「assistant 且 parts 为空」，于是会永远转圈停不下来。
+      this.state = appendCancelledPart(this.state, '用户已取消');
+      this.flushMessageSync();
       console.log('Chat was Interrupted by user');
       this.finalStatus = 'idle';
       if (this.config.onStreamComplete) {

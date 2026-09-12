@@ -27,7 +27,9 @@ interface RunRow {
   error: string | null;
 }
 
-function makeHarness(mode: 'hang-until-abort' | 'complete' = 'hang-until-abort') {
+function makeHarness(
+  mode: 'hang-until-abort' | 'complete' | 'throw-on-abort' = 'hang-until-abort',
+) {
   const threadRows = new Map<string, Record<string, unknown>>();
   const runRows = new Map<string, RunRow>();
   const deletedThreads: string[] = [];
@@ -118,6 +120,12 @@ function makeHarness(mode: 'hang-until-abort' | 'complete' = 'hang-until-abort')
           });
         });
       } catch {
+        // throw-on-abort：复刻实测到的真实形状 —— 取消异常被 LangChain 中间件链包了前缀
+        if (mode === 'throw-on-abort') {
+          throw new Error(
+            `Error in middleware "SubagentLimitMiddleware": ${reasonText(signal?.reason)}`,
+          );
+        }
         // 与 DeerFlowClient 的 catch 一致：吞掉，正常结束生成器
       }
     },
@@ -143,6 +151,15 @@ function makeHarness(mode: 'hang-until-abort' | 'complete' = 'hang-until-abort')
     deletedThreads,
     checkpointDeletes,
     abortReasons,
+    /** 等某个 run 落到终态（failed / succeeded / interrupted） */
+    async waitForRunTerminal(runId: string) {
+      await vi.waitFor(
+        () => {
+          expect(['failed', 'succeeded', 'interrupted']).toContain(runRows.get(runId)?.status);
+        },
+        { timeout: 3000 },
+      );
+    },
     /** 等第 n 条流真正开始消费 */
     waitForStart(n: number) {
       return new Promise<void>((resolve) => {
@@ -255,6 +272,35 @@ describe('cancelRun（用户点停止）', () => {
     await expect(
       h.service.cancelRun({ thread_id: THREAD_ID, user_id: USER_ID }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('取消以异常形式冒出（被中间件包了前缀）时：仍按干净的取消原因落库，不发 ERROR 帧', async () => {
+    const h = makeHarness('throw-on-abort');
+    await h.createThread();
+    const { run_id } = await h.service.submitRun({
+      thread_id: THREAD_ID,
+      user_id: USER_ID,
+      input: 'hi',
+    });
+
+    // 事件面：取消不该给前端留下一条「运行出错」
+    const events: string[] = [];
+    void (async () => {
+      for await (const ev of h.service.subscribe({ thread_id: THREAD_ID, run_id })) {
+        events.push(ev.eventType);
+      }
+    })();
+
+    const settled = h.waitForRunTerminal(run_id);
+    await h.waitForStart(1);
+    await h.service.cancelRun({ thread_id: THREAD_ID, user_id: USER_ID });
+    await settled;
+
+    // 落库的必须是干净的取消原因，而不是中间件包装后的那串
+    expect(h.runRows.get(run_id)?.error).toBe('cancelled: stopped by user');
+    expect(h.threadRows.get(THREAD_ID)?.status).toBe('idle');
+    expect(events).toContain('end');
+    expect(events).not.toContain('error');
   });
 });
 

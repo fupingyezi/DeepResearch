@@ -69,7 +69,7 @@ export interface SubagentStructuredReport {
  *
  * 一条 ChatMessageType 由一个 parts[] 时序数组组成，每个 part 用 partId 唯一标识。
  *
- * 十种 part_type：
+ * 十一种 part_type：
  *  - text          AI/用户的正文文本片段（同类相邻合并）
  *  - reasoning     AI 推理/规划（同类相邻合并）
  *  - tool_call     单次工具调用，结果回写到本 part 的 content（status / result / success）
@@ -79,6 +79,8 @@ export interface SubagentStructuredReport {
  *  - artifact      最终产物（如研究报告 markdown）
  *  - task_summary  多 agent 工作流的任务总结（完成 N 个子任务 + 每子任务关键发现）
  *  - todo          任务清单快照（write_todos 每次更新全量替换同一条 part）
+ *  - cancelled     本轮被取消的标记（用户点停止 / 被新消息抢占），正文后单独一行，
+ *                  也随 parts 落库，刷新后仍在
  */
 export type MessagePart =
   | {
@@ -176,6 +178,12 @@ export type MessagePart =
   | {
       partId: string;
       type: 'task_summary';
+      createdAt: number;
+      content: { text: string };
+    }
+  | {
+      partId: string;
+      type: 'cancelled';
       createdAt: number;
       content: { text: string };
     };

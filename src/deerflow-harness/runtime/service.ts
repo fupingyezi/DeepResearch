@@ -276,13 +276,15 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       // 取消收尾：RunStatus 是 DB CHECK 约束的枚举（无 cancelled 值），复用 failed +
       // error 文案，不为一个语义加一次迁移；thread 状态回 idle —— 对话已被删时是 0 行
       // no-op，将来若开「停止按钮」这条路也是对的。
+      // 取消原因取自 abort(reason)：删除对话 / 用户停止 / 被新 run 抢占，三者文案不同，
+      // 都统一以 'cancelled:' 开头，便于按 runs.error 检索。
+      const cancelReasonText = (): string =>
+        controller.signal.reason instanceof Error
+          ? controller.signal.reason.message
+          : String(controller.signal.reason ?? RUN_CANCELLED_ERROR);
+
       const settleCancelled = async (): Promise<void> => {
-        // 取消原因取自 abort(reason)：删除对话 / 用户停止 / 被新 run 抢占，三者文案不同，
-        // 都统一以 'cancelled:' 开头，便于按 runs.error 检索。
-        const reason =
-          controller.signal.reason instanceof Error
-            ? controller.signal.reason.message
-            : String(controller.signal.reason ?? RUN_CANCELLED_ERROR);
+        const reason = cancelReasonText();
         try {
           await runs.setStatus(run_id, 'failed', reason);
           await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
@@ -331,21 +333,30 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
         console.info(`${LOG} run succeeded thread_id=${thread_id} run_id=${run_id}`);
       } catch (e) {
-        const message = (e as Error)?.message ?? String(e);
-        channel.publish(
-          createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
-            errorCode: 'THREAD_RUN_ERROR',
-            errorMessage: message,
-            recoverable: false,
-          }),
-        );
+        // 取消可能以异常形式冒出来（且被 LangChain 中间件链包上前缀），此时按取消处理：
+        // 统一用取消原因落库、不再发 ERROR 帧（否则前端会看到一条无意义的「运行出错」）。
+        const cancelled = controller.signal.aborted;
+        const message = cancelled ? cancelReasonText() : ((e as Error)?.message ?? String(e));
+        if (!cancelled) {
+          channel.publish(
+            createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
+              errorCode: 'THREAD_RUN_ERROR',
+              errorMessage: message,
+              recoverable: false,
+            }),
+          );
+        }
         try {
           await runs.setStatus(run_id, 'failed', message);
-          await threads.updateStatus(thread_id, 'error', { user_id: user_id ?? null });
+          await threads.updateStatus(thread_id, cancelled ? 'idle' : 'error', {
+            user_id: user_id ?? null,
+          });
         } catch (e2) {
           console.error(`${LOG} status persist on error failed:`, (e2 as Error)?.message);
         }
-        console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
+        console.error(
+          `${LOG} run ${cancelled ? 'cancelled' : 'failed'} thread_id=${thread_id} run_id=${run_id} err=${message}`,
+        );
       } finally {
         if (releaseRunSlot) releaseRunSlot();
         activeRuns.delete(run_id);
