@@ -25,7 +25,6 @@ import {
   ClientAgentEvent,
   ClientAgentEventType,
 } from '../../src/deerflow-harness/runtime/sse/client-event';
-import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
 import {
   withUsageAccounting,
   type RunUsage,
@@ -204,11 +203,6 @@ export function createLongMemAgent(options: {
                   toolNames.push((event as any).payload?.toolName ?? 'unknown');
                 }
               }
-
-              // 记忆更新走 debounce 队列（memoryMiddleware.afterAgent 只入队，真正的
-              // LLM 调用在 setTimeout 里）。不在这里 flush，那些调用会落在记账作用域
-              // **之外** —— token 记不到、也看不出缺口（不触发 callsMissingUsage）。
-              await getMemoryQueue().flush();
             },
           ),
         );

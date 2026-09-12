@@ -68,6 +68,12 @@ LongMemEval 数据集需手动下载（官方 HuggingFace 源），详见
   `src/deerflow-harness/runtime/usage-accounting.ts`。
 - **金额是估算**：单价取自 `src/deerflow-harness/runtime/pricing.json`（含 `asOf` 与官方
   URL）。价格变动只改这个文件，不动代码。**未知模型不给估算**，只列进 `unknownModels`。
+- **按角色拆分**：`agent`（作答）/ `judge`（评分）/ `ingest`（LongMemEval 的
+  `--ingest` 记忆写入，成本大头）/ `memory`（记忆更新抽取）。`memory` 单独成角色是因为
+  它跑在 agent run 之外 —— `afterAgent` 只入队，真正的调用由 debounce 队列稍后触发，
+  并发批次下会落到每轮 run 的记账窗口之外。评测会在出报告前统一兜底 flush；实测不兜底
+  时 5 次抽取只有 1 次被计入，**报告成本漏掉约 60%**（且 `callsMissingUsage` 抓不到 ——
+  那些调用完全没进作用域）。
 - 计价区分三个维度：缓存命中 vs 未命中（单价可差 50 倍）、高峰 vs 空闲（空闲恰为高峰半价，
   高峰 = 北京时间周一~周五 09:00-12:00 / 14:00-18:00，按**每次调用自己的时刻**判定）、
   reasoning token 计入输出。

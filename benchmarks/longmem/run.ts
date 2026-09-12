@@ -34,6 +34,7 @@ import { fileURLToPath } from 'url';
 import { ChatOpenAI } from '@langchain/openai';
 
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
+import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
 import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/pricing';
 import {
   UsageAccumulator,
@@ -436,6 +437,14 @@ interface AccountingBlock {
   usage: {
     agent: TokenUsage;
     ingest: TokenUsage;
+    /**
+     * 记忆更新（memoryMiddleware 入队的抽取调用）的用量。
+     *
+     * 单独成一个角色是因为它**跑在 agent run 之外**：afterAgent 只入队，真正的 LLM
+     * 调用由 debounce 队列稍后触发，并发批次下会交错落到每轮 run 的 flush 之后。
+     * 实测（5 条题）若不兜底，5 次抽取只有 1 次被计入 —— 报告成本漏掉约 60%。
+     */
+    memory: TokenUsage;
     judge: TokenUsage;
     total: TokenUsage;
   };
@@ -445,6 +454,7 @@ interface AccountingBlock {
     priceSource: string;
     agent: number;
     ingest: number;
+    memory: number;
     judge: number;
     total: number;
     /** 全部调用若都落在高峰时段的总价（现实上界；空闲价恰为高峰半价） */
@@ -513,6 +523,7 @@ function generateReport(
   results: LongMemReport['results'],
   config: LongMemReport['config'],
   judgeUsage: RunUsage,
+  memoryUsage: RunUsage,
 ): LongMemReport {
   const successResults = results.filter((r) => !r.result.metrics.error);
 
@@ -558,9 +569,10 @@ function generateReport(
   // 必须保留逐次调用记录 —— 计价依赖每次调用自己的时间戳（高峰/空闲差一倍）。
   const agentUsage = mergeRunUsage(results.map((r) => r.result.usage));
   const ingestUsage = mergeRunUsage(results.map((r) => r.ingestUsage));
-  const totalUsage = mergeRunUsage([agentUsage, ingestUsage, judgeUsage]);
+  const totalUsage = mergeRunUsage([agentUsage, ingestUsage, memoryUsage, judgeUsage]);
   const agentCost = computeRunCost(agentUsage);
   const ingestCost = computeRunCost(ingestUsage);
+  const memoryCost = computeRunCost(memoryUsage);
   const judgeCost = computeRunCost(judgeUsage);
 
   return {
@@ -602,6 +614,7 @@ function generateReport(
         usage: {
           agent: agentUsage.total,
           ingest: ingestUsage.total,
+          memory: memoryUsage.total,
           judge: judgeUsage.total,
           total: totalUsage.total,
         },
@@ -611,13 +624,16 @@ function generateReport(
           priceSource: agentCost.priceSource,
           agent: agentCost.total,
           ingest: ingestCost.total,
+          memory: memoryCost.total,
           judge: judgeCost.total,
-          total: agentCost.total + ingestCost.total + judgeCost.total,
-          ifAllPeakTotal: agentCost.ifAllPeak + ingestCost.ifAllPeak + judgeCost.ifAllPeak,
+          total: agentCost.total + ingestCost.total + memoryCost.total + judgeCost.total,
+          ifAllPeakTotal:
+            agentCost.ifAllPeak + ingestCost.ifAllPeak + memoryCost.ifAllPeak + judgeCost.ifAllPeak,
           unknownModels: [
             ...new Set([
               ...agentCost.unknownModels,
               ...ingestCost.unknownModels,
+              ...memoryCost.unknownModels,
               ...judgeCost.unknownModels,
             ]),
           ],
@@ -717,7 +733,7 @@ function printReport(report: LongMemReport): void {
   console.log('\n  ┌──────────────────────────────────────────────┐');
   console.log('  │ Token & Cost                                │');
   console.log('  ├────────────────┬─────────────────────────────┤');
-  for (const role of ['agent', 'ingest', 'judge'] as const) {
+  for (const role of ['agent', 'ingest', 'memory', 'judge'] as const) {
     const u = accounting.usage[role];
     console.log(
       `  │ ${role.padEnd(14)} │ ${`${u.llmCalls} calls, in ${u.inputTokens}（命中 ${u.cacheReadTokens}）/ out ${u.outputTokens}`.padStart(25)} │`,
@@ -729,6 +745,9 @@ function printReport(report: LongMemReport): void {
   console.log(`  │ ${'成本 agent'.padEnd(14)} │ ${yuan(accounting.cost.agent).padStart(25)} │`);
   if (accounting.cost.ingest > 0) {
     console.log(`  │ ${'成本 ingest'.padEnd(14)} │ ${yuan(accounting.cost.ingest).padStart(25)} │`);
+  }
+  if (accounting.cost.memory > 0) {
+    console.log(`  │ ${'成本 memory'.padEnd(14)} │ ${yuan(accounting.cost.memory).padStart(25)} │`);
   }
   console.log(`  │ ${'成本 judge'.padEnd(14)} │ ${yuan(accounting.cost.judge).padStart(25)} │`);
   console.log(`  │ ${'成本 合计'.padEnd(14)} │ ${yuan(accounting.cost.total).padStart(25)} │`);
@@ -887,6 +906,21 @@ export async function main(): Promise<void> {
     console.log(`\n  [Progress] ${done}/${dataset.length} completed`);
   }
 
+  // ── 记忆更新兜底 flush（必须在出报告之前）──
+  //
+  // memoryMiddleware.afterAgent 只是把更新**入队**，真正的抽取 LLM 调用由 debounce
+  // 队列稍后触发。并发批次下这些调用会与「每轮 run 结束时的 flush」交错，落到窗口之外：
+  // 实测 5 条题里 5 次抽取只有 1 次被计入，报告成本因此漏掉约 60%（而 callsMissingUsage
+  // 抓不到 —— 调用完全没进作用域，没人知道它发生过）。这里统一兜底，并单独记为 memory 角色。
+  const memoryFlush = await withUsageAccounting(() => getMemoryQueue().flush());
+  const memoryUsage = memoryFlush.usage;
+  if (memoryUsage.total.llmCalls > 0) {
+    console.log(
+      `\n[Memory] 记忆更新调用 ${memoryUsage.total.llmCalls} 次 ` +
+        `(in ${memoryUsage.total.inputTokens} / out ${memoryUsage.total.outputTokens}) 已计入 memory 角色`,
+    );
+  }
+
   // LLM Judge 自动评估准确率（默认开启，--no-judge 跳过）
   let judgeModel: string | null = null;
   let judgeUsage: RunUsage = mergeRunUsage([]);
@@ -911,7 +945,7 @@ export async function main(): Promise<void> {
     timeoutMs: config.run.timeoutMs,
   };
 
-  const report = generateReport(results, reportConfig, judgeUsage);
+  const report = generateReport(results, reportConfig, judgeUsage, memoryUsage);
   printReport(report);
 
   // 保存结果 JSON
