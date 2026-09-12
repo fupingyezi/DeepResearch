@@ -39,7 +39,8 @@ import type { MessagePart, ChatMessageType } from '@/types';
 import { getThreadService, resolveUserModelConfig } from '../../threads/_service';
 import { getCurrentUser } from '../../auth/_helpers';
 import {
-  createChatSessionRecord,
+  ChatSessionAccessError,
+  ensureChatSessionRecord,
   insertAssistantMessageRecord,
   insertUserMessageRecord,
   updateAssistantMessageParts,
@@ -242,27 +243,40 @@ export async function POST(request: NextRequest) {
   const modelConfig = modelResolution.modelConfig;
 
   // —— sessionId 分流 ——
+  // 无论有没有传 sessionId，都先「确保会话行存在」：传进来的 id 未必真的落过库 ——
+  // 前端首个请求失败（没收到 START）时不会重置本地状态，下一轮会把本地生成的临时 UUID
+  // 当「已有会话」发过来。旧实现只在「没传 sessionId」时建行，于是这种情况会先建成
+  // threads_meta 孤儿，紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
   const incomingSessionId =
     typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : null;
 
-  let resolvedThreadId = incomingSessionId ?? '';
-  let createdChatSession: ChatSessionRecord | null = null;
+  let resolvedThreadId = '';
+  let chatSession: ChatSessionRecord | null = null;
 
-  if (!incomingSessionId) {
-    try {
-      const title = inputText.slice(0, 15) || 'New thread';
-      createdChatSession = await createChatSessionRecord({ title, userId: user_id });
-      resolvedThreadId = createdChatSession.id;
-    } catch (e) {
-      console.error('[POST /api/v3/chat] createChatSessionRecord failed:', e);
-      return new Response(
-        JSON.stringify({
-          error: 'failed to create chat session',
-          message: (e as Error)?.message,
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
+  try {
+    const title = inputText.slice(0, 15) || 'New thread';
+    chatSession = await ensureChatSessionRecord({
+      id: incomingSessionId ?? undefined,
+      title,
+      userId: user_id,
+    });
+    resolvedThreadId = chatSession.id;
+  } catch (e) {
+    if (e instanceof ChatSessionAccessError) {
+      console.warn('[POST /api/v3/chat] session access denied:', (e as Error)?.message);
+      return new Response(JSON.stringify({ error: 'forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
+    console.error('[POST /api/v3/chat] ensureChatSessionRecord failed:', e);
+    return new Response(
+      JSON.stringify({
+        error: 'failed to create chat session',
+        message: (e as Error)?.message,
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
   }
 
   // 单路径：始终走 submitRun（fire-and-forget）+ StreamBridge.subscribe。
@@ -425,7 +439,10 @@ export async function POST(request: NextRequest) {
     thread_id: resolvedThreadId,
     sessionId: resolvedThreadId,
   };
-  if (createdChatSession) startPayload.chatSession = createdChatSession;
+  // 总是回传会话记录：正常新建时前端要把它加进侧栏；「临时 id 首次落库」那种续聊也
+  // 需要（此前这类对话因为没落库、永远不进侧栏）；真正的续聊则被 store 的 addChatSession
+  // 按同 id 幂等跳过，重复下发无副作用。
+  if (chatSession) startPayload.chatSession = chatSession;
   if (typeof userMessageId === 'string') startPayload.userMessageId = userMessageId;
   if (typeof assistantMessageId === 'string') startPayload.assistantMessageId = assistantMessageId;
 

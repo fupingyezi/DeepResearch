@@ -217,7 +217,11 @@ StreamBridge（进程内 EventEmitter 总线）
 
 三阶段管线：
 
-1. **幂等创建线程**：请求体 `sessionId` 缺省时新建会话（UUID），存在则复用。
+1. **确保会话行存在 + 幂等创建线程**：两条路径都经 `ensureChatSessionRecord()` —— 缺省时新建
+   （UUID），传了 `sessionId` 则「有就复用、没有就补建」。**不能**退回「只在没传 sessionId 时建行」：
+   前端首个请求失败（未收到 START）时不会重置本地状态，下一轮会把本地生成的临时 UUID 当
+   「已有会话」发过来；旧实现会先落下 `threads_meta` 孤儿，紧接着 `chat_message.session_id`
+   外键失败 500，run 永远起不来。会话属于他人时抛 `ChatSessionAccessError` → 403。
 2. **提交 Run（fire-and-forget）**：`submitRun()` 立即返回 `run_id`，Agent 在后台异步执行。
 3. **注入 START 帧并返回 SSE 流**：在 StreamBridge 订阅之上先 `yield` 一个携带 `run_id` 和 `thread_id` 的 START 事件，再转发后续事件。
 
@@ -261,13 +265,14 @@ interface ChatStreamBody {
 
 #### 其他路由
 
-| 路由                           | 方法   | 说明                                              |
-| ------------------------------ | ------ | ------------------------------------------------- |
-| `/api/threads`                 | POST   | 创建线程；GET 分页列表（?limit=&offset=&status=） |
-| `/api/threads/[threadId]`      | GET    | 获取线程详情（可附带 checkpoint）；DELETE 删除    |
-| `/api/threads/[threadId]/runs` | GET    | 列出线程下的 run                                  |
-| `/api/files/upload`            | POST   | multipart 上传，存 MinIO，解析内容                |
-| `/api/files/delete`            | DELETE | 从 MinIO 删除文件                                 |
+| 路由                                | 方法          | 说明                                                                                                                                                                                                                     |
+| ----------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/api/threads`                      | POST          | 创建线程；GET 分页列表（?limit=&offset=&status=）                                                                                                                                                                        |
+| `/api/threads/[threadId]`           | GET           | 获取线程详情（可附带 checkpoint）；DELETE 删除                                                                                                                                                                           |
+| `/api/threads/[threadId]/runs`      | GET           | 列出线程下的 run                                                                                                                                                                                                         |
+| `/api/conversations/update_session` | POST / DELETE | 重命名 / 删除会话；DELETE 为**整体删除**：`chat_session` + `chat_message` + MinIO 文件对象与 `file_content` + agent 侧数据（`threads_meta` / `runs` / checkpoint / 沙箱容器）—— 后两类是 commit 后的尽力清理，失败只告警 |
+| `/api/files/upload`                 | POST          | multipart 上传，存 MinIO，解析内容                                                                                                                                                                                       |
+| `/api/files/delete`                 | DELETE        | 从 MinIO 删除文件                                                                                                                                                                                                        |
 
 ---
 
@@ -286,6 +291,13 @@ ThreadService 是整个系统的门面，装配 DeerFlowClient + Checkpointer + 
   - 失败：catch 中 publish ERROR 事件 → `runs.setStatus('failed')` + `threads.updateStatus('error')`
   - 兜底：finally 始终 publish END 事件（channel 自身对已关闭状态的 publish 是 no-op）
 - `resume()`：经 `resumeStream()` 以 LangGraph `Command({ resume: decision })` 续跑人工中断（HTTP `operation: 'resume'` 触发）
+- **run 可被取消**（进程内 `activeRuns` 注册表，按 `run_id` 挂在 service 闭包里）：`deleteThread()`
+  先 `abort()` 该 thread 在跑 run 的 signal 并等其收尾（上限 3s），再删 meta / 沙箱容器 / checkpoint；
+  否则 run 会在清理之后继续写 checkpoint，把刚删掉的数据写回来。`signal` 经
+  `DeerFlowClient.stream()` 透传进 LangGraph 的 `config.signal`，一路下发到 LLM 调用。
+  被取消的 run 记 `failed` + `cancelled:` 文案（`RunStatus` 是 DB CHECK 枚举，无 `cancelled` 值），
+  **不能**记成 succeeded —— `DeerFlowClient` 会把 abort 异常吞成正常 return，执行体必须显式判
+  `signal.aborted`（且此时不发 ERROR 帧，避免误报「运行出错」）
 
 **线程状态机：**
 
@@ -1020,3 +1032,5 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 8. 智谱 `glm-5.3-flash` 是**推理模型**：`reasoning_content` 计入 `completion_tokens`，
    `max_tokens` 过小（实测 32）会让 content 为空。副链路（标题生成 `maxTokens` 默认 64）若被
    指定为该模型需注意；主聊天链路不设 `maxTokens`，走 provider 默认值，不受影响
+9. 前端的「停止」只中断本地 fetch，**不停止服务端 run**：服务端取消能力已在 `deleteThread`
+   内部接线（删除对话时生效），但尚未开成独立 API（如 `POST .../runs/:runId/cancel`）

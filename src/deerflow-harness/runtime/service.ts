@@ -32,6 +32,28 @@ import { getSandboxProvider } from '../sandbox';
 
 const LOG = '[thread-service]';
 
+/** 取消 run 后等待其收尾的上限：超时就继续删，不能让一个卡住的 run 拖死删除请求。 */
+const RUN_CANCEL_GRACE_MS = 3_000;
+
+/** 被取消的 run 在 runs.error 里的标记（RunStatus 是 DB CHECK 约束的枚举，没有 cancelled）。 */
+const RUN_CANCELLED_ERROR = 'cancelled: thread deleted';
+
+/** 等若干 run 收尾，最多 ms 毫秒。 */
+async function waitForRunsFinished(runs: Promise<void>[], ms: number): Promise<void> {
+  if (runs.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(runs),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface CreateThreadInput {
   /** 可选：外部指定 thread_id（用于和外部会话 ID 对齐，幂等创建）。不传则自动生成。 */
   thread_id?: string;
@@ -161,6 +183,19 @@ async function getTupleSafe(
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   const { client, checkpointer, threads, runs, createClientForModel } = deps;
 
+  // 进程内「在跑的 run」注册表：run_id → { thread_id, controller, finished }。
+  //
+  // 用途：删除对话时先取消它正在跑的 run。run 是 fire-and-forget，不取消的话它会在
+  // threads_meta / checkpoint 被清掉之后继续为自己的 thread 写 checkpoint，把刚清理
+  // 干净的数据又写回来。
+  //
+  // 必须按 run_id 挂在 createThreadService 的闭包里：service 与 client 都是进程级共享
+  // 实例，多 run 并行时不能把控制句柄做成单例字段。
+  const activeRuns = new Map<
+    string,
+    { thread_id: string; controller: AbortController; finished: Promise<void> }
+  >();
+
   // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
   // 关键不变量：fire-and-forget 立即返回 run_id；try/catch/finally 三段收敛状态，
   // finally 始终 publish END（channel 对已 closed 的 publish 是 no-op）。
@@ -169,7 +204,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     user_id?: string;
     threadMeta: ThreadMeta;
     inputForDb: string;
-    makeStream: () => AsyncIterable<ClientAgentEvent>;
+    makeStream: (signal: AbortSignal) => AsyncIterable<ClientAgentEvent>;
   }): Promise<{ run_id: string }> => {
     const { thread_id, user_id, threadMeta, inputForDb, makeStream } = params;
 
@@ -192,8 +227,31 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       ...(user_id ? { user_id } : {}),
     };
 
+    // 取消句柄 + 「已收尾」信号（deleteThread 要等它，见 waitForRunsFinished）。
+    // finished 先于执行体建好，避免执行体比赋值更快结束的竞态。
+    const controller = new AbortController();
+    let markFinished: () => void = () => {};
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
+    activeRuns.set(run_id, { thread_id, controller, finished });
+
     void (async () => {
       let releaseRunSlot: (() => void) | null = null;
+
+      // 取消收尾：RunStatus 是 DB CHECK 约束的枚举（无 cancelled 值），复用 failed +
+      // error 文案，不为一个语义加一次迁移；thread 状态回 idle —— 对话已被删时是 0 行
+      // no-op，将来若开「停止按钮」这条路也是对的。
+      const settleCancelled = async (): Promise<void> => {
+        try {
+          await runs.setStatus(run_id, 'failed', RUN_CANCELLED_ERROR);
+          await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
+        } catch (e) {
+          console.error(`${LOG} status persist on cancel failed:`, (e as Error)?.message);
+        }
+        console.info(`${LOG} run cancelled thread_id=${thread_id} run_id=${run_id}`);
+      };
+
       try {
         // run 级并发闸门：超限时先回传「排队中」状态帧（复用 task_progress 语义，
         // 仅增字段不破坏白名单），对话可先思考，执行体延迟到放行后启动。
@@ -207,11 +265,25 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           );
         });
 
+        // 排队期间就被取消（对话在等锁时被删）：不必再启动
+        if (controller.signal.aborted) {
+          await settleCancelled();
+          return;
+        }
+
         await runWithContext(ctx, async () => {
-          for await (const ev of makeStream()) {
+          for await (const ev of makeStream(controller.signal)) {
             channel.publish(ev);
           }
         });
+
+        // client.stream() 会把异常吞成 ERROR 事件后正常 return（见其 catch），所以
+        // 「被取消」不会走下面的 catch —— 只能在这里显式看 signal，否则一次取消会被
+        // 记成 succeeded。
+        if (controller.signal.aborted) {
+          await settleCancelled();
+          return;
+        }
 
         await runs.setStatus(run_id, 'succeeded');
         await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
@@ -234,6 +306,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         console.error(`${LOG} run failed thread_id=${thread_id} run_id=${run_id} err=${message}`);
       } finally {
         if (releaseRunSlot) releaseRunSlot();
+        activeRuns.delete(run_id);
+        markFinished();
         channel.publish(
           createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
         );
@@ -284,6 +358,20 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     async deleteThread({ thread_id, user_id }) {
+      // 先取消这个 thread 还在跑的 run，并等它收尾（最多 RUN_CANCEL_GRACE_MS）：
+      // 否则 run 会在 meta / checkpoint 清完之后继续写 checkpoint，把刚删掉的数据写回来。
+      const runningRuns = [...activeRuns.values()].filter((entry) => entry.thread_id === thread_id);
+      if (runningRuns.length > 0) {
+        for (const entry of runningRuns) entry.controller.abort(new Error(RUN_CANCELLED_ERROR));
+        await waitForRunsFinished(
+          runningRuns.map((entry) => entry.finished),
+          RUN_CANCEL_GRACE_MS,
+        );
+        console.info(
+          `${LOG} deleteThread cancelled ${runningRuns.length} running run(s) thread_id=${thread_id}`,
+        );
+      }
+
       await threads.delete(thread_id, { user_id: user_id ?? null });
       // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
       try {
@@ -320,12 +408,13 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         user_id,
         threadMeta,
         inputForDb: input,
-        makeStream: () =>
+        makeStream: (signal) =>
           runClient.stream(
             input,
             thread_id,
             metadata ?? {},
             images?.length ? { images } : undefined,
+            signal,
           ),
       });
     },
@@ -353,7 +442,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         user_id,
         threadMeta,
         inputForDb: decisionText,
-        makeStream: () => runClient.resumeStream(decision, thread_id, metadata ?? {}),
+        makeStream: (signal) => runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
       });
     },
   };
