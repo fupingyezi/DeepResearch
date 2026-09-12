@@ -14,6 +14,9 @@ export function inferProvider(config: ModelConfig): ModelProvider {
   if (url.includes('deepseek') || name.startsWith('deepseek')) {
     return 'deepseek';
   }
+  if (url.includes('bigmodel') || name.startsWith('glm-')) {
+    return 'zhipu';
+  }
   if (url.includes('moonshot') || name.startsWith('moonshot')) {
     return 'moonshot';
   }
