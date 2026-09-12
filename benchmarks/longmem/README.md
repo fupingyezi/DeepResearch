@@ -241,18 +241,24 @@ done
 ### 问题：`数据集文件不存在`
 
 ```bash
-# 手动下载数据集
+# 手动下载数据集（s ≈ 265MB，oracle ≈ 15MB）
 mkdir -p benchmarks/data
 cd benchmarks/data
 curl -L -o longmemeval_s_cleaned.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json"
 curl -L -o longmemeval_oracle.json "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json"
 ```
 
+> **国内网络**：`huggingface.co` 常无法直连（实测 curl 在 25s 内无任何响应）。
+> 把域名换成官方镜像 `hf-mirror.com` 即可，路径完全一致：
+> `https://hf-mirror.com/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/<文件名>`
+
 ### 问题：API Key 缺失
 
 确保 `.env.local` 中配置了至少以下变量：
 
 - `BENCHMARK_AGENT_API_KEY` 或 `DEEPSEEK_API_KEY`
+- `BENCHMARK_JUDGE_API_KEY` + `BENCHMARK_JUDGE_BASE_URL`（judge 侧无 DEEPSEEK\_\* 回落；
+  确实不需要评分时用 `--no-judge` 显式跳过）
 
 ### 问题：超时
 
