@@ -13,7 +13,7 @@
  */
 
 import { cosineSimilarity, isCompatibleVector } from './embeddings';
-import type { Fact, MemoryData, SectionData } from './types';
+import type { Fact, FactCategory, MemoryData, SectionData } from './types';
 
 export interface RetrievalOptions {
   /** 最多保留的 fact 条数（默认 8）。 */
@@ -173,19 +173,106 @@ export function scoreFact(
   queryEmbedding?: number[] | null,
   hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
 ): number {
+  return factScoreParts(fact, queryTokens, queryEmbedding, hybridWeight).score;
+}
+
+/** fact 打分的分量明细（供预览/调试展示；打分口径与 scoreFact 同源，不会漂移）。 */
+export interface FactScoreParts {
+  /** 词面重叠率（0..1）。 */
+  lexical: number;
+  /** query 与该 fact 向量的余弦；无向量 / 维度不符 → null。 */
+  cosine: number | null;
+  /** 余弦是否达到阈值并实际参与混合。 */
+  semanticUsed: boolean;
+  /** 混合相关度 = w×余弦 + (1-w)×词面（未参与语义时 = 词面）。 */
+  base: number;
+  /** 最终得分 = base × (0.5 + 0.5×confidence)，与排序口径一致。 */
+  score: number;
+}
+
+/**
+ * 拆分打分的各个分量（scoreFact 内部即调用本函数）。
+ * 单独导出是为了让「检索预览」能展示 词面 / 余弦 / 阈值 / 加权 每一步，
+ * 同时保证与真实排序用的是同一套公式。
+ */
+export function factScoreParts(
+  fact: Fact,
+  queryTokens: Set<string>,
+  queryEmbedding?: number[] | null,
+  hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
+): FactScoreParts {
   const confidence = Number.isFinite(fact.confidence)
     ? Math.max(0, Math.min(1, fact.confidence))
     : 0;
   const lexical = overlapRatio(fact.content, queryTokens);
 
-  let semantic: number | null = null;
+  let cosine: number | null = null;
+  let semanticUsed = false;
   if (queryEmbedding && isCompatibleVector(fact.embedding, queryEmbedding.length)) {
-    const cosine = cosineSimilarity(fact.embedding, queryEmbedding);
-    if (cosine >= SEMANTIC_MATCH_THRESHOLD) semantic = cosine;
+    cosine = cosineSimilarity(fact.embedding, queryEmbedding);
+    semanticUsed = cosine >= SEMANTIC_MATCH_THRESHOLD;
   }
 
-  const base = semantic != null ? hybridWeight * semantic + (1 - hybridWeight) * lexical : lexical;
-  return base * (0.5 + 0.5 * confidence);
+  const base =
+    semanticUsed && cosine != null ? hybridWeight * cosine + (1 - hybridWeight) * lexical : lexical;
+  return { lexical, cosine, semanticUsed, base, score: base * (0.5 + 0.5 * confidence) };
+}
+
+/** 检索预览：逐条 fact 的打分明细 + 是否真的被注入。 */
+export interface FactScoreDetail extends FactScoreParts {
+  id: string;
+  content: string;
+  category: FactCategory;
+  confidence: number;
+  /** 是否进入实际注入集合（由 retrieveMemory 的真实结果决定，非本函数自行判定）。 */
+  picked: boolean;
+}
+
+/**
+ * 逐条列出 fact 的打分明细（按得分降序），供预览接口 / 调试展示。
+ *
+ * `picked` **取自 retrieveMemory 的真实返回**，因此本函数不会与真实检索行为脱节：
+ * 排序、minScore 过滤、topK 截断的口径都以实际检索为准。
+ */
+export function previewFactScores(
+  data: MemoryData | null | undefined,
+  query: string,
+  options?: RetrievalOptions,
+): FactScoreDetail[] {
+  if (!data || !Array.isArray(data.facts)) return [];
+  const queryTokens = new Set(tokenize(query));
+  const queryEmbedding = options?.queryEmbedding ?? null;
+  const hybridWeight = options?.hybridWeight ?? DEFAULT_HYBRID_WEIGHT;
+
+  const pickedIds = new Set(
+    (
+      retrieveMemory(data, query, {
+        topK: options?.topK,
+        minScore: options?.minScore,
+        queryEmbedding,
+        hybridWeight,
+      })?.facts ?? []
+    ).map((f) => f.id),
+  );
+
+  return data.facts
+    .map((fact) => ({
+      id: fact.id,
+      content: fact.content,
+      category: fact.category,
+      confidence: fact.confidence,
+      ...factScoreParts(fact, queryTokens, queryEmbedding, hybridWeight),
+      picked: pickedIds.has(fact.id),
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * 预览用：模块内**不可配置**的两个门槛常量，便于解读打分明细。
+ * （topK / hybridWeight 来自 MemoryConfig，真实值请从 getMemoryConfig() 取。）
+ */
+export function retrievalThresholds(): { semanticMatch: number; minScore: number } {
+  return { semanticMatch: SEMANTIC_MATCH_THRESHOLD, minScore: DEFAULT_MIN_SCORE };
 }
 
 /**

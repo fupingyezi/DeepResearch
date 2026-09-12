@@ -157,7 +157,13 @@ export {
   type MemoryEmbeddingsFactory,
   // facade
   buildMemoryContext,
+  previewMemoryRetrieval,
   type BuildMemoryContextOptions,
+  type MemoryRetrievalPreview,
+  // retrieval 明细（预览/调试）
+  previewFactScores,
+  retrievalThresholds,
+  type FactScoreDetail,
 } from './agents/memory';
 
 // vision（多模态：图片字节注入 + 多模态消息构造 + 历史图压缩）

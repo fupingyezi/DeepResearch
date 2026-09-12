@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Fact, MemoryData } from './types';
-import { overlapRatio, retrieveMemory, scoreFact, tokenize } from './retrieval';
+import { overlapRatio, previewFactScores, retrieveMemory, scoreFact, tokenize } from './retrieval';
 
 function fact(content: string, confidence = 0.9, id = content, embedding?: number[]): Fact {
   return {
@@ -246,5 +246,59 @@ describe('retrieveMemory 混合打分（queryEmbedding）', () => {
     const high = scoreFact(fact('量子计算', 1.0, 'h', QUERY_VEC), tokens, QUERY_VEC);
     const low = scoreFact(fact('量子计算', 0.5, 'l', QUERY_VEC), tokens, QUERY_VEC);
     expect(high).toBeGreaterThan(low);
+  });
+});
+
+describe('previewFactScores（检索预览）', () => {
+  const QUERY_VEC = [1, 0, 0, 0];
+  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+
+  it('明细的 score 与 scoreFact 完全一致（同一套公式，不会漂移）', () => {
+    const f = fact('量子计算进展', 0.8, 'a', unit(0.7));
+    const tokens = new Set(tokenize('量子计算'));
+    const [detail] = previewFactScores(memory([f]), '量子计算', { queryEmbedding: QUERY_VEC });
+    expect(detail.score).toBeCloseTo(scoreFact(f, tokens, QUERY_VEC), 10);
+    expect(detail.lexical).toBeCloseTo(overlapRatio(f.content, tokens), 10);
+    expect(detail.cosine).toBeCloseTo(0.7, 10);
+    expect(detail.semanticUsed).toBe(true);
+  });
+
+  it('picked 取自真实 retrieveMemory：过阈值但被 topK 挤掉的标 false', () => {
+    const data = memory([
+      fact('甲内容', 0.9, 'top', unit(0.9)),
+      fact('乙内容', 0.9, 'cut', unit(0.7)),
+    ]);
+    const details = previewFactScores(data, '无关查询', { queryEmbedding: QUERY_VEC, topK: 1 });
+
+    // 两条都过 0.6 阈值，但 topK=1 只留最高分那条
+    expect(details.map((d) => d.semanticUsed)).toEqual([true, true]);
+    expect(details.find((d) => d.id === 'top')?.picked).toBe(true);
+    expect(details.find((d) => d.id === 'cut')?.picked).toBe(false);
+  });
+
+  it('未过语义阈值时如实标注：cosine 仍返回原值，semanticUsed=false', () => {
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.55))]);
+    const [detail] = previewFactScores(data, '随便聊聊', { queryEmbedding: QUERY_VEC });
+    expect(detail.cosine).toBeCloseTo(0.55, 10);
+    expect(detail.semanticUsed).toBe(false);
+    expect(detail.base).toBeCloseTo(detail.lexical, 10); // 回落词面
+  });
+
+  it('无向量的 fact：cosine 为 null、按词面打分', () => {
+    const data = memory([fact('量子计算研究', 0.9, 'novec')]);
+    const [detail] = previewFactScores(data, '量子计算', { queryEmbedding: QUERY_VEC });
+    expect(detail.cosine).toBeNull();
+    expect(detail.semanticUsed).toBe(false);
+  });
+
+  it('空 data / 无 facts → 空数组', () => {
+    expect(previewFactScores(null, 'x')).toEqual([]);
+    expect(previewFactScores(memory([]), 'x')).toEqual([]);
+  });
+
+  it('明细按得分降序（便于直接看 top-K 边界）', () => {
+    const data = memory([fact('低分内容', 0.3, 'low'), fact('量子计算', 0.9, 'high')]);
+    const details = previewFactScores(data, '量子计算');
+    expect(details.map((d) => d.id)).toEqual(['high', 'low']);
   });
 });
