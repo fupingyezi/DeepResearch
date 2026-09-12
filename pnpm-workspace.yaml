@@ -1,11 +1,14 @@
-# pnpm 配置（pnpm 10+ 起，包管理设置从 package.json 的 "pnpm" 字段迁移至此）。
+# pnpm 配置（pnpm 10+ 把部分设置从 package.json 移到这里）。
 #
-# allowBuilds：依赖的 postinstall 构建脚本白名单。
-#   - core-js / unrs-resolver：原有用到的构建脚本。
-#   - cpu-features / ssh2：ssh2 的可选原生加速（cpu-features），纯 JS 模式功能完整，
-#     故禁用其构建脚本 —— 避免在 CI/服务器构建镜像时引入 node-gyp 工具链依赖。
+# 关于 allowBuilds：pnpm 11 默认不跑依赖的构建脚本，且**把「存在被忽略的构建脚本」
+# 当成非零退出** —— 这会让 `pnpm install` 与 `pnpm run <script>`（运行前的依赖检查）
+# 直接失败。这里逐项显式声明为 false（= 不需要跑），既清掉那个错误、又保持不执行
+# 第三方 postinstall 的默认安全姿态：
+#   - esbuild / unrs-resolver：通过各自平台的 optional 依赖提供二进制，不跑脚本也能用
+#     （tsx 依赖 esbuild，已实测 `tsx --version` 与脚本执行均正常）
+#   - core-js：其 postinstall 只打印赞助信息，对构建无影响
+# 若将来某个依赖确实需要 postinstall，把它改成 true。
 allowBuilds:
-  core-js: true
-  cpu-features: false
-  ssh2: false
-  unrs-resolver: true
+  core-js: false
+  esbuild: false
+  unrs-resolver: false

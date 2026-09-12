@@ -39,9 +39,14 @@ function loadDotEnv(file: string): void {
   }
 }
 
-// 加载顺序：benchmarks/.env.local 优先 > 根目录 .env.local fallback
+// 加载顺序：benchmarks/.env.local 优先 > 根目录 .env.local > 根目录 .env
+//
+// 根 .env 兜底是为了让评测直接复用产品开发环境已有的 key（DEEPSEEK_* / TAVILY_API_KEY
+// 等）—— 此前只找 .env.local，于是「key 明明在 .env 里、评测却认证失败」。loadDotEnv
+// 不覆盖已设值，故 .env 优先级最低，需要覆盖时写 benchmarks/.env.local 即可。
 loadDotEnv(__dirname + '/.env.local');
 loadDotEnv(process.cwd() + '/.env.local');
+loadDotEnv(process.cwd() + '/.env');
 
 if (process.env.BENCHMARK_VERBOSE === 'true') {
   console.log('[load-env] 已加载环境变量:', {

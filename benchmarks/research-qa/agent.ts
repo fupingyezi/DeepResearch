@@ -17,6 +17,11 @@ import {
   ClientAgentEvent,
   ClientAgentEventType,
 } from '../../src/deerflow-harness/runtime/sse/client-event';
+import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
+import {
+  withUsageAccounting,
+  type RunUsage,
+} from '../../src/deerflow-harness/runtime/usage-accounting';
 
 export interface AgentRunResult {
   /** Agent 最终输出文本（完整回答） */
@@ -25,6 +30,11 @@ export interface AgentRunResult {
   metrics: PerformanceMetrics;
   /** 原始事件列表（调试用） */
   events: ClientAgentEvent[];
+  /**
+   * 本次 run 的 LLM 用量（含 subagent 与中间件调用）。
+   * 经模型工厂的 callback 累加，与 SSE 事件流无关。
+   */
+  usage?: RunUsage;
 }
 
 export interface PerformanceMetrics {
@@ -40,6 +50,11 @@ export interface PerformanceMetrics {
   error: boolean;
   /** 错误信息 */
   errorMessage?: string;
+  /**
+   * 错误类型。'timeout' 是**基础设施**故障，与「模型答错」不是一回事，
+   * 汇总 accuracy 时会被剔除（见 longmem/run.ts）。
+   */
+  errorKind?: 'timeout' | 'agent';
 }
 
 /**
@@ -58,9 +73,23 @@ export function createBenchmarkAgent(options: {
   baseUrl?: string;
   apiKey?: string;
   memoryEnabled?: boolean;
+  /** 单次 run 超时（ms）。超限 abort 该 run 并记为 errorKind='timeout'。 */
+  timeoutMs?: number;
 }) {
   return async (input: { query: string }): Promise<AgentRunResult> => {
     const startTime = Date.now();
+
+    // 超时兜底：此前 BENCHMARK_TIMEOUT_MS 是死配置，挂住的 run 会永远挂着。
+    // abort 一路下发到 LLM 调用（client.stream 的 signal → LangGraph config.signal）。
+    // 声明在 try 之外 —— 在 try 块里用 let 声明的话 catch 块读不到。
+    const abortController = new AbortController();
+    let timedOut = false;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          abortController.abort();
+        }, options.timeoutMs)
+      : undefined;
 
     try {
       // 构建 ModelConfig
@@ -93,50 +122,92 @@ export function createBenchmarkAgent(options: {
       // 先跑的项目把计数刷过 hardLimit(50) 后，后续项目的每次工具调用都被秒杀。
       // 这里复刻生产 runtime/service.ts 的 runWithContext 入口，按项目隔离计数器。
       const threadId = randomUUID();
-      await runWithContext(
-        {
-          thread_id: threadId,
-          run_id: randomUUID(),
-          assistant_id: 'benchmark',
-          currentModelConfig: modelConfig,
-        },
-        async () => {
-          for await (const event of client.stream(input.query, threadId)) {
-            events.push(event);
 
-            // 记录 TTFT（首个正文 token 到达）
-            if (!ttftRecorded && event.eventType === ClientAgentEventType.STREAM_CHUNK) {
-              if ((event as any).payload?.text) {
-                ttftMs = Date.now() - startTime;
-                ttftRecorded = true;
+      try {
+        // withUsageAccounting：作用域内所有经模型工厂创建的 LLM 调用（含 subagent、
+        // 中间件）都会累计；产量随 Promise 一起返回，供报告算钱。
+        const { usage } = await withUsageAccounting(() =>
+          runWithContext(
+            {
+              thread_id: threadId,
+              run_id: randomUUID(),
+              assistant_id: 'benchmark',
+              currentModelConfig: modelConfig,
+            },
+            async () => {
+              for await (const event of client.stream(
+                input.query,
+                threadId,
+                undefined,
+                undefined,
+                abortController.signal,
+              )) {
+                events.push(event);
+
+                // 记录 TTFT（首个正文 token 到达）
+                if (!ttftRecorded && event.eventType === ClientAgentEventType.STREAM_CHUNK) {
+                  if ((event as any).payload?.text) {
+                    ttftMs = Date.now() - startTime;
+                    ttftRecorded = true;
+                  }
+                }
+
+                // 聚合文本内容（仅取最终答案正文，跳过 reasoning）
+                if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
+                  const text = (event as any).payload?.text;
+                  if (typeof text === 'string') fullText += text;
+                }
+
+                // 统计工具调用
+                if (event.eventType === ClientAgentEventType.TOOL_CALL) {
+                  toolNames.push((event as any).payload?.toolName ?? 'unknown');
+                }
               }
-            }
 
-            // 聚合文本内容（仅取最终答案正文，跳过 reasoning）
-            if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
-              const text = (event as any).payload?.text;
-              if (typeof text === 'string') fullText += text;
-            }
+              // 记忆更新走 debounce 队列（afterAgent 只入队，LLM 调用在 setTimeout 里）。
+              // 不在这里 flush，那些调用会落在记账作用域**之外**：token 记不到，而且不会
+              // 触发 callsMissingUsage（根本没进作用域）。research-qa 默认关记忆，队列为空
+              // 时是 no-op。
+              await getMemoryQueue().flush();
+            },
+          ),
+        );
 
-            // 统计工具调用
-            if (event.eventType === ClientAgentEventType.TOOL_CALL) {
-              toolNames.push((event as any).payload?.toolName ?? 'unknown');
-            }
-          }
-        },
-      );
+        // ⚠️ abort 不能只靠 catch 兜：DeerFlowClient 会把 abort 异常**吞成正常 return**
+        // （见 CLAUDE.md「run 可被取消」一节），不显式判就会让超时的 run 看起来像一次
+        // 正常但很短的回答 —— 正是要消灭的静默失真。
+        if (timedOut) {
+          return {
+            output: fullText.trim(),
+            metrics: {
+              ttftMs,
+              totalLatencyMs: Date.now() - startTime,
+              toolCallCount: toolNames.length,
+              toolNames,
+              error: true,
+              errorMessage: `run 超时（${options.timeoutMs}ms），已中止`,
+              errorKind: 'timeout',
+            },
+            events,
+            usage,
+          };
+        }
 
-      return {
-        output: fullText.trim(),
-        metrics: {
-          ttftMs,
-          totalLatencyMs: Date.now() - startTime,
-          toolCallCount: toolNames.length,
-          toolNames,
-          error: false,
-        },
-        events,
-      };
+        return {
+          output: fullText.trim(),
+          metrics: {
+            ttftMs,
+            totalLatencyMs: Date.now() - startTime,
+            toolCallCount: toolNames.length,
+            toolNames,
+            error: false,
+          },
+          events,
+          usage,
+        };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     } catch (error: any) {
       return {
         output: '',
@@ -147,6 +218,7 @@ export function createBenchmarkAgent(options: {
           toolNames: [],
           error: true,
           errorMessage: error?.message ?? String(error),
+          errorKind: timedOut ? 'timeout' : 'agent',
         },
         events: [],
       };

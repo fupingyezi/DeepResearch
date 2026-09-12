@@ -7,10 +7,32 @@
 
 ```bash
 cp benchmarks/.env.example benchmarks/.env.local
-# 编辑填入 LANGCHAIN_API_KEY（必填，LangSmith 追踪）与模型 API Key
+# 填入 judge 的 key 与 baseUrl（见下）。LangSmith 可选。
 ```
 
-评分模型与 LangSmith 为必填项：`config.ts` 在缺失时直接报错退出，避免产出无法追溯的结果。
+环境变量加载顺序（`load-env.ts`，后者只在前者没设该变量时生效）：
+
+```
+benchmarks/.env.local  >  根 .env.local  >  根 .env
+```
+
+根 `.env` 兜底意味着**产品开发环境已有的 `DEEPSEEK_*` / `TAVILY_API_KEY` 会被自动继承**，
+通常只需要额外补 judge 的三项。
+
+### 必填与可选
+
+| 变量                       | 必填性                        | 说明                                                                       |
+| -------------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `BENCHMARK_JUDGE_API_KEY`  | **必填**（除非 `--no-judge`） | judge 侧**没有** `DEEPSEEK_*` 回落，缺了直接报错退出                       |
+| `BENCHMARK_JUDGE_BASE_URL` | **必填**（除非 `--no-judge`） | 同上不回落到 `DEEPSEEK_BASE_URL`；漏配会把请求带着 key 打到 api.openai.com |
+| `BENCHMARK_JUDGE_MODEL`    | 可选                          | 默认 `deepseek-v4-pro`                                                     |
+| `BENCHMARK_AGENT_MODEL`    | 可选                          | 默认 `deepseek-flash`                                                      |
+| `LANGCHAIN_API_KEY` 等     | 可选                          | 缺失只告警；仅 `--upload` 与在 LangSmith UI 看 trace 需要                  |
+
+`validateEnv()` 对**必填项缺失是硬失败**（抛错 + 非零退出），不再静默降级。这修的是两个
+静默失真：judge key 缺失时 research-qa 会**悄悄不创建 LLM judge**（报告仍打印 judge 模型名）、
+longmem 会**悄悄改用 agent 模型自评**；judge baseUrl 缺失时请求打到 OpenAI，judge 全部失败
+并被记成 0 分平均进结果。想显式不评分请加 `--no-judge`，把「静默降级」变成「显式选择」。
 
 ## 套件一览
 
@@ -23,22 +45,50 @@ cp benchmarks/.env.example benchmarks/.env.local
 
 ```bash
 # 研究 QA 评估
-npx tsx benchmarks/research-qa/run.ts
+pnpm bench:qa
+pnpm bench:qa -- --id tech-001        # 单条
 
 # LongMemEval：两阶段（先 --ingest 预写记忆，再评测）
-npx tsx benchmarks/longmem/run.ts --ingest
-npx tsx benchmarks/longmem/run.ts
+pnpm bench:longmem:ingest
+pnpm bench:longmem
+
+# 显式跳过评分（不产出 accuracy / llm_judge，也不要求 judge 配置）
+pnpm bench:qa -- --no-judge
 ```
 
 LongMemEval 数据集需手动下载（官方 HuggingFace 源），详见
 [`longmem/README.md`](./longmem/README.md)「数据准备」一节。
+
+## token 用量与成本
+
+报告（`benchmarks/results/**/latest.json` 与终端）会给出按角色拆分的 token 与费用：
+
+- **token 是实测值**：agent 侧经模型工厂的 callback 累加（含 subagent、中间件与记忆抽取
+  的调用），judge 侧就地读取响应的 `usage_metadata`。实现在
+  `src/deerflow-harness/runtime/usage-accounting.ts`。
+- **金额是估算**：单价取自 `src/deerflow-harness/runtime/pricing.json`（含 `asOf` 与官方
+  URL）。价格变动只改这个文件，不动代码。**未知模型不给估算**，只列进 `unknownModels`。
+- 计价区分三个维度：缓存命中 vs 未命中（单价可差 50 倍）、高峰 vs 空闲（空闲恰为高峰半价，
+  高峰 = 北京时间周一~周五 09:00-12:00 / 14:00-18:00，按**每次调用自己的时刻**判定）、
+  reasoning token 计入输出。
+- 报告里有 `callsMissingUsage` / `callsCoarseUsage` 两个「记账缺口」计数：前者表示有调用
+  拿不到 usage（成本被低估），后者表示只有粗粒度 usage（缓存命中体现不出，成本被高估）。
+  终端在缺口 > 0 时会打 `⚠️ 记账缺口` 一行 —— 看到它就别把金额当准数。
+- 已知盲区：LangChain 内层的 HTTP 重试对记账不可见（自建网关可能对每次重试都计费），
+  这部分费用不会体现在报告里。
+- 逐次调用记录（含各自的时间戳）随条目落盘，因此价格表或时段规则变化后，
+  **可以直接从历史报告重算费用**，不必重跑评测。
+
+省钱的两个杠杆：把便宜档放在 agent 侧（体积大的一侧），以及尽量让 run 落在**空闲时段**
+（北京工作日 12:00-14:00、18:00 之后与周末，单价减半；报告里的 `ifAllPeakTotal` 是全落在
+高峰时段的上界，可用于对照）。
 
 ## 目录结构
 
 ```
 benchmarks/
 ├── config.ts             # 统一配置（模型 / 评分 / 并发，读 .env）
-├── load-env.ts           # .env 加载（根目录 + benchmarks/）
+├── load-env.ts           # .env 加载（benchmarks/.env.local > 根 .env.local > 根 .env）
 ├── tsconfig.bench.json   # benchmarks 独立 tsconfig
 ├── longmem/              # LongMemEval 套件
 │   ├── README.md         # 详细说明（数据准备 / 两阶段模式 / 分类型运行）

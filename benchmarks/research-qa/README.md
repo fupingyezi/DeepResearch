@@ -11,22 +11,25 @@ cp benchmarks/.env.example .env.local
 # 编辑 .env.local 填入实际 API Key
 ```
 
-**必须配置：**
+**必须配置（缺失时 `validateEnv()` 直接报错退出，不再静默降级）：**
 | 变量 | 说明 | 来源 |
 |------|------|------|
-| `LANGCHAIN_TRACING_V2=true` | 启用 LangSmith Tracing | - |
-| `LANGCHAIN_API_KEY` | LangSmith API Key | https://smith.langchain.com/settings/keys |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key（Agent 默认模型） | https://platform.deepseek.com/ |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key（Agent 模型；也可用 `BENCHMARK_AGENT_API_KEY` 单独给） | https://platform.deepseek.com/ |
+| `BENCHMARK_JUDGE_API_KEY` | LLM Judge 的 Key —— judge 侧**没有** `DEEPSEEK_*` 回落，必须显式给（可与 agent 共用同一把） | - |
+| `BENCHMARK_JUDGE_BASE_URL` | LLM Judge 的端点 —— 同样无回落，漏配会把请求打到 api.openai.com | DeepSeek 填 `https://api.deepseek.com/v1` |
 
 **可选配置：**
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `BENCHMARK_AGENT_MODEL` | `deepseek-chat` | 覆盖 Agent 模型 |
-| `BENCHMARK_JUDGE_MODEL` | `gpt-4o` | LLM Judge 评估模型 |
+| `BENCHMARK_AGENT_MODEL` | `deepseek-flash` | 覆盖 Agent 模型（官方名） |
+| `BENCHMARK_JUDGE_MODEL` | `deepseek-v4-pro` | LLM Judge 评估模型 |
 | `BENCHMARK_CONCURRENCY` | 2 | 并发数 |
+| `BENCHMARK_TIMEOUT_MS` | 300000 | 单次 run / judge 调用超时，超限记 `errorKind: 'timeout'` |
 | `BENCHMARK_VERBOSE` | false | 详细日志 |
+| `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` | - | 可选：启用 LangSmith Tracing（缺失只告警） |
 
-> **注意**：不设置 `BENCHMARK_AGENT_*` 时，自动使用项目已有的 `DEEPSEEK_BASE_URL` + `DEEPSEEK_API_KEY`，模型默认为 `deepseek-chat`。
+> **注意**：不设置 `BENCHMARK_AGENT_*` 时，自动使用项目已有的 `DEEPSEEK_BASE_URL` + `DEEPSEEK_API_KEY`。
+> 根 `.env` 也会被加载（优先级最低），所以产品开发环境的 key 通常已被继承。
 
 ### 2. 运行 Benchmark
 
@@ -34,21 +37,26 @@ cp benchmarks/.env.example .env.local
 
 ```bash
 # 运行全部测试（8条预设数据）
-npx tsx benchmarks/research-qa/run.ts
+pnpm bench:qa
 
 # 按分类运行
-npx tsx benchmarks/research-qa/run.ts --category single-hop
-npx tsx benchmarks/research-qa/run.ts --category technical-deep-dive
+pnpm bench:qa -- --category single-hop
+pnpm bench:qa -- --category technical-deep-dive
 
 # 运行单条
-npx tsx benchmarks/research-qa/run.ts --id tech-001
+pnpm bench:qa -- --id tech-001
+
+# 显式跳过 LLM judge（不产出 llm_judge 指标，也不要求 judge 配置）
+pnpm bench:qa -- --no-judge
 
 # 上传数据集到 LangSmith Dashboard
-npx tsx benchmarks/research-qa/run.ts --upload
+pnpm bench:qa -- --upload
 
 # 指定输出路径
-npx tsx benchmarks/research-qa/run.ts --output my-results.json
+pnpm bench:qa -- --output my-results.json
 ```
+
+> 报告在**每批结束后增量落盘**，中途失败不会丢掉已完成的部分。
 
 ### 3. 查看结果
 
@@ -81,13 +89,13 @@ benchmarks/
 
 ## 评估指标说明
 
-| 指标               | 类型 | 分数范围 | 说明                                              |
-| ------------------ | ---- | -------- | ------------------------------------------------- |
-| `non_empty`        | 代码 | 0/1      | 输出是否有效（>50字符）                           |
-| `error_free`       | 代码 | 0/1      | 是否无报错                                        |
-| `keyword_coverage` | 代码 | 0-1      | 期望关键词覆盖率                                  |
-| `performance`      | 代码 | 0-1      | TTFT + 总延迟综合得分                             |
-| `llm_judge`        | LLM  | 0-1      | GPT-4o 多维度打分（准确性/完整性/深度/结构/引用） |
+| 指标               | 类型 | 分数范围 | 说明                                                 |
+| ------------------ | ---- | -------- | ---------------------------------------------------- |
+| `non_empty`        | 代码 | 0/1      | 输出是否有效（>50字符）                              |
+| `error_free`       | 代码 | 0/1      | 是否无报错                                           |
+| `keyword_coverage` | 代码 | 0-1      | 期望关键词覆盖率                                     |
+| `performance`      | 代码 | 0-1      | TTFT + 总延迟综合得分                                |
+| `llm_judge`        | LLM  | 0-1      | Judge 模型多维度打分（准确性/完整性/深度/结构/引用） |
 
 ## 自定义数据集
 

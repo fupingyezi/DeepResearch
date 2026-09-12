@@ -11,16 +11,15 @@
  *   - Abstention                (弃权识别)
  *
  * 用法（从项目根目录执行）：
- *   npx tsx benchmarks/longmem/run.ts
- *   npx tsx benchmarks/longmem/run.ts --type multi-session
- *   npx tsx benchmarks/longmem/run.ts --id e47becba
- *   npx tsx benchmarks/longmem/run.ts --variant oracle
- *   npx tsx benchmarks/longmem/run.ts --no-memory          # 关闭记忆系统（对照实验）
- *   npx tsx benchmarks/longmem/run.ts --history-mode system # 使用 system prompt 注入历史
- *   npx tsx benchmarks/longmem/run.ts --no-websearch        # 关闭 Web Search（默认已关闭，省 API 额度）
- *   npx tsx benchmarks/longmem/run.ts --websearch           # 显式开启 Web Search
- *   npx tsx benchmarks/longmem/run.ts --no-judge            # 跳过自动准确率评估（默认开启）
- *   npx tsx benchmarks/longmem/run.ts --ingest              # 两阶段：先把 sessions 写入记忆系统，再靠记忆检索作答（真正测长期记忆）
+ *   pnpm bench:longmem
+ *   pnpm bench:longmem -- --type multi-session
+ *   pnpm bench:longmem -- --id e47becba
+ *   pnpm bench:longmem -- --variant oracle
+ *   pnpm bench:longmem -- --no-memory           # 关闭记忆系统（对照实验）
+ *   pnpm bench:longmem -- --history-mode system # 用 system prompt 注入历史
+ *   pnpm bench:longmem -- --websearch           # 显式开启 Web Search（默认关闭）
+ *   pnpm bench:longmem -- --no-judge            # 跳过自动准确率评估（默认开启）
+ *   pnpm bench:longmem:ingest                   # 两阶段：先写记忆，再靠检索作答
  *
  * 环境变量：见 benchmarks/.env.example
  */
@@ -29,10 +28,21 @@ import '../load-env';
 
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'url';
 
 import { ChatOpenAI } from '@langchain/openai';
 
-import defaultConfig, { validateEnv } from '../config';
+import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
+import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/pricing';
+import {
+  UsageAccumulator,
+  mergeRunUsage,
+  tokenUsageFromUsageMetadata,
+  withUsageAccounting,
+  type RunUsage,
+  type TokenUsage,
+} from '../../src/deerflow-harness/runtime/usage-accounting';
 import {
   loadLongMemDataset,
   printStats,
@@ -41,7 +51,7 @@ import {
   type LongMemExample,
   type LongMemQuestionType,
 } from './dataset';
-import { createLongMemAgent, type LongMemAgentResult } from './agent';
+import { createLongMemAgent, type LongMemAgentResult, type PerformanceMetrics } from './agent';
 import {
   installMemoryModelFactory,
   ingestExample,
@@ -136,6 +146,34 @@ function filterDataset(dataset: LongMemExample[], args: LongMemArgs): LongMemExa
 
 // ── 执行单条测试 ──
 
+/**
+ * 落盘用的 agent 结果 —— **不含原始事件流**（单条就有上千条逐 token 事件，
+ * 实测占报告体积 97%）。只留按类型计数；细排请看 LangSmith trace。
+ */
+interface ReportedAgentResult {
+  output: string;
+  metrics: PerformanceMetrics;
+  eventTypes: Record<string, number>;
+  /**
+   * 该条目的完整用量（含**逐次调用记录**）—— 计价依赖每次调用自己的时间戳
+   * （高峰/空闲差一倍），只存总数会让从报告重算费用变得不可能。
+   */
+  usage?: RunUsage;
+}
+
+function toReportedResult(result: LongMemAgentResult): ReportedAgentResult {
+  const eventTypes: Record<string, number> = {};
+  for (const event of result.events) {
+    eventTypes[event.eventType] = (eventTypes[event.eventType] ?? 0) + 1;
+  }
+  return {
+    output: result.output,
+    metrics: result.metrics,
+    eventTypes,
+    ...(result.usage ? { usage: result.usage } : {}),
+  };
+}
+
 /** 单条测试结果（judgment 在评估阶段填充） */
 interface LongMemResultItem {
   exampleId: string;
@@ -143,13 +181,23 @@ interface LongMemResultItem {
   isAbstention: boolean;
   query: string;
   referenceAnswer: string;
-  result: LongMemAgentResult;
+  result: ReportedAgentResult;
   /** 记忆写入阶段统计（仅 --ingest 模式填充） */
   ingest?: IngestStats;
+  /** 记忆写入阶段的 LLM 用量（仅 --ingest 模式填充） */
+  ingestUsage?: RunUsage;
   /** LLM judge 评估结果（开启 --judge 时填充） */
   judgment?: {
     correct: boolean;
     reasoning: string;
+    /** 该次 judge 调用的用量（judge 不经模型工厂，就地读取响应） */
+    usage?: TokenUsage;
+    /**
+     * 判定来源。只有 `'valid'` 才是「模型答对/答错」；
+     * `'agent_error'` / `'judge_error'` / `'timeout'` 都是**基础设施故障**，
+     * 不计入 accuracy 分母（见 generateReport 的 infraFailureCount）。
+     */
+    kind?: 'valid' | 'agent_error' | 'judge_error' | 'timeout';
   };
 }
 
@@ -161,6 +209,7 @@ async function runSingle(
   console.log(`\n  [Running] ${example.questionType}: "${example.query.slice(0, 80)}..."`);
 
   let ingestStats: IngestStats | undefined;
+  let ingestUsage: RunUsage | undefined;
   let userId: string | undefined;
 
   if (opts.ingest) {
@@ -168,14 +217,21 @@ async function runSingle(
     userId = exampleUserId(example);
     const total = example.raw.haystack_sessions?.length ?? 0;
     process.stdout.write(`    [Ingest] 写入记忆: 0/${total} sessions`);
-    ingestStats = await ingestExample(example, userId, (done, t) => {
-      // 原地刷新进度
-      process.stdout.write(`\r    [Ingest] 写入记忆: ${done}/${t} sessions   `);
-    });
+    // 记忆抽取走 createChatModel（见 ingest.ts 的 installMemoryModelFactory），
+    // 因此包一层记账即可捕获 ingest 阶段的用量 —— 这是 LongMemEval 的成本大头。
+    const accounted = await withUsageAccounting(() =>
+      ingestExample(example, userId!, (done, t) => {
+        // 原地刷新进度
+        process.stdout.write(`\r    [Ingest] 写入记忆: ${done}/${t} sessions   `);
+      }),
+    );
+    ingestStats = accounted.result;
+    ingestUsage = accounted.usage;
     process.stdout.write(
       `\r    [Ingest] 写入完成: ${ingestStats.sessionsWritten}/${ingestStats.sessionsProcessed} sessions, ` +
         `${ingestStats.factCount} facts, ${(ingestStats.ingestMs / 1000).toFixed(1)}s\n`,
     );
+    process.stdout.write(`    [Ingest] 用量: ${ingestUsage.total.llmCalls} 次调用\n`);
   }
 
   // ── 阶段 2：提问 ──
@@ -203,8 +259,9 @@ async function runSingle(
     isAbstention: example.isAbstention,
     query: example.query,
     referenceAnswer: example.referenceAnswer,
-    result,
+    result: toReportedResult(result),
     ingest: ingestStats,
+    ingestUsage,
   };
 }
 
@@ -234,33 +291,56 @@ Rules:
 - Output STRICT JSON only, no markdown:
 {"correct": true|false, "reasoning": "one short sentence"}`;
 
-function createJudgeModel(): ChatOpenAI {
+/**
+ * 构建 judge 模型。
+ *
+ * **不再回退到 agent 模型**：此前未配 `BENCHMARK_JUDGE_API_KEY` 时会静默改用 agent
+ * 模型自评（只在 console 打一行），报告里看不出任何差别。现在缺配置由 `validateEnv()`
+ * 直接报错退出；想显式不评分请用 `--no-judge`。
+ */
+function createJudgeModel(): { model: ChatOpenAI; modelName: string } {
   const j = defaultConfig.judge;
-  // 优先用专门的 judge 配置；未配置 judge apiKey 时回退到 agent 模型（复用已有 key）
-  const hasJudgeKey = Boolean(j.apiKey);
-  const modelName = hasJudgeKey ? j.modelName : defaultConfig.agent.modelName;
-  const apiKey = hasJudgeKey ? j.apiKey : defaultConfig.agent.apiKey;
-  const baseUrl = hasJudgeKey ? j.baseUrl : defaultConfig.agent.baseUrl;
 
-  console.log(
-    `[Judge] 使用评估模型: ${modelName}${hasJudgeKey ? '' : ' (回退到 agent 模型，未配置 BENCHMARK_JUDGE_API_KEY)'}`,
-  );
+  if (!j.apiKey) {
+    throw new Error(
+      '[Judge] 缺少 BENCHMARK_JUDGE_API_KEY。judge 侧没有 DEEPSEEK_* 回落，' +
+        '请显式配置（可与 agent 共用同一把 key），或用 --no-judge 显式跳过评分。',
+    );
+  }
+  if (!j.baseUrl) {
+    throw new Error(
+      '[Judge] 缺少 BENCHMARK_JUDGE_BASE_URL。judge 侧不会回落到 DEEPSEEK_BASE_URL，' +
+        '漏配会让请求带着 key 打到 api.openai.com。DeepSeek 填 https://api.deepseek.com/v1。',
+    );
+  }
 
-  return new ChatOpenAI({
-    model: modelName,
-    apiKey,
-    configuration: baseUrl ? { baseURL: baseUrl } : undefined,
-    temperature: 0,
-  });
+  console.log(`[Judge] 使用评估模型: ${j.modelName}（baseUrl=${j.baseUrl}）`);
+  return {
+    model: new ChatOpenAI({
+      model: j.modelName,
+      apiKey: j.apiKey,
+      configuration: { baseURL: j.baseUrl },
+      temperature: 0,
+    }),
+    modelName: j.modelName,
+  };
 }
 
 async function judgeOne(
   model: ChatOpenAI,
   item: LongMemResultItem,
-): Promise<{ correct: boolean; reasoning: string }> {
-  // Agent 报错的条目直接判错
+  timeoutMs: number,
+): Promise<{
+  correct: boolean;
+  reasoning: string;
+  kind: NonNullable<LongMemResultItem['judgment']>['kind'];
+  usage?: TokenUsage;
+}> {
+  // Agent 报错/超时的条目判错，但标记为基础设施故障 —— 不计入 accuracy 分母，
+  // 否则「评测环境抖动」会伪装成「模型答错」。
   if (item.result.metrics.error) {
-    return { correct: false, reasoning: 'Agent 执行出错' };
+    const kind = item.result.metrics.errorKind === 'timeout' ? 'timeout' : 'agent_error';
+    return { correct: false, reasoning: `Agent 执行出错（${kind}）`, kind };
   }
 
   const systemPrompt = item.isAbstention ? JUDGE_ABSTENTION_PROMPT : JUDGE_SYSTEM_PROMPT;
@@ -270,11 +350,24 @@ async function judgeOne(
         item.result.output || '(empty)'
       }`;
 
+  // judge 调用超时（signal 会让底层请求真正中止）
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = timeoutMs
+    ? setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs)
+    : undefined;
+
   try {
-    const resp = await model.invoke([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ]);
+    const resp = await model.invoke(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      { signal: controller.signal },
+    );
     const raw = resp.content as string;
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('judge 输出无法解析 JSON');
@@ -282,35 +375,94 @@ async function judgeOne(
     return {
       correct: Boolean(parsed.correct),
       reasoning: String(parsed.reasoning ?? ''),
+      kind: 'valid',
+      // judge 模型不经模型工厂，没有 callback 记账，就地读取响应上的 usage
+      usage: tokenUsageFromUsageMetadata(resp.usage_metadata),
     };
   } catch (e: any) {
-    return { correct: false, reasoning: `judge 失败: ${e.message}` };
+    return {
+      correct: false,
+      reasoning: timedOut ? `judge 超时（${timeoutMs}ms）` : `judge 失败: ${e.message}`,
+      kind: 'judge_error',
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
 /** 批量评估所有结果（带并发控制），就地写入 judgment 字段 */
-async function judgeAll(results: LongMemResultItem[], concurrency: number): Promise<void> {
-  const model = createJudgeModel();
+async function judgeAll(
+  results: LongMemResultItem[],
+  concurrency: number,
+  timeoutMs: number,
+): Promise<{ modelName: string; usage: RunUsage }> {
+  const { model, modelName } = createJudgeModel();
+  const usage = new UsageAccumulator();
   console.log(`\n[Judge] 开始评估 ${results.length} 条结果...`);
 
   for (let i = 0; i < results.length; i += concurrency) {
     const batch = results.slice(i, i + concurrency);
     await Promise.all(
       batch.map(async (item) => {
-        item.judgment = await judgeOne(model, item);
+        item.judgment = await judgeOne(model, item, timeoutMs);
+        if (item.judgment.usage) {
+          // synthetic runId：judge 模型不经模型工厂、没有 callback 的 runId 可用，
+          // 每次调用给一个唯一值即可（累加器用它去重）。
+          usage.record(randomUUID(), {
+            modelName,
+            usage: item.judgment.usage,
+            at: Date.now(),
+          });
+        }
         const mark = item.judgment.correct ? '✓' : '✗';
-        console.log(`  [Judge ${mark}] ${item.exampleId} (${item.questionType})`);
+        const flag = item.judgment.kind === 'valid' ? '' : ` [${item.judgment.kind}]`;
+        console.log(`  [Judge ${mark}${flag}] ${item.exampleId} (${item.questionType})`);
       }),
     );
   }
+
+  return { modelName, usage: usage.snapshot() };
 }
 
 // ── 报告生成 ──
+
+/**
+ * 报告里的 token 与费用。
+ *
+ * token 数是**实测**（来自 API 的 usage），费用是按 `pricing.json` 估算 —— 两者分开列，
+ * 价格表过期时 token 依然可信。
+ */
+interface AccountingBlock {
+  usage: {
+    agent: TokenUsage;
+    ingest: TokenUsage;
+    judge: TokenUsage;
+    total: TokenUsage;
+  };
+  cost: {
+    currency: string;
+    priceAsOf: string;
+    priceSource: string;
+    agent: number;
+    ingest: number;
+    judge: number;
+    total: number;
+    /** 全部调用若都落在高峰时段的总价（现实上界；空闲价恰为高峰半价） */
+    ifAllPeakTotal: number;
+    /** 出现在用量里但价格表没有的模型 —— 它们的费用**未**计入上面的数字 */
+    unknownModels: string[];
+    /** 拿不到用量的调用数（费用被低估）/ 只有粗粒度用量的调用数（被高估） */
+    callsMissingUsage: number;
+    callsCoarseUsage: number;
+  };
+}
 
 interface LongMemReport {
   runAt: string;
   config: {
     agentModel: string;
+    /** judge **实际**使用的模型；未评分时为 null（记录实际生效值，而非配置意图） */
+    judgeModel: string | null;
     variant: string;
     memoryEnabled: boolean;
     historyMode: string;
@@ -318,24 +470,41 @@ interface LongMemReport {
     /** 是否为两阶段记忆评测（--ingest） */
     ingest: boolean;
     datasetSize: number;
+    /** 单次 agent run / judge 调用的超时（ms） */
+    timeoutMs: number;
   };
   summary: {
     totalExamples: number;
     successCount: number;
     errorCount: number;
+    /** 其中因超时中止的条数 */
+    timeoutCount: number;
     avgLatencyMs: number;
     avgTtftMs: number;
     avgOutputLength: number;
     /** 是否执行了 judge 评估 */
     judged: boolean;
-    /** 已评估条数 */
+    /**
+     * 有效判定条数 —— accuracy 的分母。**不含**基础设施故障
+     * （agent 报错/超时、judge 失败），那些单独记在 infraFailureCount。
+     */
     judgedCount: number;
     /** 判定正确条数 */
     correctCount: number;
     /** 整体准确率 0-1（judgedCount>0 时有效） */
     accuracy: number;
-    /** 按 question_type 分组的统计 */
-    byType: Record<string, { total: number; success: number; correct: number; avgLatency: number }>;
+    /**
+     * 被剔除出 accuracy 分母的条数（agent 报错/超时、judge 失败）。
+     * 单独暴露的原因：这些是**评测环境故障**，混进分母会伪装成「模型答错」。
+     */
+    infraFailureCount: number;
+    /** 按 question_type 分组的统计（correct/judged 只含有效判定，与整体口径一致） */
+    byType: Record<
+      string,
+      { total: number; success: number; correct: number; judged: number; avgLatency: number }
+    >;
+    /** token 用量与费用（按角色拆分） */
+    accounting: AccountingBlock;
   };
   results: LongMemResultItem[];
 }
@@ -343,17 +512,19 @@ interface LongMemReport {
 function generateReport(
   results: LongMemReport['results'],
   config: LongMemReport['config'],
+  judgeUsage: RunUsage,
 ): LongMemReport {
   const successResults = results.filter((r) => !r.result.metrics.error);
 
-  // 按 type 分组统计
-  const byType: Record<
-    string,
-    { total: number; success: number; correct: number; avgLatency: number }
-  > = {};
+  /** 有效判定：真的判了「对/错」，而不是「跑挂了」。 */
+  const isValidJudgment = (r: LongMemResultItem): boolean =>
+    r.judgment !== undefined && (r.judgment.kind ?? 'valid') === 'valid';
+
+  // 按 type 分组统计（correct 只计有效判定，与整体 accuracy 口径一致）
+  const byType: LongMemReport['summary']['byType'] = {};
   for (const r of results) {
     if (!byType[r.questionType]) {
-      byType[r.questionType] = { total: 0, success: 0, correct: 0, avgLatency: 0 };
+      byType[r.questionType] = { total: 0, success: 0, correct: 0, judged: 0, avgLatency: 0 };
     }
     const stat = byType[r.questionType];
     stat.total++;
@@ -361,8 +532,9 @@ function generateReport(
       stat.success++;
       stat.avgLatency += r.result.metrics.totalLatencyMs;
     }
-    if (r.judgment?.correct) {
-      stat.correct++;
+    if (isValidJudgment(r)) {
+      stat.judged++;
+      if (r.judgment!.correct) stat.correct++;
     }
   }
 
@@ -374,10 +546,22 @@ function generateReport(
     }
   }
 
-  // 准确率统计
-  const judgedResults = results.filter((r) => r.judgment !== undefined);
-  const correctCount = judgedResults.filter((r) => r.judgment?.correct).length;
-  const judgedCount = judgedResults.length;
+  // 准确率统计：分母只含有效判定，基础设施故障单独计数。
+  // 此前 agent 报错与 judge 失败都被折成 correct:false 混进分母 —— 评测环境抖动
+  // 会看起来像「模型答错」，且报告里无从分辨。
+  const validJudgments = results.filter(isValidJudgment);
+  const correctCount = validJudgments.filter((r) => r.judgment?.correct).length;
+  const judgedCount = validJudgments.length;
+  const infraFailureCount = results.length - judgedCount;
+
+  // 记账：按角色分别汇总（agent 提问 / ingest 记忆写入 / judge 评分）。
+  // 必须保留逐次调用记录 —— 计价依赖每次调用自己的时间戳（高峰/空闲差一倍）。
+  const agentUsage = mergeRunUsage(results.map((r) => r.result.usage));
+  const ingestUsage = mergeRunUsage(results.map((r) => r.ingestUsage));
+  const totalUsage = mergeRunUsage([agentUsage, ingestUsage, judgeUsage]);
+  const agentCost = computeRunCost(agentUsage);
+  const ingestCost = computeRunCost(ingestUsage);
+  const judgeCost = computeRunCost(judgeUsage);
 
   return {
     runAt: new Date().toISOString(),
@@ -386,10 +570,12 @@ function generateReport(
       totalExamples: results.length,
       successCount: successResults.length,
       errorCount: results.filter((r) => r.result.metrics.error).length,
+      timeoutCount: results.filter((r) => r.result.metrics.errorKind === 'timeout').length,
       judged: judgedCount > 0,
       judgedCount,
       correctCount,
       accuracy: judgedCount > 0 ? Math.round((correctCount / judgedCount) * 10000) / 10000 : 0,
+      infraFailureCount,
       avgLatencyMs:
         successResults.length > 0
           ? Math.round(
@@ -412,6 +598,34 @@ function generateReport(
             )
           : 0,
       byType,
+      accounting: {
+        usage: {
+          agent: agentUsage.total,
+          ingest: ingestUsage.total,
+          judge: judgeUsage.total,
+          total: totalUsage.total,
+        },
+        cost: {
+          currency: agentCost.currency,
+          priceAsOf: agentCost.priceAsOf,
+          priceSource: agentCost.priceSource,
+          agent: agentCost.total,
+          ingest: ingestCost.total,
+          judge: judgeCost.total,
+          total: agentCost.total + ingestCost.total + judgeCost.total,
+          ifAllPeakTotal: agentCost.ifAllPeak + ingestCost.ifAllPeak + judgeCost.ifAllPeak,
+          unknownModels: [
+            ...new Set([
+              ...agentCost.unknownModels,
+              ...ingestCost.unknownModels,
+              ...judgeCost.unknownModels,
+            ]),
+          ],
+          // totalUsage 已含 agent/ingest/judge 三者，直接取它的缺口计数即可（别再相加）
+          callsMissingUsage: totalUsage.callsMissingUsage,
+          callsCoarseUsage: totalUsage.callsCoarseUsage,
+        },
+      },
     },
     results,
   };
@@ -423,6 +637,7 @@ function printReport(report: LongMemReport): void {
   console.log('='.repeat(70));
   console.log(`  Time:         ${report.runAt}`);
   console.log(`  Model:        ${report.config.agentModel}`);
+  console.log(`  Judge Model:  ${report.config.judgeModel ?? '(未评分 —— --no-judge)'}`);
   console.log(`  Variant:      ${report.config.variant} (${report.config.datasetSize} questions)`);
   console.log(`  Memory:       ${report.config.memoryEnabled ? 'ENABLED ✓' : 'DISABLED ✗'}`);
   console.log(
@@ -477,8 +692,68 @@ function printReport(report: LongMemReport): void {
     );
     console.log(`  │ Accuracy       │ ${`${accPct}%`.padStart(25)} │`);
     console.log('  └────────────────┴─────────────────────────────┘');
+    console.log('    ↑ 分母只含有效判定；基础设施故障已剔除（见下方 Infra Failures）');
+
+    if (summary.infraFailureCount > 0 || summary.timeoutCount > 0) {
+      console.log('\n  ┌──────────────────────────────────────────────┐');
+      console.log('  │ Infra Failures（不计入 accuracy 分母）        │');
+      console.log('  ├────────────────┬─────────────────────────────┤');
+      console.log(`  │ Agent 报错/超时 │ ${String(summary.errorCount).padStart(25)} │`);
+      console.log(`  │ 其中超时       │ ${String(summary.timeoutCount).padStart(25)} │`);
+      console.log(
+        `  │ Judge 失败     │ ${String(summary.infraFailureCount - summary.errorCount).padStart(
+          25,
+        )} │`,
+      );
+      console.log('  └────────────────┴─────────────────────────────┘');
+    }
   } else {
     console.log('\n  [提示] 未执行 LLM judge 评估（使用了 --no-judge）。准确率不可用。');
+  }
+
+  // ── 成本（token 是实测，金额按 pricing.json 估算）──
+  const { accounting } = summary;
+  const yuan = (n: number) => `¥${n.toFixed(4)}`;
+  console.log('\n  ┌──────────────────────────────────────────────┐');
+  console.log('  │ Token & Cost                                │');
+  console.log('  ├────────────────┬─────────────────────────────┤');
+  for (const role of ['agent', 'ingest', 'judge'] as const) {
+    const u = accounting.usage[role];
+    console.log(
+      `  │ ${role.padEnd(14)} │ ${`${u.llmCalls} calls, in ${u.inputTokens}（命中 ${u.cacheReadTokens}）/ out ${u.outputTokens}`.padStart(25)} │`,
+    );
+  }
+  console.log(
+    `  │ ${'合计 token'.padEnd(14)} │ ${String(accounting.usage.total.inputTokens + accounting.usage.total.outputTokens).padStart(25)} │`,
+  );
+  console.log(`  │ ${'成本 agent'.padEnd(14)} │ ${yuan(accounting.cost.agent).padStart(25)} │`);
+  if (accounting.cost.ingest > 0) {
+    console.log(`  │ ${'成本 ingest'.padEnd(14)} │ ${yuan(accounting.cost.ingest).padStart(25)} │`);
+  }
+  console.log(`  │ ${'成本 judge'.padEnd(14)} │ ${yuan(accounting.cost.judge).padStart(25)} │`);
+  console.log(`  │ ${'成本 合计'.padEnd(14)} │ ${yuan(accounting.cost.total).padStart(25)} │`);
+  console.log('  └────────────────┴─────────────────────────────┘');
+  console.log(
+    `    价格表 ${accounting.cost.priceAsOf}（${accounting.cost.currency}）；全部落在高峰时段则约 ${yuan(
+      accounting.cost.ifAllPeakTotal,
+    )}`,
+  );
+
+  // 记账缺口：数字不可信时必须说出来，而不是让读者以为成本已经算全了
+  const gaps: string[] = [];
+  if (accounting.cost.callsMissingUsage > 0) {
+    gaps.push(`${accounting.cost.callsMissingUsage} 次调用没拿到 usage（成本被低估）`);
+  }
+  if (accounting.cost.callsCoarseUsage > 0) {
+    gaps.push(
+      `${accounting.cost.callsCoarseUsage} 次只有粗粒度 usage（缓存命中体现不出，成本被高估）`,
+    );
+  }
+  if (accounting.cost.unknownModels.length > 0) {
+    gaps.push(`价格表缺少模型 ${accounting.cost.unknownModels.join(', ')}（其费用未计入）`);
+  }
+  if (gaps.length > 0) {
+    console.log(`  ⚠️  记账缺口：${gaps.join('；')}`);
   }
 
   console.log('\n  Results by Question Type:');
@@ -488,7 +763,8 @@ function printReport(report: LongMemReport): void {
 
   const sortedTypes = Object.entries(summary.byType).sort(([, a], [, b]) => b.total - a.total);
   for (const [type, stat] of sortedTypes) {
-    const acc = stat.total > 0 ? ((stat.correct / stat.total) * 100).toFixed(1) + '%' : '-';
+    // 分母用有效判定数（stat.judged），与整体 accuracy 同口径
+    const acc = stat.judged > 0 ? ((stat.correct / stat.judged) * 100).toFixed(1) + '%' : '-';
     console.log(
       `  │ ${type.padEnd(24)} │ ${String(stat.total).padStart(4)} │ ${String(stat.correct).padStart(5)} │ ${(summary.judged ? acc : '-').padStart(8)} │ ${(stat.avgLatency / 1000).toFixed(1).padStart(8)}s │`,
     );
@@ -507,10 +783,11 @@ function printReport(report: LongMemReport): void {
 // ── 主入口（导出让 research-qa/run.ts 可以路由调用）──
 
 export async function main(): Promise<void> {
-  validateEnv();
-
   const config = defaultConfig;
   const args = parseArgs();
+
+  // 先解析参数再校验：--no-judge 是「显式不评分」的逃生口，校验必须知道它。
+  validateEnv({ skipJudge: !args.judge });
 
   // 加载数据集
   const fullDataset = loadLongMemDataset(args.variant);
@@ -578,6 +855,8 @@ export async function main(): Promise<void> {
     memoryEnabled: !args.noMemory,
     historyMode: args.historyMode,
     webSearchEnabled: args.webSearchEnabled,
+    // 此前 BENCHMARK_TIMEOUT_MS 是死配置：挂住的 run 会永远挂着
+    timeoutMs: config.run.timeoutMs,
   });
 
   // 执行 Benchmark
@@ -609,22 +888,30 @@ export async function main(): Promise<void> {
   }
 
   // LLM Judge 自动评估准确率（默认开启，--no-judge 跳过）
+  let judgeModel: string | null = null;
+  let judgeUsage: RunUsage = mergeRunUsage([]);
   if (args.judge) {
-    await judgeAll(results, args.concurrency);
+    const judged = await judgeAll(results, args.concurrency, config.run.timeoutMs);
+    judgeModel = judged.modelName;
+    judgeUsage = judged.usage;
+  } else {
+    console.log('\n[Judge] 已用 --no-judge 显式跳过评分：本次不产出 accuracy。');
   }
 
-  // 生成报告
+  // 生成报告（记录**实际生效**的 judge 模型，而不是配置里写的那个）
   const reportConfig = {
     agentModel: config.agent.modelName,
+    judgeModel,
     variant: args.variant,
     memoryEnabled: !args.noMemory,
     historyMode: args.historyMode,
     webSearchEnabled: args.webSearchEnabled,
     ingest: args.ingest,
     datasetSize: dataset.length,
+    timeoutMs: config.run.timeoutMs,
   };
 
-  const report = generateReport(results, reportConfig);
+  const report = generateReport(results, reportConfig, judgeUsage);
   printReport(report);
 
   // 保存结果 JSON
@@ -647,7 +934,22 @@ export async function main(): Promise<void> {
   console.log('  python3 evaluate_qa.py gpt-4o <jsonl_path> ../../data/longmemeval_oracle.json');
 }
 
-main().catch((e) => {
-  console.error('[LongMem] Fatal error:', e);
-  process.exit(1);
-});
+// 入口守卫：只在**直接执行**本文件时跑 main()。
+//
+// 此前是裸的 `main().catch(...)`，而本模块同时被 research-qa/run.ts 以
+// `await import('../longmem/run')` 的方式路由调用 —— 于是 import 会触发一次
+// main()、紧接着 `await longMemMain()` 又跑第二次，**两个 run 并发抢同一个输出
+// 文件与同一个 benchmarks/.memory-store**。
+const isDirectRun =
+  !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  main().catch((e) => {
+    if (e instanceof BenchmarkConfigError) {
+      console.error(e.message);
+      process.exit(1);
+    }
+    console.error('[LongMem] Fatal error:', e);
+    process.exit(1);
+  });
+}

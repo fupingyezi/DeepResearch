@@ -11,6 +11,9 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "bench:qa": "tsx benchmarks/research-qa/run.ts",
+    "bench:longmem": "tsx benchmarks/longmem/run.ts",
+    "bench:longmem:ingest": "tsx benchmarks/longmem/run.ts --ingest",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -85,6 +88,7 @@
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "vitest": "^5.0.0"
   }

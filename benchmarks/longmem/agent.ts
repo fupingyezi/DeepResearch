@@ -25,6 +25,11 @@ import {
   ClientAgentEvent,
   ClientAgentEventType,
 } from '../../src/deerflow-harness/runtime/sse/client-event';
+import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
+import {
+  withUsageAccounting,
+  type RunUsage,
+} from '../../src/deerflow-harness/runtime/usage-accounting';
 
 export interface LongMemAgentResult {
   /** Agent 最终输出文本 */
@@ -33,6 +38,8 @@ export interface LongMemAgentResult {
   metrics: PerformanceMetrics;
   /** 原始事件列表 */
   events: ClientAgentEvent[];
+  /** 本次 run 的 LLM 用量（经模型工厂 callback 累加）。 */
+  usage?: RunUsage;
 }
 
 export interface PerformanceMetrics {
@@ -46,6 +53,11 @@ export interface PerformanceMetrics {
   error: boolean;
   /** 错误信息 */
   errorMessage?: string;
+  /**
+   * 错误类型。'timeout' 是**基础设施**故障，与「模型答错」不是一回事，
+   * 汇总 accuracy 时会被剔除（见 run.ts 的 infraFailureCount）。
+   */
+  errorKind?: 'timeout' | 'agent';
 }
 
 /**
@@ -64,6 +76,8 @@ export function createLongMemAgent(options: {
   historyMode?: 'prefix' | 'system' | 'none';
   /** 是否启用 web search 工具（默认 false，测试纯记忆能力） */
   webSearchEnabled?: boolean;
+  /** 单次 run 超时（ms）。超限 abort 该 run 并记为 errorKind='timeout'。 */
+  timeoutMs?: number;
 }) {
   const memoryEnabled = options.memoryEnabled ?? true;
   const historyMode = options.historyMode ?? 'prefix';
@@ -79,6 +93,17 @@ export function createLongMemAgent(options: {
     userId?: string;
   }): Promise<LongMemAgentResult> => {
     const startTime = Date.now();
+
+    // 超时兜底：abort 经 client.stream 的 signal 一路下发到 LLM 调用。
+    // 声明在 try 之外 —— 在 try 块里用 let 声明的话 catch 块读不到。
+    const abortController = new AbortController();
+    let timedOut = false;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          abortController.abort();
+        }, options.timeoutMs)
+      : undefined;
 
     try {
       const modelConfig: ModelConfig = {
@@ -142,47 +167,84 @@ export function createLongMemAgent(options: {
       const events: ClientAgentEvent[] = [];
 
       const threadId = randomUUID();
-      await runWithContext(
-        {
-          thread_id: threadId,
-          run_id: randomUUID(),
-          assistant_id: 'longmem-benchmark',
-          user_id: input.userId,
-          currentModelConfig: modelConfig,
-        },
-        async () => {
-          for await (const event of effectiveClient.stream(finalQuery, threadId)) {
-            events.push(event);
 
-            if (!ttftRecorded && event.eventType === ClientAgentEventType.STREAM_CHUNK) {
-              if ((event as any).payload?.text) {
-                ttftMs = Date.now() - startTime;
-                ttftRecorded = true;
+      try {
+        const { usage } = await withUsageAccounting(() =>
+          runWithContext(
+            {
+              thread_id: threadId,
+              run_id: randomUUID(),
+              assistant_id: 'longmem-benchmark',
+              user_id: input.userId,
+              currentModelConfig: modelConfig,
+            },
+            async () => {
+              for await (const event of effectiveClient.stream(
+                finalQuery,
+                threadId,
+                undefined,
+                undefined,
+                abortController.signal,
+              )) {
+                events.push(event);
+
+                if (!ttftRecorded && event.eventType === ClientAgentEventType.STREAM_CHUNK) {
+                  if ((event as any).payload?.text) {
+                    ttftMs = Date.now() - startTime;
+                    ttftRecorded = true;
+                  }
+                }
+
+                if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
+                  const text = (event as any).payload?.text;
+                  if (typeof text === 'string') fullText += text;
+                }
+
+                if (event.eventType === ClientAgentEventType.TOOL_CALL) {
+                  toolNames.push((event as any).payload?.toolName ?? 'unknown');
+                }
               }
-            }
 
-            if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
-              const text = (event as any).payload?.text;
-              if (typeof text === 'string') fullText += text;
-            }
+              // 记忆更新走 debounce 队列（memoryMiddleware.afterAgent 只入队，真正的
+              // LLM 调用在 setTimeout 里）。不在这里 flush，那些调用会落在记账作用域
+              // **之外** —— token 记不到、也看不出缺口（不触发 callsMissingUsage）。
+              await getMemoryQueue().flush();
+            },
+          ),
+        );
 
-            if (event.eventType === ClientAgentEventType.TOOL_CALL) {
-              toolNames.push((event as any).payload?.toolName ?? 'unknown');
-            }
-          }
-        },
-      );
+        // abort 会被 DeerFlowClient 吞成正常 return，必须显式判，否则超时的 run
+        // 会以「一次很短的正常回答」形态混进 accuracy。
+        if (timedOut) {
+          return {
+            output: fullText.trim(),
+            metrics: {
+              ttftMs,
+              totalLatencyMs: Date.now() - startTime,
+              toolCallCount: toolNames.length,
+              error: true,
+              errorMessage: `run 超时（${options.timeoutMs}ms），已中止`,
+              errorKind: 'timeout',
+            },
+            events,
+            usage,
+          };
+        }
 
-      return {
-        output: fullText.trim(),
-        metrics: {
-          ttftMs,
-          totalLatencyMs: Date.now() - startTime,
-          toolCallCount: toolNames.length,
-          error: false,
-        },
-        events,
-      };
+        return {
+          output: fullText.trim(),
+          metrics: {
+            ttftMs,
+            totalLatencyMs: Date.now() - startTime,
+            toolCallCount: toolNames.length,
+            error: false,
+          },
+          events,
+          usage,
+        };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     } catch (error: any) {
       return {
         output: '',
@@ -192,6 +254,7 @@ export function createLongMemAgent(options: {
           toolCallCount: 0,
           error: true,
           errorMessage: error?.message ?? String(error),
+          errorKind: timedOut ? 'timeout' : 'agent',
         },
         events: [],
       };
