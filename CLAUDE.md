@@ -96,6 +96,20 @@ OPENAI_QWEN_API_KEY=...                   # Qwen / Spark（阿里 DashScope）
 OPENAI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL_NAME=qwen3-235b-a22b         # 默认模型
 
+# 智谱（GLM 视觉模型 / embedding / OCR 共用账号）
+ZHIPU_API_KEY=...                         # 缺省时：语义检索回落关键词、图片 OCR 返回占位文本
+ZHIPU_BASE_URL=                           # 可选，默认 https://open.bigmodel.cn/api/paas/v4
+ZHIPU_OCR_MODEL=                          # 可选，默认 glm-ocr
+
+# 记忆向量检索（缺省回落 ZHIPU_API_KEY 与智谱端点；无 Key 自动退回词面检索）
+DEERFLOW_EMBEDDING_API_KEY=               # 可独立配（与 ZHIPU_API_KEY 分离时用）
+DEERFLOW_EMBEDDING_BASE_URL=
+DEERFLOW_EMBEDDING_MODEL=embedding-3
+DEERFLOW_EMBEDDING_DIMENSIONS=1024        # 256..2048；变更后存量向量视为失效并自动重嵌
+
+# 视觉多模态
+DEERFLOW_VISION_MAX_IMAGE_MB=5            # 单图字节上限；前端 MAX_IMAGE_SIZE_MB 必须 ≤ 它
+
 # 数据库
 DATABASE_URL=postgresql://user:pass@localhost:5432/DeepResearch
 
@@ -413,22 +427,22 @@ StreamBridge（单例 streamBridge）
 
 按 `ORDERED_MIDDLEWARES` 位序装配（下表「服务级默认」指 `_service.ts` 的 sharedClientOptions）：
 
-| 位序 | 中间件                           | 触发条件                                                                                                        |
-| ---- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| —    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置                                    |
-| 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                |
-| 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）       |
-| 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）   |
-| 3    | `ToolCallIntegrityMiddleware`    | 始终启用（悬空调用 + 未知调用两条子规则）                                                                       |
-| 4    | `GuardrailMiddleware`            | `features.guardrail=true`（走 createGuardrailMiddleware 默认规则）或传自定义实例；**服务级默认开**（仅告警）    |
-| 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                        |
-| 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware(model)` 实例（不允许 true）；**服务级默认开**         |
-| 7    | `TodoMiddleware`                 | `features.todo=true`（注入 `write_todos` + ThreadState.todos）；**服务级默认开**，清单经 `todo_update` 下发前端 |
-| 8    | `TitleMiddleware`                | `features.autoTitle=true`（服务级默认 true）；afterAgent 用固定小模型异步生成标题，落 chat_session/threads_meta |
-| 9    | `MemoryMiddleware`               | `features.memory=true`（服务级默认 true）                                                                       |
-| 10   | `ViewImageMiddleware`            | `features.vision=true`（默认关闭；当前为占位 + 启用警告，等视觉模型适配再做）                                   |
-| 11   | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）                                                |
-| 12   | `LoopDetectionMiddleware`        | 始终启用                                                                                                        |
+| 位序 | 中间件                           | 触发条件                                                                                                                                  |
+| ---- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| —    | `QwenToolCallRecoveryMiddleware` | `features.qwenToolCallRecovery=true`，或 `provider='qwen'` 且 feature 未设置                                                              |
+| 0    | `ThreadDataMiddleware`           | `features.threadData=true`（服务级默认 true）；beforeAgent 从 `file_metadata` 装载 uploadedFiles                                          |
+| 1    | `UploadsMiddleware`              | `features.uploads=true`（服务级默认 true）；把 uploadedFiles 渲染为 SystemMessage 注入 prompt（防重 tag）                                 |
+| 2    | `SandboxMiddleware`              | `features.sandbox=true`；beforeAgent `retain`(+1) / afterAgent `markIdle`(-1) 维护容器引用计数（docker 后端）                             |
+| 3    | `ToolCallIntegrityMiddleware`    | 始终启用（悬空调用 + 未知调用两条子规则）                                                                                                 |
+| 4    | `GuardrailMiddleware`            | `features.guardrail=true`（走 createGuardrailMiddleware 默认规则）或传自定义实例；**服务级默认开**（仅告警）                              |
+| 5    | `ToolErrorHandlingMiddleware`    | 始终启用                                                                                                                                  |
+| 6    | `SummarizationMiddleware`        | `features.summarization` = `createSummarizationMiddleware(model)` 实例（不允许 true）；**服务级默认开**                                   |
+| 7    | `TodoMiddleware`                 | `features.todo=true`（注入 `write_todos` + ThreadState.todos）；**服务级默认开**，清单经 `todo_update` 下发前端                           |
+| 8    | `TitleMiddleware`                | `features.autoTitle=true`（服务级默认 true）；afterAgent 用固定小模型异步生成标题，落 chat_session/threads_meta                           |
+| 9    | `MemoryMiddleware`               | `features.memory=true`（服务级默认 true）                                                                                                 |
+| 10   | `VisionMiddleware`               | `features.vision`（由 `modelConfig.supportsVision` 驱动）；beforeAgent 把历史 `image_url` blocks 压成文本占位；同时注入 `view_image` 工具 |
+| 11   | `SubagentLimitMiddleware`        | 始终启用（lead-agent 永远具备 task 能力，需要并发/总量上限兜底）                                                                          |
+| 12   | `LoopDetectionMiddleware`        | 始终启用                                                                                                                                  |
 
 同时，`taskTool` 始终注入到 `extraTools`；`features.sandbox` 启用时，7 个沙箱文件/执行工具（`SANDBOX_TOOLS`）注入 lead-agent 工具集（subagent 经工具注册表继承）。
 
@@ -442,7 +456,7 @@ interface RuntimeFeatures {
   memory?: FeatureToggle;
   summarization?: FeatureToggle; // 不允许 true（须传 createSummarizationMiddleware 实例）
   todo?: FeatureToggle;
-  vision?: FeatureToggle; // viewImageMiddleware（当前为占位）
+  vision?: FeatureToggle; // VisionMiddleware（历史图片压缩）+ 注入 view_image 工具
   autoTitle?: FeatureToggle;
   threadData?: FeatureToggle; // 装载 file_metadata 到 state.uploadedFiles
   uploads?: FeatureToggle; // 注入 uploadedFiles 到 prompt（SystemMessage）
@@ -560,19 +574,32 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 | 模式       | 行为                                                                                     |
 | ---------- | ---------------------------------------------------------------------------------------- |
 | `inject`   | 全量注入：所有 section + facts 按 confidence 降序、在 `maxInjectionTokens`（2000）内截断 |
-| `retrieve` | 按本轮用户输入检索：关键词打分取 top-K facts + 最相关的一段 history，注入预算 800 tokens |
+| `retrieve` | 按本轮用户输入检索：混合打分取 top-K facts + 最相关的一段 history，注入预算 800 tokens   |
 
-检索实现（`memory/retrieval.ts`，零外部依赖纯函数）：
+检索实现（`memory/retrieval.ts`，纯函数；词面 + 语义混合打分）：
 
 - 分词：latin 词（小写、去停用词）+ CJK 单字与二元组（bigram，让「量子」能命中「量子计算」）
-- `scoreFact = 重叠率(|fact∩query| / |query|) × (0.5 + 0.5 × confidence)`
+- 词面分量 `overlap = 重叠率(|fact∩query| / |query|) × (0.5 + 0.5 × confidence)`
+- 语义分量 `cosine = cos(query 向量, fact.embedding)`，需 ≥ `SEMANTIC_MATCH_THRESHOLD`（0.5）才参与
+- `scoreFact = w × cosine + (1-w) × overlap`（`w = MemoryConfig.embeddingHybridWeight`，默认 0.7）；
+  无向量 / 维度不匹配 / 未过阈值 → 退回纯词面打分
 - 取舍：facts 取 top-K（默认 8）；workContext / personalContext 视为身份信息恒保留；
   topOfMind 按相关性取舍；history 三段只保留最相关的一段
 - query 为空或全部落空 → 不注入（避免无关记忆干扰模型）
 
-**定位说明**：这是**词面**相关性（关键词重叠），不是语义检索（无 embedding / 向量库）。
-对「用户提到记忆中已有的实体名」最有效，对同义改写无能为力，故检索模式为可选，
-默认仍是注入模式。检索参数见 `MemoryConfig.retrieveTopK` / `retrieveMaxTokens`。
+**向量基础设施**（`memory/embeddings.ts`）：
+
+- 供应商智谱 `embedding-3`（OpenAI 兼容 `/embeddings`，`dimensions` 可配 256..2048，默认 1024），
+  工厂由 app 层 `_service.ts` 经 `setMemoryEmbeddingsFactory` 注入；**未注册 / 无 Key / API 失败
+  一律静默降级回词面打分，绝不抛出**
+- 单请求 64 条上限，`embedTexts` 手动分批串行；`Fact.embedding` 随 memory.json 落盘
+- 旧数据回填：`backfillFactEmbeddings` 补缺失 / 维度不匹配的向量，进程内按存储键去重，
+  save 前 reload 并只合并「仍存在且 content 未变」的 fact
+- **无向量库 / 无 ANN 索引**：facts 受 `maxFacts`（默认 100）约束，检索即内存线性扫描余弦
+
+**定位说明**：语义分量让同义改写也能召回（词面检索做不到）；但向量存在 memory.json 里、
+不做 ANN，facts 规模显著增长后线性扫描会成为瓶颈，届时需另接向量存储。
+检索参数见 `MemoryConfig.retrieveTopK` / `retrieveMaxTokens` / `embeddingHybridWeight`。
 
 #### Memory 手动 CRUD API
 
@@ -673,6 +700,65 @@ deleteMemoryFact(factId, agentName, userId): Promise<MemoryData>
 `sandbox/sandbox-monitor.ts`（`getSandboxSnapshot`）+ `app/api/sandbox/stats/route.ts`（`GET`，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控，`runtime='nodejs'`）暴露容器/并发运行态快照。
 
 > 完整设计见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)（§10 为并行编排方案）。
+
+---
+
+### 8.7 视觉多模态（vision）
+
+**文件：** `src/deerflow-harness/vision/`
+
+能力开关由**模型能力**驱动，而非用户偏好：`modelConfig.supportsVision`（preset 上的可选标记，
+`buildModelConfigFromPreset` 透传）→ `DeerFlowClient.resolveRuntimeOptions` 的 `visionEnabled`
+→ `features.vision`（进 agent 缓存键）。不开放 metadata 覆盖。
+
+| 文件                   | 职责                                                                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `image-fetcher.ts`     | `ThreadImageRef` / `FetchedImage` 类型、`setThreadImageFetcher` 注入点、`buildHumanMessageContent` 构造多模态 content |
+| `vision-middleware.ts` | `VisionMiddleware`：beforeAgent 把历史 `image_url` blocks 压成文本占位                                                |
+| `content-blocks.ts`    | `extractContentTextBlocks`：多模态 ToolMessage → 纯文本，**SSE 脱敏入口**                                             |
+
+#### 图片从上传到模型
+
+```
+前端选择图片（白名单含 image/*，图片单独卡 5MB）
+  → POST /api/files/upload → MinIO + file_content 行
+      └─ extractTextFromFile 对 image/* 走 OCR（见下）→ 文本写入 file_content.content
+  → POST /api/v3/chat（contents 里是 {type:'image', fileId}）
+      └─ resolveFilesByIds 反查 → 挑出 image/* 组装 ThreadImageRef[] → submitRun({ images })
+          └─ DeerFlowClient.stream(message, threadId, metadata, { images })
+              └─ buildHumanMessageContent：supportsVision 且带图时构造 content blocks
+                 （文本块 + `[附图: 文件名]` 标签 + image_url data URL）
+```
+
+- **传输用 base64 data URL**：内网部署下 MinIO presigned URL 对模型服务商不可达，
+  base64 是唯一可靠通道
+- **线上格式必须是 `image_url`**：`@langchain/openai` 只转换带 `source_type` 的 data block，
+  其余 content block 原样透传给 provider；换成语义上更「标准」的 `ContentBlock.Multimodal.Image`
+  会被原样发出去并 400
+- **单图上限** `DEERFLOW_VISION_MAX_IMAGE_MB`（默认 5）；前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它，
+  否则会出现「发送成功但模型没看到图」的静默降级
+- **历史压缩**：`VisionMiddleware.beforeAgent` 除最后一条 HumanMessage 外，把所有 `image_url`
+  blocks 换成 `[图片已查看，可用 view_image 重新查看]`（克隆时保留 id —— `add_messages` 按 id
+  merge；无 id 的跳过，否则 append 语义会重复）。它用 beforeAgent 而摘要中间件用 beforeModel，
+  LangGraph 结构保证**压缩先于摘要**（否则 base64 会被 `JSON.stringify` 进摘要 prompt）
+- **`view_image` 工具**：模型按文件名重新查看图片（句柄来自 `[附图: xxx]` 文本块）。
+  返回多模态 `ToolMessage`，必须自带 `runtime.toolCallId`（ToolNode 对 ToolMessage 实例
+  原样采用，不会补）
+- **SSE 安全**：`messages` 模式显式跳过 ToolMessage，`updates` 模式的 tool 分支经
+  `extractContentTextBlocks` 剥离 image blocks —— base64 不会进入 SSE 事件与前端 parts-reducer
+
+#### 图片 OCR（上传解析）
+
+`lib/file-parser.ts` 对 image/\* 调 `ocrImageFromZhipu`：主路径走智谱**原生** `POST {base}/layout_parsing`
+（`{model: ZHIPU_OCR_MODEL||'glm-ocr', file: 'data:<mime>;base64,...'}`，取 `md_results`），
+失败时**降级到视觉模型**「读图转 markdown」，再失败返回说明性占位文本。
+
+- `file` 必须用 **data URI**：实测裸 base64 被拒（code 1214）
+- 降级是必要的：实测 `layout_parsing` 的格式校验会拒绝某些合法图片（同一张图视觉模型可正常识别）
+- **永不抛错**：`/api/files/upload` 把解析异常记为 `status='failed'`，而前端
+  `chat-input.tsx` 有「全部文件 parsedStatus 为 success 才可发送」的硬门禁 —— 抛错会让用户
+  传图后根本发不出消息
+- 图片分支**绕过** `extractTextFromFile` 末尾的空白折叠，否则 markdown 表格/标题层级会被压平
 
 ---
 
@@ -883,6 +969,11 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | `src/deerflow-harness/runtime/sse/to-client-event.ts`            | 内部事件 → 客户端事件的过滤边界                             |
 | `src/deerflow-harness/types/agent-event.ts`                      | AgentEvent 内部事件枚举                                     |
 | `src/deerflow-harness/agents/memory/updater.ts`                  | MemoryUpdater（LLM 驱动记忆更新）                           |
+| `src/deerflow-harness/agents/memory/embeddings.ts`               | 记忆向量基础设施（智谱 embedding-3 工厂注入 + 回填）        |
+| `src/deerflow-harness/vision/image-fetcher.ts`                   | 图片字节注入 + 多模态 content 构造                          |
+| `src/deerflow-harness/vision/vision-middleware.ts`               | VisionMiddleware（历史图片压缩）                            |
+| `src/deerflow-harness/tools/builtins/view-image-tool.ts`         | view_image 工具（按文件名重看会话图片）                     |
+| `src/lib/file-parser.ts`                                         | 上传文件解析（PDF/DOCX/文本 + 图片 OCR）                    |
 | `src/deerflow-harness/subagents/executor.ts`                     | SubagentExecutor（子代理执行，超时+取消）                   |
 | `src/deerflow-harness/extensions/config-store.ts`                | extensions_config.json 文件存储（MCP/skill 统一配置）       |
 | `src/deerflow-harness/skills/loader.ts`                          | skill 加载器（扫描 SKILL.md + 合并启用状态）                |
@@ -908,7 +999,12 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
 4. 单元测试覆盖建设中（vitest 已接入，当前覆盖中间件装配、防递归、guardrail 规则、
    记忆检索、checkpoint 行为约束、remote 沙箱等核心纯逻辑）
-5. 记忆检索模式（`memoryMode: 'retrieve'`）为关键词相关性（无 embedding / 向量库），
-   对同义改写无效；需要语义检索时得另接向量存储
+5. 记忆检索为「词面重叠率 × confidence」与 embedding 余弦的加权混合（`embeddingHybridWeight`
+   默认 0.7），但**无向量库 / 无 ANN 索引**：向量随 facts 存 memory.json，检索即内存线性扫描，
+   受 `maxFacts`（默认 100）约束；facts 规模显著增长后需另接向量存储
 6. remote 沙箱的并发上限按进程独立计（不做跨进程协调），多进程部署时实际连接数 = 上限 × 进程数
-7. ViewImage 中间件仍为占位（启用仅打印警告），待视觉模型适配
+7. `view_image` 仅支持**本会话上传的图片**（按文件名）；沙箱产物图片（如 matplotlib 输出）未支持 ——
+   `Sandbox` 基类只有文本 `readFile`，要支持需为 local/docker/remote 三个后端各加二进制读取
+8. 智谱 `glm-5.3-flash` 是**推理模型**：`reasoning_content` 计入 `completion_tokens`，
+   `max_tokens` 过小（实测 32）会让 content 为空。副链路（标题生成 `maxTokens` 默认 64）若被
+   指定为该模型需注意；主聊天链路不设 `maxTokens`，走 provider 默认值，不受影响
