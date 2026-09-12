@@ -109,8 +109,34 @@ cd /opt/mini-deepresearch && vim .env.production
 
 可选——体验账号（登录页"一键体验"入口）：先在应用里注册好账号（如 `test@qq.com`），
 再在 `.env.production` 加 `AUTH_DEMO_EMAIL` / `AUTH_DEMO_PASSWORD`（与账号同一对凭证）
-并 `docker compose --env-file .env.production -f docker-compose.prod.yaml up -d` 重启；
-删除两行即关闭入口。密码只存在服务器 env，不会进前端代码。
+并重建 app 容器（步骤见「六、注意事项」）；删除两行即关闭入口。
+密码只存在服务器 env，不会进前端代码。
+
+**随功能迭代新增的变量**（都是可选：不配也能跑，只是对应能力静默降级/走默认值。
+`.env.production` 是早期一次性填的，新增能力不会自动补进去，按需核对）：
+
+| 变量                                                         | 不配会怎样                                                                                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `ZHIPU_API_KEY`                                              | 图片上传只落一段说明性占位文本（`view_image` 与视觉模型不可用）；记忆检索退回纯词面                                         |
+| `ZHIPU_BASE_URL` / `ZHIPU_OCR_MODEL`                         | 可选，默认智谱官方端点 / `glm-ocr`                                                                                          |
+| `DEERFLOW_EMBEDDING_API_KEY` / `_BASE_URL`                   | 可选，缺省回落 `ZHIPU_*`（embedding 与视觉用不同账号时才需填）                                                              |
+| `DEERFLOW_EMBEDDING_MODEL` / `DEERFLOW_EMBEDDING_DIMENSIONS` | 可选，默认 `embedding-3` / 1024（改维度会让存量向量自动重嵌）                                                               |
+| `DEERFLOW_VISION_MAX_IMAGE_MB`                               | 可选，默认 5（前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它）                                                                          |
+| `DEERFLOW_MAX_CONCURRENT_RUNS`                               | 可选，默认 16；**轻量服务器建议 4~6**，避免多对话并发把内存打满                                                             |
+| `DEERFLOW_GUARDRAIL_ENABLED` / `DEERFLOW_GUARDRAIL_BLOCK`    | 可选，默认开启但只告警（`none`）                                                                                            |
+| `DEERFLOW_SANDBOX_BACKEND`                                   | 可选，默认 `local`；`docker` 后端需 app 容器挂 docker socket（当前生产编排未挂，故不可用），`remote` 需 `DEERFLOW_REMOTE_*` |
+| `AUTH_DEMO_EMAIL` / `AUTH_DEMO_PASSWORD`                     | 可选，一键体验入口；删掉两行即关闭                                                                                          |
+| `MIN_FREE_GB`                                                | 可选，部署脚本的磁盘守卫阈值，默认 3G                                                                                       |
+
+核对服务器上已配了哪些：
+
+```bash
+cd /opt/mini-deepresearch
+for v in ZHIPU_API_KEY DEERFLOW_EMBEDDING_MODEL DEERFLOW_EMBEDDING_DIMENSIONS \
+         DEERFLOW_VISION_MAX_IMAGE_MB DEERFLOW_MAX_CONCURRENT_RUNS DEERFLOW_SANDBOX_BACKEND; do
+  grep -q "^${v}=" .env.production && echo "✓ ${v}" || echo "— 未配置 ${v}（走默认）"
+done
+```
 
 ### 4. 安全组 / 防火墙
 
