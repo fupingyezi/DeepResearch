@@ -4,8 +4,9 @@
  * 返回多对话并行下的容器运行态：thread↔container↔lastActiveAt↔refCount 映射、
  * 空闲时长与（可选）docker stats 资源采样。仅 docker backend 有数据，local 返回空。
  *
- * 访问控制：这是跨租户运维数据。若配置了 DEERFLOW_SANDBOX_STATS_TOKEN，则要求请求头
- * `x-sandbox-stats-token` 完全匹配；未配置时按内网/运维环境处理（不额外鉴权）。
+ * 访问控制：这是跨租户运维数据，默认关闭。必须配置 DEERFLOW_SANDBOX_STATS_TOKEN
+ * 并携带匹配的 `x-sandbox-stats-token` 请求头才能访问；未配置 token 时一律 401，
+ * 避免误暴露（本地调试可临时设置任意 token 值）。
  * 不接受任何外部地址输入，仅读取本机 docker daemon，无 SSRF 面。
  *
  * 查询参数：
@@ -20,7 +21,8 @@ export const runtime = 'nodejs';
 
 function isAuthorized(request: NextRequest): boolean {
   const token = process.env.DEERFLOW_SANDBOX_STATS_TOKEN;
-  if (!token || token.trim().length === 0) return true;
+  // 未配置 token 时该接口禁用（fail-closed），避免运维数据默认暴露
+  if (!token || token.trim().length === 0) return false;
   return request.headers.get('x-sandbox-stats-token') === token;
 }
 

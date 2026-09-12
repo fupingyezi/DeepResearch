@@ -67,7 +67,7 @@ export interface SubagentStructuredReport {
  *
  * 一条 ChatMessageType 由一个 parts[] 时序数组组成，每个 part 用 partId 唯一标识。
  *
- * 九种 part_type：
+ * 十种 part_type：
  *  - text          AI/用户的正文文本片段（同类相邻合并）
  *  - reasoning     AI 推理/规划（同类相邻合并）
  *  - tool_call     单次工具调用，结果回写到本 part 的 content（status / result / success）
@@ -76,6 +76,7 @@ export interface SubagentStructuredReport {
  *  - file / image  用户上传的附件块（仅在 user message 中出现）
  *  - artifact      最终产物（如研究报告 markdown）
  *  - task_summary  多 agent 工作流的任务总结（完成 N 个子任务 + 每子任务关键发现）
+ *  - todo          任务清单快照（write_todos 每次更新全量替换同一条 part）
  */
 export type MessagePart =
   | {
@@ -161,6 +162,17 @@ export type MessagePart =
     }
   | {
       partId: string;
+      type: 'todo';
+      createdAt: number;
+      content: {
+        todos: Array<{
+          content: string;
+          status: 'pending' | 'in_progress' | 'completed';
+        }>;
+      };
+    }
+  | {
+      partId: string;
       type: 'task_summary';
       createdAt: number;
       content: { text: string };
@@ -171,7 +183,7 @@ export type MessagePartType = MessagePart['type'];
 /** 渲染层用的派生 timeline step 子集（不含 text/file/image/artifact/tool_result） */
 export type TimelineStepPart = Extract<
   MessagePart,
-  { type: 'reasoning' | 'tool_call' | 'subagent_task' }
+  { type: 'reasoning' | 'tool_call' | 'subagent_task' | 'todo' }
 >;
 
 /** MessageTimeline 渲染组件 props（组件名保留，类型重命名以避免冲突） */

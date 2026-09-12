@@ -29,6 +29,10 @@ export interface MemoryConfig {
   injectionEnabled: boolean;
   /** 注入 token 预算（tiktoken 计数）。 */
   maxInjectionTokens: number;
+  /** 检索模式（memoryMode='retrieve'）保留的 fact 条数上限，1..50。 */
+  retrieveTopK: number;
+  /** 检索模式注入 token 预算，100..4000。 */
+  retrieveMaxTokens: number;
 }
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
@@ -41,6 +45,8 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   factConfidenceThreshold: 0.7,
   injectionEnabled: true,
   maxInjectionTokens: 2000,
+  retrieveTopK: 8,
+  retrieveMaxTokens: 800,
 };
 
 let _config: MemoryConfig = { ...DEFAULT_MEMORY_CONFIG };
@@ -84,6 +90,12 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   out.maxFacts = clamp(out.maxFacts, 10, 500);
   out.factConfidenceThreshold = clamp(out.factConfidenceThreshold, 0, 1);
   out.maxInjectionTokens = clamp(out.maxInjectionTokens, 100, 8000);
+  if (typeof m.retrieve_top_k === 'number') out.retrieveTopK = m.retrieve_top_k;
+  if (typeof m.retrieveTopK === 'number') out.retrieveTopK = m.retrieveTopK;
+  if (typeof m.retrieve_max_tokens === 'number') out.retrieveMaxTokens = m.retrieve_max_tokens;
+  if (typeof m.retrieveMaxTokens === 'number') out.retrieveMaxTokens = m.retrieveMaxTokens;
+  out.retrieveTopK = clamp(out.retrieveTopK, 1, 50);
+  out.retrieveMaxTokens = clamp(out.retrieveMaxTokens, 100, 4000);
 
   _config = out;
 }

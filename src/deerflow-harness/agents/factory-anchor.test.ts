@@ -1,0 +1,100 @@
+import { describe, expect, it } from 'vitest';
+import { createMiddleware, type AgentMiddleware } from 'langchain';
+
+import { assembleFromFeatures } from './factory';
+import { DEFAULT_FEATURES, Next, Prev, type MiddlewareAnchor } from './features';
+import {
+  loopDetectionMiddleware,
+  memoryMiddleware,
+  toolErrorHandlingMiddleware,
+} from './middlewares';
+
+/**
+ * 造一个带锚点的自定义中间件。
+ *
+ * 注意 `createMiddleware()` 只保留已知字段（未知字段会被剥离），因此锚点
+ * 必须在实例创建后附加 —— 这正是装配器要同时支持两种读取路径的原因。
+ */
+function positioned(
+  name: string,
+  anchor: MiddlewareAnchor,
+  side: 'next' | 'prev',
+): AgentMiddleware {
+  const middleware = createMiddleware({ name }) as AgentMiddleware;
+  Object.assign(middleware, side === 'next' ? { _nextAnchor: anchor } : { _prevAnchor: anchor });
+  return middleware;
+}
+
+const names = (chain: AgentMiddleware[]): string[] => chain.map((m) => m.name ?? '?');
+const indexOf = (chain: AgentMiddleware[], name: string): number => names(chain).indexOf(name);
+
+describe('assembleFromFeatures —— @Next/@Prev 锚点插入', () => {
+  it('@Prev(anchor) 插到锚点实例之前（锚点为内置中间件实例）', () => {
+    const custom = positioned('CustomBeforeLoop', loopDetectionMiddleware, 'prev');
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [custom] });
+
+    const customIndex = indexOf(chain, 'CustomBeforeLoop');
+    expect(customIndex).toBeGreaterThanOrEqual(0);
+    expect(customIndex).toBe(indexOf(chain, 'LoopDetectionMiddleware') - 1);
+  });
+
+  it('@Next(anchor) 插到锚点实例之后', () => {
+    const custom = positioned('CustomAfterMemory', memoryMiddleware, 'next');
+    const { chain } = assembleFromFeatures(
+      { ...DEFAULT_FEATURES, memory: true },
+      { extraMiddlewares: [custom] },
+    );
+
+    const memoryIndex = indexOf(chain, 'MemoryMiddleware');
+    expect(memoryIndex).toBeGreaterThanOrEqual(0);
+    expect(indexOf(chain, 'CustomAfterMemory')).toBe(memoryIndex + 1);
+  });
+
+  it('锚点写在构造函数（@Next/@Prev 装饰类）上同样生效', () => {
+    // 装饰器把锚点写到类上，createMiddleware 的实例不携带该字段 —— 走静态字段回退路径
+    const Decorated = class DecoratedMiddleware {};
+    Prev(toolErrorHandlingMiddleware)(Decorated as never);
+    const custom = createMiddleware({ name: 'ClassDecorated' }) as AgentMiddleware;
+    // 让实例的 constructor 指向被装饰的类
+    Object.defineProperty(custom, 'constructor', { value: Decorated });
+
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [custom] });
+    expect(indexOf(chain, 'ClassDecorated')).toBe(
+      indexOf(chain, 'ToolErrorHandlingMiddleware') - 1,
+    );
+  });
+
+  it('无锚点的自定义中间件追加到链尾', () => {
+    const custom = createMiddleware({ name: 'PlainCustom' }) as AgentMiddleware;
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [custom] });
+
+    expect(indexOf(chain, 'PlainCustom')).toBe(chain.length - 1);
+  });
+
+  it('锚点不在链上时退化为追加链尾（不丢失中间件）', () => {
+    // DEFAULT_FEATURES.memory = false → 链上没有 MemoryMiddleware，锚点缺席
+    const custom = positioned('CustomOrphan', memoryMiddleware, 'prev');
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [custom] });
+
+    expect(indexOf(chain, 'MemoryMiddleware')).toBe(-1);
+    expect(indexOf(chain, 'CustomOrphan')).toBe(chain.length - 1);
+  });
+
+  it('多个自定义中间件按顺序逐个插入，互不覆盖', () => {
+    const before = positioned('CustomA', toolErrorHandlingMiddleware, 'prev');
+    const plain = createMiddleware({ name: 'CustomB' }) as AgentMiddleware;
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, {
+      extraMiddlewares: [before, plain],
+    });
+
+    expect(indexOf(chain, 'CustomA')).toBe(indexOf(chain, 'ToolErrorHandlingMiddleware') - 1);
+    expect(indexOf(chain, 'CustomB')).toBe(chain.length - 1);
+  });
+
+  it('extraMiddlewares 为空或未传时链形态不变', () => {
+    const baseline = names(assembleFromFeatures(DEFAULT_FEATURES, {}).chain);
+    expect(names(assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [] }).chain)).toEqual(
+      baseline,
+    );
+  });
+});

@@ -315,6 +315,10 @@ export interface BuildLeadAgentPromptOptions {
   injectMemory?: boolean;
   /** 已加载 MCP 工具的注入块（由 caller 经 buildMcpToolsSection 生成）；为空则不注入。 */
   mcpToolsSection?: string;
+  /** 记忆注入模式：inject（默认，全量）/ retrieve（按 query 检索 top-K）。 */
+  memoryMode?: 'inject' | 'retrieve';
+  /** retrieve 模式的检索 query（通常为最近一条用户输入）。 */
+  memoryQuery?: string;
 }
 
 /**
@@ -339,6 +343,8 @@ export async function buildLeadAgentSystemPrompt(
       : await buildMemoryContext({
           agentName: opts.agentName ?? null,
           userId: opts.userId ?? null,
+          mode: opts.memoryMode,
+          query: opts.memoryQuery,
         });
 
   const sections = [BASE_SYSTEM_PROMPT];

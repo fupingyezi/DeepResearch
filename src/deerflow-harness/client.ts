@@ -5,6 +5,7 @@ import { BaseCheckpointSaver, Command } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
+import { createSummarizationMiddleware } from './agents/middlewares';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
@@ -20,10 +21,15 @@ import { getEnabledSkillsSignature } from './skills';
 
 interface RuntimeRunOptions {
   memoryEnabled: boolean;
+  /** 记忆注入模式：inject（默认，全量）/ retrieve（关键词检索 top-K）。 */
+  memoryMode: 'inject' | 'retrieve';
   autoTitleEnabled: boolean;
   threadDataEnabled: boolean;
   uploadsEnabled: boolean;
   sandboxEnabled: boolean;
+  summarizationEnabled: boolean;
+  guardrailEnabled: boolean;
+  todoEnabled: boolean;
   mcpEnabled: boolean;
   subagentsEnabled: boolean;
   agentName: string;
@@ -44,6 +50,9 @@ function buildConfigKey(
     opts.threadDataEnabled,
     opts.uploadsEnabled,
     opts.sandboxEnabled,
+    opts.summarizationEnabled,
+    opts.guardrailEnabled,
+    opts.todoEnabled,
     opts.mcpEnabled,
     opts.subagentsEnabled,
     opts.agentName,
@@ -60,6 +69,36 @@ function buildConfigKey(
  */
 function pickBooleanOverride(metadataValue: unknown, fallback: boolean): boolean {
   return typeof metadataValue === 'boolean' ? metadataValue : fallback;
+}
+
+/**
+ * 提取本轮输入文本（仅首轮 HumanMessage 形态有；resume 的 Command 返回 undefined）。
+ * 用于 retrieve 模式的记忆检索 query。
+ */
+function extractInputText(input: { messages: HumanMessage[] } | Command): string | undefined {
+  if (!input || typeof input !== 'object' || !('messages' in input)) return undefined;
+  const messages = (input as { messages?: HumanMessage[] }).messages;
+  const first = Array.isArray(messages) ? messages[0] : undefined;
+  const content = first?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) =>
+        block && typeof block === 'object' && typeof (block as { text?: string }).text === 'string'
+          ? (block as { text: string }).text
+          : '',
+      )
+      .join('\n');
+  }
+  return undefined;
+}
+
+/**
+ * memoryMode 覆盖：只接受 'inject' / 'retrieve' 两个字面量，其它值（含 undefined）
+ * 一律回落 baseOptions，避免拼写错误静默改变记忆行为。
+ */
+function pickMemoryMode(value: unknown, fallback: 'inject' | 'retrieve'): 'inject' | 'retrieve' {
+  return value === 'retrieve' || value === 'inject' ? value : fallback;
 }
 
 /**
@@ -116,10 +155,14 @@ export class DeerFlowClient {
     this.baseOptions = {
       agentName: options?.agentName ?? 'lead',
       memoryEnabled: options?.memoryEnabled ?? false,
+      memoryMode: options?.memoryMode ?? 'inject',
       autoTitleEnabled: options?.autoTitleEnabled ?? false,
       threadDataEnabled: options?.threadDataEnabled ?? false,
       uploadsEnabled: options?.uploadsEnabled ?? false,
       sandboxEnabled: options?.sandboxEnabled ?? false,
+      summarizationEnabled: options?.summarizationEnabled ?? false,
+      guardrailEnabled: options?.guardrailEnabled ?? false,
+      todoEnabled: options?.todoEnabled ?? false,
       // MCP / subagent 默认开启，保持主应用历史行为；caller 可显式关闭以收紧工具集。
       mcpEnabled: options?.mcpEnabled ?? true,
       subagentsEnabled: options?.subagentsEnabled ?? true,
@@ -141,7 +184,8 @@ export class DeerFlowClient {
    *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled / sandboxEnabled。`agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
+   * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。
+   * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
    *
    * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
    * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
@@ -151,6 +195,7 @@ export class DeerFlowClient {
     const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
     return {
       memoryEnabled: pickBooleanOverride(metadata?.memoryEnabled, !!this.baseOptions.memoryEnabled),
+      memoryMode: pickMemoryMode(metadata?.memoryMode, this.baseOptions.memoryMode ?? 'inject'),
       autoTitleEnabled: pickBooleanOverride(
         metadata?.autoTitleEnabled,
         !!this.baseOptions.autoTitleEnabled,
@@ -167,6 +212,15 @@ export class DeerFlowClient {
         metadata?.sandboxEnabled,
         !!this.baseOptions.sandboxEnabled,
       ),
+      summarizationEnabled: pickBooleanOverride(
+        metadata?.summarizationEnabled,
+        !!this.baseOptions.summarizationEnabled,
+      ),
+      guardrailEnabled: pickBooleanOverride(
+        metadata?.guardrailEnabled,
+        !!this.baseOptions.guardrailEnabled,
+      ),
+      todoEnabled: pickBooleanOverride(metadata?.todoEnabled, !!this.baseOptions.todoEnabled),
       mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
       subagentsEnabled: pickBooleanOverride(
         metadata?.subagentsEnabled,
@@ -189,6 +243,7 @@ export class DeerFlowClient {
   private async resolveSystemPrompt(
     opts: RuntimeRunOptions,
     mcpTools: StructuredToolInterface[],
+    memoryQuery?: string,
   ): Promise<string> {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
@@ -202,6 +257,8 @@ export class DeerFlowClient {
         userId: opts.userId,
         injectMemory: opts.memoryEnabled,
         mcpToolsSection: buildMcpToolsSection(mcpTools),
+        memoryMode: opts.memoryMode,
+        memoryQuery,
       });
     } catch (e) {
       console.warn(
@@ -262,6 +319,11 @@ export class DeerFlowClient {
         uploads: opts.uploadsEnabled,
         sandbox: opts.sandboxEnabled,
         subagents: opts.subagentsEnabled,
+        // summarization 需要 model 实例（会额外调用 LLM 生成摘要），
+        // features.summarization 不接受 true，须在此用当次 model 构造实例
+        summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
+        guardrail: opts.guardrailEnabled,
+        todo: opts.todoEnabled,
       },
     });
 
@@ -349,7 +411,9 @@ export class DeerFlowClient {
     // 保证「模型在提示里看到的 MCP 工具」与「实际可调用的工具」严格一致。
     // mcpEnabled=false 时本轮不加载任何 MCP 工具（既不绑定也不写进提示），用于收紧工具集。
     const mcpTools = runOpts.mcpEnabled ? await loadMcpTools() : [];
-    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools);
+    // 检索模式的 query 取本轮用户输入（resume 的 Command 输入无文本 → 回落全量注入）
+    const memoryQuery = extractInputText(input);
+    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools, memoryQuery);
     const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
 
     // 3. lifecycle start
@@ -776,6 +840,23 @@ export class DeerFlowClient {
         }
 
         for (const nodeName of Object.keys(payload)) {
+          // todos state delta：write_todos 工具经 Command({update:{todos}}) 写回 state，
+          // 因此清单变化会自然出现在 updates 的节点 delta 里，无需中间件额外推 custom 事件。
+          // 注意：必须在下方 `!Array.isArray(msgs) → continue` 之前判定——只更新 todos
+          // 的节点 payload 不含 messages，会被该 continue 跳过。
+          const todosDelta = (payload[nodeName] as { todos?: unknown } | undefined)?.todos;
+          if (Array.isArray(todosDelta)) {
+            const ev = emit(
+              createAgentEvent<AgentEvent>(
+                AgentEventType.TODO_UPDATE,
+                agentId,
+                { todos: todosDelta },
+                { sessionId: effectiveThreadId, ...metadata },
+              ),
+            );
+            if (ev) yield ev;
+          }
+
           const msgs = payload[nodeName]?.messages;
 
           if (!Array.isArray(msgs)) continue;

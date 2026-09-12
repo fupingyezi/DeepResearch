@@ -1,5 +1,5 @@
 /**
- * Middleware execution order（必须严格按 0 → 13 编排）：
+ * Middleware execution order（必须严格按 0 → 12 编排）：
  *
  *  0. ThreadDataMiddleware              (基础设施)
  *  1. UploadsMiddleware                 (基础设施)
@@ -38,7 +38,8 @@ export {
   DEFAULT_INTEGRITY_RULES,
 } from './tool-call-integrity';
 export type { IntegrityRule, RuleContext, ToolCallIntegrityOptions } from './tool-call-integrity';
-export { guardrailMiddleware } from './guardrail-middleware';
+export { guardrailMiddleware, createGuardrailMiddleware } from './guardrail-middleware';
+export type { GuardrailOptions, GuardrailBlockMode } from './guardrail-middleware';
 export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 export { summarizationMiddleware, createSummarizationMiddleware } from './summarization-middleware';
 export type { SummarizationOptions } from './summarization-middleware';

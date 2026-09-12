@@ -3,7 +3,13 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { BaseCheckpointSaver } from '@langchain/langgraph';
 import { ThreadStateAnnotation } from './thread-state';
-import { RuntimeFeatures, DEFAULT_FEATURES, type FeatureToggle } from './features';
+import {
+  RuntimeFeatures,
+  DEFAULT_FEATURES,
+  type FeatureToggle,
+  type MiddlewareAnchor,
+  type PositionedMiddleware,
+} from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool, SANDBOX_TOOLS } from '../tools';
 import {
@@ -17,6 +23,7 @@ import {
   sandboxMiddleware,
   viewImageMiddleware,
   createSubagentLimitMiddleware,
+  createGuardrailMiddleware,
   loopDetectionMiddleware,
   qwenToolCallRecoveryMiddleware,
   withCallLogAll,
@@ -114,19 +121,19 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  *
  * 装配顺序严格按 `middlewares/index.ts` 中 ORDERED_MIDDLEWARES 编排：
  *   threadData(0) → uploads(1) → sandbox(2 features.sandbox) → toolCallIntegrity(3) →
- *   guardrail(4 暂未挂) → toolErrorHandling(5) → summarization(6) → todo(7) →
+ *   guardrail(4 features.guardrail) → toolErrorHandling(5) → summarization(6) → todo(7) →
  *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
  *
- * SubagentExecutor 内部调用 createBaseAgent 时同样会走这条路径，因此
- * subagent 也会注入 task 工具到中间件链上 —— 但 task-tool 装载阶段
- * 会过滤掉 task，最终绑定到 LLM 的工具列表里没有 task，模型不会调用它。
- * subagentLimitMiddleware 在 subagent 上下文中无害（不会拦到 task）。
+ * SubagentExecutor 内部调用 createBaseAgent 时显式传入 `SUBAGENT_FEATURES`
+ * （`subagents: false`），因此装配层不会注入 task 工具，也不会挂
+ * subagentLimitMiddleware —— 防递归由「工具可见性」硬保证：子 agent 的 LLM
+ * 工具列表里根本没有 task（system prompt 约束与用量限额仅作兜底）。
  */
 export function assembleFromFeatures(
   features: RuntimeFeatures,
   options: AssembelOptions,
 ): { chain: AgentMiddleware[]; extraTools: StructuredToolInterface[] } {
-  const { provider } = options;
+  const { provider, extraMiddlewares } = options;
 
   const chain: AgentMiddleware[] = [];
   const extraTools: StructuredToolInterface[] = [];
@@ -162,6 +169,15 @@ export function assembleFromFeatures(
 
   // (3) 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
+
+  // (4) 可选：规则式护栏。features.guardrail=true 走默认实现（createGuardrailMiddleware），
+  // 或传入自定义中间件实例。默认关闭（库级安全默认），服务级由 _service.ts 开启。
+  const guardrailFeat = features.guardrail;
+  if (guardrailFeat === true) {
+    chain.push(createGuardrailMiddleware());
+  } else if (typeof guardrailFeat === 'object' && guardrailFeat !== null) {
+    chain.push(guardrailFeat as AgentMiddleware);
+  }
 
   // (5) 始终启用：工具自身执行异常的兜底
   chain.push(toolErrorHandlingMiddleware);
@@ -204,13 +220,82 @@ export function assembleFromFeatures(
   // (12) 始终启用：循环检测
   chain.push(loopDetectionMiddleware);
 
-  // task 工具按开关注入到 lead-agent 工具集（subagent 内部由 task-tool 装载阶段过滤）。
-  // 关闭 subagents 时不注入 task
+  // task 工具按开关注入到 lead-agent 工具集；subagent 走 SUBAGENT_FEATURES
+  // （subagents=false），此处不注入 task，构成防递归硬保证。
   if (subagentsEnabled) {
     extraTools.push(taskTool as StructuredToolInterface);
   }
 
+  // 自定义中间件：按 @Next/@Prev 锚点插入（无锚点 / 锚点未命中 → 追加到链尾）
+  for (const middleware of extraMiddlewares ?? []) {
+    insertWithAnchor(chain, middleware);
+  }
+
   return { chain, extraTools };
+}
+
+/**
+ * 按 `@Next` / `@Prev` 装饰器声明的锚点，把自定义中间件插入链中。
+ *
+ * 锚点读取：装饰器把锚点写在**类（构造函数）**上，而 `createMiddleware()`
+ * 会剥离实例上的未知字段，因此两个位置都要读 —— 优先实例字段（手工
+ * `Object.assign` 场景），回退构造函数静态字段（`@Next` / `@Prev` 装饰类场景）。
+ *
+ * 匹配规则：
+ * - 优先按构造函数同一性匹配；生产构建可能压缩类名，退化到 `name` 相等；
+ * - `_prevAnchor` 插入到**第一个**匹配实例之前；`_nextAnchor` 插入到
+ *   **最后一个**匹配实例之后（同名中间件可能在链上出现多次）；
+ * - 无锚点或锚点不在链上时追加到链尾（保持历史语义）。
+ */
+function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware): void {
+  const resolved = resolveAnchor(middleware);
+  if (!resolved) {
+    chain.push(middleware);
+    return;
+  }
+  const { anchor, side } = resolved;
+
+  const matches = chain
+    .map((existing, index) => ({ existing, index }))
+    .filter(({ existing }) => matchesAnchor(existing, anchor));
+
+  if (matches.length === 0) {
+    chain.push(middleware);
+    return;
+  }
+
+  if (side === 'prev') {
+    chain.splice(matches[0].index, 0, middleware);
+  } else {
+    chain.splice(matches[matches.length - 1].index + 1, 0, middleware);
+  }
+}
+
+/** 解析中间件的插入锚点；无锚点返回 null。 */
+function resolveAnchor(
+  middleware: AgentMiddleware,
+): { anchor: MiddlewareAnchor; side: 'prev' | 'next' } | null {
+  const positioned = middleware as PositionedMiddleware;
+  if (positioned._prevAnchor) return { anchor: positioned._prevAnchor, side: 'prev' };
+  if (positioned._nextAnchor) return { anchor: positioned._nextAnchor, side: 'next' };
+  // 装饰器把锚点写在类（构造函数）上，而 createMiddleware 会剥离实例未知字段，
+  // 因此再回退读一次构造函数的静态字段。
+  const ctor = middleware.constructor as unknown as PositionedMiddleware | undefined;
+  if (ctor?._prevAnchor) return { anchor: ctor._prevAnchor, side: 'prev' };
+  if (ctor?._nextAnchor) return { anchor: ctor._nextAnchor, side: 'next' };
+  return null;
+}
+
+/** 判断链上中间件是否命中锚点：锚点为类时比构造函数，为实例时先同一性再比 name。 */
+function matchesAnchor(existing: AgentMiddleware, anchor: MiddlewareAnchor): boolean {
+  if (existing === anchor) return true;
+  if (typeof anchor === 'function') {
+    return (
+      existing.constructor === anchor ||
+      (existing.constructor as { name?: string } | undefined)?.name === anchor.name
+    );
+  }
+  return (existing as { name?: string }).name === (anchor as { name?: string }).name;
 }
 
 /**

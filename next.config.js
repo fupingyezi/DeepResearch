@@ -9,6 +9,12 @@ const nextConfig = {
   // 自托管容器化：产出 .next/standalone 精简运行时，供 Docker runner 阶段直接 `node server.js`
   output: 'standalone',
 
+  experimental: {
+    // ssh2 及其可选原生依赖（cpu-features）含动态 require，webpack 静态解析会失败；
+    // 列为服务端外部包，运行期从 node_modules 直接 require（standalone 会一并追踪拷贝）。
+    serverComponentsExternalPackages: ['ssh2', 'cpu-features'],
+  },
+
   // 图片优化
   images: {
     domains: ['localhost'],

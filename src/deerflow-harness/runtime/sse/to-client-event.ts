@@ -68,6 +68,13 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
         details: event.payload.details,
       });
 
+    case AgentEventType.TODO_UPDATE: {
+      const p = event.payload as { todos: unknown };
+      return createClientAgentEvent(ClientAgentEventType.TODO_UPDATE, agentId, {
+        todos: p.todos as never,
+      });
+    }
+
     // 折叠所有 task_* 内部事件为 TASK_PROGRESS
     case AgentEventType.TASK_PROGRESS: {
       const p = event.payload as TaskProgressPayload;

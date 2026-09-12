@@ -25,6 +25,8 @@ export enum ClientAgentEventType {
   TOOL_RESULT = 'tool_result',
   /** 任务进度更新（折叠所有 task_* 内部事件） */
   TASK_PROGRESS = 'task_progress',
+  /** 任务清单更新（write_todos 工具更新 state.todos 后全量下发） */
+  TODO_UPDATE = 'todo_update',
   /** 人工中断（等待决策） */
   HUMAN_INTERRUPT = 'human_interrupt',
   /** 错误 */
@@ -130,6 +132,19 @@ export interface TaskProgressPayload {
   [k: string]: any;
 }
 
+/**
+ * TodoUpdatePayload —— write_todos 工具更新 `state.todos` 后的完整清单。
+ *
+ * 语义为 latest-wins 全量替换：前端每次都用最新数组覆盖同一条消息内的
+ * 清单展示，不做增量合并。
+ */
+export interface TodoUpdatePayload {
+  todos: Array<{
+    content: string;
+    status: 'pending' | 'in_progress' | 'completed';
+  }>;
+}
+
 export interface HumanInterruptPayload {
   question: string;
   details: any;
@@ -184,6 +199,11 @@ export interface TaskProgressEvent extends BaseClientAgentEvent {
   payload: TaskProgressPayload;
 }
 
+export interface TodoUpdateEvent extends BaseClientAgentEvent {
+  eventType: ClientAgentEventType.TODO_UPDATE;
+  payload: TodoUpdatePayload;
+}
+
 export interface HumanInterruptEvent extends BaseClientAgentEvent {
   eventType: ClientAgentEventType.HUMAN_INTERRUPT;
   payload: HumanInterruptPayload;
@@ -211,6 +231,7 @@ export type ClientAgentEvent =
   | ToolCallEvent
   | ToolResultEvent
   | TaskProgressEvent
+  | TodoUpdateEvent
   | HumanInterruptEvent
   | ErrorEvent
   | EndEvent

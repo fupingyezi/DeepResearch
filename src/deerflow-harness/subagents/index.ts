@@ -5,7 +5,7 @@
  */
 import './builtins';
 
-export { SubagentExecutor } from './executor';
+export { SubagentExecutor, SUBAGENT_FEATURES } from './executor';
 export type { SubagentExecutorOptions } from './executor';
 export {
   registerSubagent,

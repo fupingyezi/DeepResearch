@@ -16,6 +16,7 @@ import { Alert } from 'antd';
 
 import CustomMarkdown from '../markdown/custom-markdown';
 import { HumanDecision } from '../process/human-decision';
+import TodoList from './todo-list';
 
 import type { MessageTimelineProps, TimelineStepPart } from '@/types';
 import { hasMeaningfulArgs } from '@/utils/common';
@@ -432,6 +433,15 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ steps, status, interr
           }
           if (step.type === 'subagent_task') {
             return <SubagentTaskBubble key={step.partId} step={step} index={subagentCounter++} />;
+          }
+          if (step.type === 'todo') {
+            return (
+              <TodoList
+                key={step.partId}
+                todos={step.content.todos}
+                streaming={status === 'processing'}
+              />
+            );
           }
           return null;
         })}

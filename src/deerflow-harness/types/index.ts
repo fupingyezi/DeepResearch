@@ -32,6 +32,11 @@ export interface ClientOptions {
   agentName?: string;
   /** 是否启用长期记忆（features.memory）。默认 false。 */
   memoryEnabled?: boolean;
+  /**
+   * 记忆注入模式。默认 'inject'（全量注入）。
+   * 'retrieve' 按本轮用户输入检索相关 facts/section（关键词打分，非语义检索）。
+   */
+  memoryMode?: 'inject' | 'retrieve';
   /** 是否启用 autoTitle（features.autoTitle）。默认 false；服务级建议 true。 */
   autoTitleEnabled?: boolean;
   /** 是否启用 ThreadDataMiddleware（features.threadData）。默认 false；服务级建议 true。 */
@@ -40,6 +45,15 @@ export interface ClientOptions {
   uploadsEnabled?: boolean;
   /** 是否启用 SandboxMiddleware + 文件工具集（features.sandbox）。默认 false；服务级建议 true。 */
   sandboxEnabled?: boolean;
+  /**
+   * 是否启用历史摘要（features.summarization）。默认 false。
+   * 开启后历史触达阈值时会额外调用一次 LLM 生成摘要，产生 token 费用。
+   */
+  summarizationEnabled?: boolean;
+  /** 是否启用 GuardrailMiddleware（features.guardrail）。默认 false；服务级建议 true。 */
+  guardrailEnabled?: boolean;
+  /** 是否启用 TodoMiddleware（write_todos 工具 + state.todos）。默认 false；服务级建议 true。 */
+  todoEnabled?: boolean;
   /** 是否加载并绑定 MCP 工具。默认 true。*/
   mcpEnabled?: boolean;
   /** 是否注入 task 工具与 subagent 能力（features.subagents）。默认 true。*/

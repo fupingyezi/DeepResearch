@@ -73,10 +73,12 @@ src/deerflow-harness/sandbox/
 
 **关键函数**（`path-utils.ts`）：
 
-- `virtualToLocal(virtualPath, threadId)` — 虚拟路径 → 本地路径
-- `localToVirtual(localPath, threadId)` — 本地路径 → 虚拟路径（脱敏）
-- `validateVirtualPath(virtualPath, allowedDirs)` — 路径校验（防穿越）
-- `validateBashCommandPaths(command, allowedDirs)` — bash 路径白名单
+- `replaceVirtualPath(virtualPath, dirs)` — 虚拟路径 → 本地真实路径（最长前缀匹配）
+- `validateLocalToolPath(path)` — 工具入参校验：仅放行 `/mnt/user-data/*` 虚拟路径
+- `resolveAndValidateUserDataPath(path, dirs)` — 替换后 `path.resolve` 再校验仍落在三根目录内（防 symlink / 拼接逃逸）
+- `maskLocalPathsInOutput(text, dirs)` — 输出脱敏：宿主真实路径反向替换回 `/mnt/user-data/*`
+- `validateBashCommandPaths(command, dirs)` — bash 路径白名单（拒 `..` 穿越与 `file://`）
+- `replaceVirtualPathsInCommand(command, dirs)` — bash 命令内的虚拟路径替换
 
 ### 3.2 惰性初始化
 
