@@ -75,8 +75,10 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 
 流水线：`.github/workflows/deploy.yml`，目标腾讯云 Ubuntu 服务器（`/opt/mini-deepresearch`）。
 
-- **job quality**：lint / format:check / typecheck / test / build（PR 也跑）
-- **job deploy**（仅 push main）：`git archive` 打包源码（~0.5MB）→ scp → **服务器本地 `docker build`**（`scripts/deploy-remote.sh`）→ compose 起服务 → 健康检查（`/api/auth/setup-status`，30×3s，<500 即存活）→ 失败自动回滚 `.previous-image`
+- **job quality**：lint / format:check / typecheck / test / build（PR 也跑）；同时用 `dorny/paths-filter` 判定改动是否只含文档
+- **job deploy**（仅 push main，且改动含非文档文件）：`git archive` 打包源码（~0.5MB）→ scp → **服务器本地 `docker build`**（`scripts/deploy-remote.sh`）→ compose 起服务 → 健康检查（`/api/auth/setup-status`，30×3s，<500 即存活）→ 失败自动回滚 `.previous-image`
+  - **纯文档改动（`**.md`/`docs/**`）不部署**：同一台机器上跑全量构建会和 PG/Redis/MinIO/app 抢内存与磁盘，2026-09 曾因一次 README push 触发构建把整机（含 SSH）压死 —— 详见 `docs/cicd-notes.md` §11。判定写成 `code != 'false'` 是刻意 fail-open
+  - **资源边界**（同次事故的加固）：Dockerfile builder 阶段 `NODE_OPTIONS=--max-old-space-size=2048`；`deploy-remote.sh` 构建前磁盘守卫（<3G 先清缓存、仍不足则快速失败）+ 成功后回收（构建缓存留 2G、镜像留最近 3 版）；`docker-compose.prod.yaml` 所有服务统一日志轮转 `max-size 10m / max-file 3`
 - **镜像不在 CI 构建也不走 registry**：跨境 scp 镜像 tar 与推 TCR 均实测不可用（详见 `docs/cicd-notes.md` 踩坑实录）；服务器构建的依赖链路已配国内源（daemon registry mirror + Dockerfile 内 npmmirror）
 - **镜像 tag**：`deepresearch:<git sha 前 12 位>`，历史镜像保留在服务器本地，可手动回滚任意版本
 - **密钥分层**：GitHub Secrets 只放 4 个 SSH 凭证；业务密钥只在服务器 `DEPLOY_PATH/.env.production`（compose 经 `--env-file` 插值中间件凭证，`:?` 强制非空）；生产持久化卷见 `docker-compose.prod.yaml`（注意 memory/extensions 的落盘路径由 `environment:` 显式指到卷内）

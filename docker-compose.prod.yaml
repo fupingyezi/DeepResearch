@@ -10,12 +10,21 @@
 #     注：memory 与 extensions_config 的落盘位置由 app 的 environment 显式
 #     指到挂载目录内（代码默认值落在 ~ 与 cwd，不在卷上会丢数据）。
 
+# 容器日志上限（所有服务共用）：compose 默认的 json-file 驱动不轮转，长期跑会把磁盘
+# 写满 —— 磁盘满时这台机器连 SSH 都会失去响应（2026-09 生产事故的成因之一）。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
 services:
   app:
     # APP_IMAGE 由 scripts/deploy-remote.sh 设置为带 git sha 的 tag，
     # 缺省回退到 :latest 便于手动起服务。
     image: ${APP_IMAGE:-deepresearch:latest}
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env.production
     environment:
@@ -53,6 +62,7 @@ services:
       start_period: 30s
 
   postgres:
+    logging: *default-logging
     image: postgres:15
     restart: unless-stopped
     environment:
@@ -71,6 +81,7 @@ services:
       retries: 3
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD 未设置（应来自 .env.production）}
@@ -88,6 +99,7 @@ services:
       retries: 3
 
   minio:
+    logging: *default-logging
     image: minio/minio
     restart: unless-stopped
     command: server /data --console-address ":9001"

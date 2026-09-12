@@ -20,6 +20,38 @@ NEW_IMAGE="${1:?用法: deploy-remote.sh <image:tag>}"
 log()  { echo "[deploy] $*"; }
 fail() { echo "[deploy][ERROR] $*" >&2; exit 1; }
 
+# 磁盘守卫：本机构建把构建缓存、按 sha 保留的历史镜像、容器日志都压在同一块盘上，
+# 写满会让整台机器（含 SSH）失去响应。低于阈值先自动清构建缓存，仍不够就快速失败 ——
+# 宁可这次部署失败，也不要压垮服务器。
+MIN_FREE_GB="${MIN_FREE_GB:-3}"
+ensure_disk_space() {
+  local free_gb
+  free_gb="$(df -BG --output=avail / | tail -1 | tr -dc '0-9')"
+  if [ "${free_gb:-0}" -ge "$MIN_FREE_GB" ]; then
+    log "磁盘可用 ${free_gb}G（阈值 ${MIN_FREE_GB}G）"
+    return 0
+  fi
+  log "磁盘可用仅 ${free_gb}G，低于阈值 ${MIN_FREE_GB}G，先自动清理构建缓存"
+  docker builder prune -f >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+  free_gb="$(df -BG --output=avail / | tail -1 | tr -dc '0-9')"
+  if [ "${free_gb:-0}" -lt "$MIN_FREE_GB" ]; then
+    fail "清理后磁盘仍只有 ${free_gb}G（需 ≥ ${MIN_FREE_GB}G）。请清理历史镜像（docker images --filter reference=deepresearch）与容器日志，或在控制台扩容云硬盘。"
+  fi
+  log "清理后磁盘可用 ${free_gb}G，继续部署"
+}
+
+# 部署成功后的回收：镜像只留最近 3 个版本（回滚只需要上一版，留 3 个够用），构建缓存
+# 保留 2G 以维持构建速度。不回收的话磁盘只增不减（每次部署多一份全量镜像）。
+cleanup_after_deploy() {
+  docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+  docker images --filter reference='deepresearch' --format '{{.CreatedAt}}\t{{.Tag}}' \
+    | sort -r | tail -n +4 | awk '{print $NF}' \
+    | xargs -r docker rmi >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+  log "已回收：构建缓存保留 2G，镜像保留最近 3 个版本"
+}
+
 command -v docker >/dev/null 2>&1 || fail "未找到 docker，请先在服务器安装 docker"
 [ -f "Dockerfile" ]      || fail "当前目录缺少 Dockerfile（源码包未解包？）"
 [ -f "$COMPOSE_FILE" ]   || fail "当前目录缺少 $COMPOSE_FILE（请在 DEPLOY_PATH 下执行）"
@@ -37,6 +69,8 @@ else
   log "未检测到运行中的 app（首次部署），无 previous 版本"
 fi
 
+ensure_disk_space
+
 log "构建新镜像: $NEW_IMAGE（首次较慢，后续有 layer 缓存）"
 docker build -t "$NEW_IMAGE" . || fail "docker build 失败（见上方构建日志）"
 
@@ -48,7 +82,7 @@ log "开始健康检查..."
 if APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/auth/setup-status}" \
    bash "$SCRIPT_DIR/health-check.sh"; then
   log "部署成功，新版本健康: $NEW_IMAGE"
-  docker image prune -f >/dev/null 2>&1 || true
+  cleanup_after_deploy
   exit 0
 fi
 

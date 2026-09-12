@@ -81,8 +81,44 @@ export async function getFileUrl(objectKey: string, expiryHours = 24) {
   return url;
 }
 
+/**
+ * MinIO 单次删除的超时上限。
+ *
+ * minio-js 自身不接受 timeout（`setRequestOptions` 只认 agent / cert / ciphers 那几个字段，
+ * timeout 会被 `lodash.pick` 丢掉），一个卡住的 socket 能把调用方无限期拖住 —— 删除对话
+ * 是同步等这个结果的，卡住就等于那个请求挂死。
+ *
+ * 只加在删除上：上传（putObject）耗时随文件大小增长，设上限会误伤大文件。
+ */
+const MINIO_DELETE_TIMEOUT_MS = 15_000;
+
+/**
+ * 给 MinIO 调用套超时。
+ *
+ * 注意超时后底层请求仍在跑，必须由这里吞掉它迟到的 reject —— Node 默认把未处理的
+ * promise rejection 当致命错误（--unhandled-rejections=throw），绝不能让它冒到进程级。
+ */
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${MINIO_DELETE_TIMEOUT_MS}ms`)),
+      MINIO_DELETE_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    promise.catch(() => undefined);
+  }
+}
+
 export async function deleteFile(objectKey: string) {
-  await getMinioClient().removeObject(getBucketName(), objectKey);
+  await withTimeout(
+    getMinioClient().removeObject(getBucketName(), objectKey),
+    `minio removeObject(${objectKey})`,
+  );
 }
 
 export async function getFile(objectKey: string) {

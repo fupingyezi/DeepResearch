@@ -20,6 +20,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # 构建期不需要真实业务密钥；standalone 产物在运行期由 env_file 注入配置
 ENV NEXT_TELEMETRY_DISABLED=1
+# 构建内存上限：next build 默认按机器内存自适应堆大小，在轻量服务器上会把同机的
+# PG / Redis / app 一起挤出内存，整机（含 SSH）失去响应 —— 2026-09 生产事故的成因之一。
+# 给构建设个上限后，真不够会以明确的 "JavaScript heap out of memory" 失败，
+# 而不是拖死服务器。机器规格较大时可上调这个值。
+ENV NODE_OPTIONS=--max-old-space-size=2048
 RUN pnpm build
 
 # ---- runner：仅拷贝 standalone 运行所需文件，非 root 运行 ----

@@ -164,6 +164,7 @@ git push origin main        # 推上去即自动发布
 - 看 GitHub `Actions` 进度；`deploy` 结束即上线，全程约 3–6 分钟
 - 健康检查失败会**自动回滚**到上一版本，Actions 日志里能看到回滚输出
 - 同一批新 push 会取消进行中的旧部署（不排队）
+- **纯文档改动不部署**：改动只含 `**.md` / `docs/**` 时，`deploy` job 会显示 skipped，只跑质量门禁（服务器上不值得为改文档再跑一次全量构建）
 
 ## 五、回滚与应急
 
@@ -176,6 +177,28 @@ docker images 'deepresearch:*'
 APP_IMAGE=deepresearch:<sha> docker compose --env-file .env.production \
   -f docker-compose.prod.yaml up -d app
 ```
+
+**服务器整体卡死（SSH 都慢/进不去）**：先怀疑磁盘写满或内存打满 —— 本机构建 + 同机跑
+PG/Redis/MinIO/app，任何一项吃满都会让全机失去响应。
+
+```bash
+# ① 定性（重启后第一件事就是看这两个数）
+df -h / ; free -m ; uptime
+docker system df
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'   # 有无 Restarting
+
+# ② 磁盘清理（构建缓存 → 悬空镜像 → 旧版本镜像，保留最近 3 版）
+docker builder prune -f
+docker image prune -f
+docker images --filter reference='deepresearch' --format '{{.CreatedAt}}\t{{.Tag}}' \
+  | sort -r | tail -n +4 | awk '{print $NF}' | xargs -r docker rmi
+
+# ③ 清不出空间 / 内存打满时：控制台强制重启实例（容器 restart: unless-stopped 自动拉起）
+```
+
+- 部署脚本已内置守卫：构建前根分区 <3G 会先自动清构建缓存、仍不足则**快速失败**（不会硬着头皮构建）；部署成功后自动回收（构建缓存留 2G、镜像留最近 3 版）
+- 控制台「监控」页的磁盘曲线长期 >85% → 优先扩容云硬盘，别等它写满
+- 内存不够的典型症状：`journalctl -k | grep -i "killed process"` 能看到 OOM 记录
 
 排查命令速查：
 
