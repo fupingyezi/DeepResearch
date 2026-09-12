@@ -184,7 +184,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             ref={fileInputRef}
             onChange={handleFileChange}
             multiple
-            accept=".pdf,.docx,.md,.txt"
+            accept=".pdf,.docx,.md,.txt,.png,.jpg,.jpeg,.webp,.gif"
             className="hidden"
           />
           <Image

@@ -12,6 +12,7 @@ import {
 } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool, SANDBOX_TOOLS } from '../tools';
+import { visionMiddleware } from '../vision';
 import {
   toolCallIntegrityMiddleware,
   toolErrorHandlingMiddleware,
@@ -21,7 +22,6 @@ import {
   threadDataMiddleware,
   uploadsMiddleware,
   sandboxMiddleware,
-  viewImageMiddleware,
   createSubagentLimitMiddleware,
   createGuardrailMiddleware,
   loopDetectionMiddleware,
@@ -122,7 +122,7 @@ export function createBaseAgent(opts: CreateAgentOptions) {
  * 装配顺序严格按 `middlewares/index.ts` 中 ORDERED_MIDDLEWARES 编排：
  *   threadData(0) → uploads(1) → sandbox(2 features.sandbox) → toolCallIntegrity(3) →
  *   guardrail(4 features.guardrail) → toolErrorHandling(5) → summarization(6) → todo(7) →
- *   title(8) → memory(9) → viewImage(10) → subagentLimit(11) → loopDetection(12)
+ *   title(8) → memory(9) → vision(10) → subagentLimit(11) → loopDetection(12)
  *
  * SubagentExecutor 内部调用 createBaseAgent 时显式传入 `SUBAGENT_FEATURES`
  * （`subagents: false`），因此装配层不会注入 task 工具，也不会挂
@@ -207,8 +207,10 @@ export function assembleFromFeatures(
     chain.push(memoryFeat as AgentMiddleware);
   }
 
-  // (10) 可选：viewImage —— 当前为占位实现（仅启用时打印一次警告）。
-  pushFeature(chain, features.vision, viewImageMiddleware);
+  // (10) 可选：vision —— 历史图片压缩（把历史 image_url blocks 换成文本占位，
+  // 避免 base64 每轮重进 checkpoint 与重复付 vision token）。压缩先于摘要的
+  // 顺序保证见 vision/vision-middleware.ts 头部注释。
+  pushFeature(chain, features.vision, visionMiddleware);
 
   // (11) subagent 频次/并发上限。每个 agent 实例独立 counter——
   // 仅在启用 subagents 时挂载（features.subagents !== false，默认启用）。

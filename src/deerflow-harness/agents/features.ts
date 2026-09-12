@@ -10,7 +10,8 @@ export interface RuntimeFeatures {
   memory?: FeatureToggle;
   summarization?: FeatureToggle; // 不允许 true（须传 createSummarizationMiddleware 实例）
   todo?: FeatureToggle; // 现成 todoListMiddleware；true=默认实现
-  vision?: FeatureToggle; // viewImageMiddleware（当前为占位 + 警告）
+  /** VisionMiddleware（历史图片压缩）+ 注入 view_image 工具。由模型能力驱动。 */
+  vision?: FeatureToggle;
   autoTitle?: FeatureToggle;
   /** ThreadDataMiddleware：beforeAgent 从 file_metadata 装载本会话上传文件到 state。 */
   threadData?: FeatureToggle;

@@ -160,6 +160,22 @@ export {
   type BuildMemoryContextOptions,
 } from './agents/memory';
 
+// vision（多模态：图片字节注入 + 多模态消息构造 + 历史图压缩）
+export {
+  buildHumanMessageContent,
+  contentHasImageBlocks,
+  extractContentTextBlocks,
+  getThreadImageFetcher,
+  maxImageBytesFromEnv,
+  setThreadImageFetcher,
+  visionMiddleware,
+  type BuildContentOptions,
+  type BuildContentResult,
+  type FetchedImage,
+  type ThreadImageFetcher,
+  type ThreadImageRef,
+} from './vision';
+
 export {
   setTitleModelFactory,
   getTitleModelFactory,
