@@ -18,7 +18,8 @@
 
 ```bash
 cp benchmarks/.env.example benchmarks/.env.local
-# 编辑填入 API Key（至少需要 BENCHMARK_AGENT_API_KEY）
+# 编辑填入 API Key（agent 可用 DEEPSEEK_API_KEY；judge 另需
+# BENCHMARK_JUDGE_API_KEY + BENCHMARK_JUDGE_BASE_URL）
 ```
 
 ### 2. 运行 LongMemEval 基准测试
@@ -27,42 +28,42 @@ cp benchmarks/.env.example benchmarks/.env.local
 # 从项目根目录执行
 
 # 运行全部 500 条问题（S版，~115k tokens 历史）
-npx tsx benchmarks/longmem/run.ts
+pnpm bench:longmem
 
 # 或通过 research-qa/run.ts 路由
-npx tsx benchmarks/research-qa/run.ts --dataset longmem
+pnpm bench:qa -- --dataset longmem
 ```
 
 ### 3. 常用参数
 
 ```bash
 # 按类型过滤运行
-npx tsx benchmarks/longmem/run.ts --type multi-session      # 多会话推理 (133条)
-npx tsx benchmarks/longmem/run.ts --type temporal-reasoning # 时间推理 (133条)
-npx tsx benchmarks/longmem/run.ts --type knowledge-update   # 知识更新 (78条)
-npx tsx benchmarks/longmem/run.ts --type abstention         # 弃权识别 (30条)
+pnpm bench:longmem -- --type multi-session      # 多会话推理 (133条)
+pnpm bench:longmem -- --type temporal-reasoning # 时间推理 (133条)
+pnpm bench:longmem -- --type knowledge-update   # 知识更新 (78条)
+pnpm bench:longmem -- --type abstention         # 弃权识别 (30条)
 
 # 运行单条问题（调试用）
-npx tsx benchmarks/longmem/run.ts --id e47becba
+pnpm bench:longmem -- --id e47becba
 
 # 使用 Oracle 版本（仅包含证据会话，更快）
-npx tsx benchmarks/longmem/run.ts --variant oracle
+pnpm bench:longmem -- --variant oracle
 
 # 限制数量（快速验证）
-npx tsx benchmarks/longmem/run.ts --limit 5
+pnpm bench:longmem -- --limit 5
 
 # 对照实验：关闭长期记忆系统
-npx tsx benchmarks/longmem/run.ts --no-memory
+pnpm bench:longmem -- --no-memory
 
 # 切换历史注入模式
-npx tsx benchmarks/longmem/run.ts --history-mode system   # 通过 system prompt 注入
-npx tsx benchmarks/longmem/run.ts --history-mode none     # 不注入历史（基线）
+pnpm bench:longmem -- --history-mode system   # 通过 system prompt 注入
+pnpm bench:longmem -- --history-mode none     # 不注入历史（基线）
 
 # 自定义输出路径
-npx tsx benchmarks/longmem/run.ts --output results/my-test.json
+pnpm bench:longmem -- --output benchmarks/results/longmem/my-test.json
 
 # 并发控制（默认 2）
-npx tsx benchmarks/longmem/run.ts --concurrency 1
+pnpm bench:longmem -- --concurrency 1
 ```
 
 ## 两种评测模式：PREFIX vs INGEST
@@ -80,10 +81,10 @@ npx tsx benchmarks/longmem/run.ts --concurrency 1
 
 ```bash
 # 默认 PREFIX 模式：把历史拼进 prompt
-npx tsx benchmarks/longmem/run.ts --limit 5
+pnpm bench:longmem -- --limit 5
 
 # INGEST 两阶段模式：真正测试记忆写入→检索
-npx tsx benchmarks/longmem/run.ts --ingest --limit 5
+pnpm bench:longmem:ingest -- --limit 5
 ```
 
 ### INGEST 模式工作原理
@@ -200,16 +201,19 @@ python3 print_qa_metrics.py gpt-4o hypothesis.log ../../data/longmemeval_oracle.
 
 ## 对照实验建议
 
+> 注意用 `--output` 指定各自的输出文件（**不要**漏掉：两个实验写进同一个
+> 默认路径会互相覆盖，最后变成拿自己和自己比）。
+
 为了验证你的**长期记忆系统**的有效性，建议进行以下对照实验：
 
 ### 实验 1: Memory ON vs OFF
 
 ```bash
 # 开启记忆（默认）
-npx tsx benchmarks/longmem/run.ts -o results/memory-on.json
+pnpm bench:longmem -- --output benchmarks/results/longmem/memory-on.json
 
 # 关闭记忆（对照基线）
-npx tsx benchmarks/longmem/run.ts --no-memory -o results/memory-off.json
+pnpm bench:longmem -- --no-memory --output benchmarks/results/longmem/memory-off.json
 ```
 
 **预期结果**: memory-on 的准确率应显著高于 memory-off，特别是在多会话推理和时间推理类问题上。
@@ -218,13 +222,13 @@ npx tsx benchmarks/longmem/run.ts --no-memory -o results/memory-off.json
 
 ```bash
 # Prefix 模式（推荐）
-npx tsx benchmarks/longmem/run.ts --history-mode prefix -o results/prefix.json
+pnpm bench:longmem -- --history-mode prefix --output benchmarks/results/longmem/prefix.json
 
 # System Prompt 模式
-npx tsx benchmarks/longmem/run.ts --history-mode system -o results/system.json
+pnpm bench:longmem -- --history-mode system --output benchmarks/results/longmem/system.json
 
 # 无历史注入（纯 QA 能力基线）
-npx tsx benchmarks/longmem/run.ts --history-mode none -o results/none.json
+pnpm bench:longmem -- --history-mode none --output benchmarks/results/longmem/none.json
 ```
 
 ### 实验 3: 分类型分析
@@ -232,7 +236,7 @@ npx tsx benchmarks/longmem/run.ts --history-mode none -o results/none.json
 ```bash
 # 分别运行各类型，观察记忆系统在不同能力上的表现
 for type in multi-session temporal-reasoning knowledge-update single-session-user abstention; do
-  npx tsx benchmarks/longmem/run.ts --type $type -o results/by-type/$type.json
+  pnpm bench:longmem -- --type $type --output benchmarks/results/longmem/by-type/$type.json
 done
 ```
 

@@ -131,7 +131,10 @@ benchmarks/
     LANGCHAIN_TRACING_V2: true
     LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    # judge 侧无 DEEPSEEK_* 回落，必须显式给（否则 validateEnv 直接中止）
+    BENCHMARK_JUDGE_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    BENCHMARK_JUDGE_BASE_URL: https://api.deepseek.com/v1
   run: |
-    npx tsx benchmarks/research-qa/run.ts --output benchmark-results.json
+    pnpm bench:qa -- --output benchmark-results.json
     node scripts/check-benchmark-threshold.js benchmark-results.json
 ```
