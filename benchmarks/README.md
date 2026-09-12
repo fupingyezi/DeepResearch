@@ -83,6 +83,24 @@ LongMemEval 数据集需手动下载（官方 HuggingFace 源），详见
 （北京工作日 12:00-14:00、18:00 之后与周末，单价减半；报告里的 `ifAllPeakTotal` 是全落在
 高峰时段的上界，可用于对照）。
 
+## TTFT 与流式分片的口径（容易误读）
+
+agent 的正文**不是无条件逐 token 下发的**：`client.ts` 有一个「报告范式」分类器
+（`looksLikeFinalReportStart`，见 `src/deerflow-harness/client.ts`）—— 仅当回答以
+Markdown 标题（`# ` / `## ` / `### `）或摘要引用块（`> **`）开头时，才判定为「最终报告
+正文」并逐 token 流式下发；否则内容会被缓冲到本轮结束、整段一次性刷出。设计意图是把
+「工具调用前的规划叙述」与「最终报告正文」分开，前者归到 reasoning 通道。
+
+对评测的含义：
+
+- **TTFT 只在报告式回答上等于「首 token 时间」**。会话式短答（LongMemEval 里「X 是什么」
+  这类一两句话的回答）几乎都是整体刷出，此时 **TTFT ≈ 总延迟** —— 别拿它当流式性能指标，
+  更不要用它比较不同模型的首字延迟。
+- 报告里的 `eventTypes.stream_chunk` 同样受此影响，不适合当作「流式流畅度」的度量。
+  同一模型下，`你好` 这类寒暄只会有 1 个分片，而 report 式回答会有几百到几千个。
+- 要比较真实流式表现，请用**会产出报告式回答**的题目（如 research-qa 的
+  technical-deep-dive），并同时看 `performance` 评估器给出的 TTFT 与总延迟。
+
 ## 目录结构
 
 ```
