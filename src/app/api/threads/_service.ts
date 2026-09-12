@@ -292,13 +292,21 @@ async function build(): Promise<ThreadService> {
 
   const client = new DeerFlowClient(defaultModelConfig, sharedClientOptions);
 
-  // 按模型名缓存 client，供 submitRun 在单次请求切换模型时复用（避免每请求新建丢失 agentCache）。
+  // 按模型配置签名缓存 client，供 submitRun 在单次请求切换模型时复用（避免每请求新建丢失 agentCache）。
+  //
+  // 缓存键必须是**完整 modelConfig 的签名**而不是 modelName：client 在构造时固化
+  // modelConfig（apiKey / baseUrl / supportsVision 都在里面），按名字缓存意味着
+  // ① 两个用户用同一模型会共用第一个用户的 client（**连带他的 API Key**）；
+  // ② 配置变化（如给预设补 supportsVision）后，同进程内的旧 client 永远不会刷新
+  //    —— dev 下 globalThis 单例跨 HMR 存活，改完预设不重启 dev 就会出现
+  //    「远端生效、本地不生效」的假象（实测踩过）。
   const clientByModel = new Map<string, DeerFlowClient>();
   const createClientForModel = (modelConfig: ModelConfig): DeerFlowClient => {
-    const cached = clientByModel.get(modelConfig.modelName);
+    const signature = JSON.stringify(modelConfig);
+    const cached = clientByModel.get(signature);
     if (cached) return cached;
     const next = new DeerFlowClient(modelConfig, sharedClientOptions);
-    clientByModel.set(modelConfig.modelName, next);
+    clientByModel.set(signature, next);
     return next;
   };
 
