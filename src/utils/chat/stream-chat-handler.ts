@@ -1,9 +1,16 @@
-import { ChatMessageType, ChatSessionType, ChatUploadedFileRef, MessagePart } from '@/types';
+import {
+  ChatMessageType,
+  ChatSessionType,
+  ChatUploadedFileRef,
+  MessagePart,
+  type MemoryInjectionMode,
+} from '@/types';
 import type { ModelPresetName } from '@/config/models';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
 import { buildAttachmentParts } from './attachment-parts';
+import { buildChatConfiguration } from './chat-configuration';
 import {
   appendStandaloneText,
   createPartsStateFromExisting,
@@ -29,6 +36,8 @@ export interface StreamChatConfig {
   isNewSession?: boolean;
   /** 已上传文件的元信息（前端上传后拿到，转成 message.contents 中的 file/image block，仅传 fileId） */
   uploadedFiles?: ChatUploadedFileRef[];
+  /** 记忆注入模式（用户偏好，见 /api/memory/mode）；缺省由后端按服务级默认 inject 处理。 */
+  memoryMode?: MemoryInjectionMode;
   chatSessions: ChatSessionType[];
   currentMessages: ChatMessageType[];
 
@@ -264,8 +273,13 @@ export class StreamChatHandler {
         requestBody.sessionId = this.sessionId;
       }
 
-      if (typeof this.config.model === 'string' && this.config.model.length > 0) {
-        requestBody.configuration = { model: { value: this.config.model } };
+      // configuration 一次性组装（model + memoryMode），避免多处赋值互相覆盖
+      const configuration = buildChatConfiguration({
+        model: this.config.model,
+        memoryMode: this.config.memoryMode,
+      });
+      if (Object.keys(configuration).length > 0) {
+        requestBody.configuration = configuration;
       }
 
       if (this.config.operation !== undefined) {

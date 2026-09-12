@@ -182,6 +182,18 @@ export type MessagePart =
 
 export type MessagePartType = MessagePart['type'];
 
+/**
+ * 记忆注入模式（请求体 `configuration.memoryMode` 的取值，前后端共享契约）：
+ * - `inject`（默认）：全量注入所有 section 与预算内 facts；
+ * - `retrieve`：按本轮用户输入检索 top-K 相关内容，注入体积更小。
+ *
+ * 放在 types 层（而非 store）是为了让请求构造侧不必依赖 zustand。
+ */
+export type MemoryInjectionMode = 'inject' | 'retrieve';
+
+export const isMemoryInjectionMode = (v: unknown): v is MemoryInjectionMode =>
+  v === 'inject' || v === 'retrieve';
+
 /** 渲染层用的派生 timeline step 子集（不含 text/file/image/artifact/tool_result） */
 export type TimelineStepPart = Extract<
   MessagePart,

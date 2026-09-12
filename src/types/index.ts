@@ -19,6 +19,7 @@ import type {
   UploadedFileStatus,
   UploadedFile,
   ChatUploadedFileRef,
+  MemoryInjectionMode,
   MessagePart,
   MessagePartType,
   TimelineStepPart,
@@ -37,6 +38,7 @@ import {
   isImagePart,
   isArtifactPart,
   isTaskSummaryPart,
+  isMemoryInjectionMode,
 } from './chat-info-define';
 
 //函数参数相关
@@ -57,6 +59,7 @@ export {
 export {
   ChatMessageType,
   ChatSessionType,
+  MemoryInjectionMode,
   fileMetadataType,
   UploadedFileStatus,
   UploadedFile,
@@ -79,6 +82,7 @@ export {
   isImagePart,
   isArtifactPart,
   isTaskSummaryPart,
+  isMemoryInjectionMode,
 };
 
 export { chatWithAgentProps, reChatWithAgentProps };

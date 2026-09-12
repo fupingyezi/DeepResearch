@@ -9,6 +9,7 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     resumeDecision,
     uploadedFiles,
     model,
+    memoryMode,
 
     // ConversationState 注入
     chatSessions,
@@ -52,6 +53,7 @@ export const chatWithAgent = async (params: chatWithAgentProps) => {
     setSessionAbortController,
     migrateSessionRuntime,
     model,
+    memoryMode,
   });
 
   await handler.execute();
