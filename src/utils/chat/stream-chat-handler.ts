@@ -3,6 +3,7 @@ import type { ModelPresetName } from '@/config/models';
 import { UUIDTypes, v4 as uuidv4 } from 'uuid';
 
 import { createAgentEventStream, ClientAgentEventType } from '@/runtime';
+import { buildAttachmentParts } from './attachment-parts';
 import {
   appendStandaloneText,
   createPartsStateFromExisting,
@@ -140,6 +141,7 @@ export class StreamChatHandler {
           createdAt: Date.now(),
           content: { text: this.config.inputValue },
         },
+        ...buildAttachmentParts(this.config.uploadedFiles),
       ],
       createdAt: Date.now(),
     };

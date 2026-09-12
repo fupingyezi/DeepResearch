@@ -18,7 +18,9 @@ export interface UploadedFile {
  * mimeType 用于前端区分 file/image content block。
  * 其余字段（minioKey/filename/sizeBytes 等）属实现细节，不进入参数边界。
  */
-export type ChatUploadedFileRef = Pick<UploadedFileInfo, 'fileId' | 'mimeType'>;
+export type ChatUploadedFileRef = Pick<UploadedFileInfo, 'fileId' | 'mimeType'> &
+  /** 展示用（气泡卡片要显示真实文件名/大小）；发请求时用不到，故可选。 */
+  Partial<Pick<UploadedFileInfo, 'filename' | 'sizeBytes'>>;
 
 /**
  * file_metadata 行的前端形态。
