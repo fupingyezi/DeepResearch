@@ -1,7 +1,7 @@
 export { DeerFlowClient } from './client';
 export { createChatModel } from './models';
 export { createBaseAgent } from './agents/factory';
-export { searchWebTool, taskTool, getAvailableTools } from './tools';
+export { searchWebTool, taskTool, viewImageTool, getAvailableTools } from './tools';
 export {
   SubagentExecutor,
   registerSubagent,

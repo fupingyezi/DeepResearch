@@ -10,10 +10,10 @@
  */
 
 import type { StructuredToolInterface } from '@langchain/core/tools';
-import { taskTool, searchWebTool } from './builtins';
+import { taskTool, searchWebTool, viewImageTool } from './builtins';
 import { SANDBOX_TOOLS } from '../sandbox';
 
-export { taskTool, askClarificationTool, searchWebTool } from './builtins';
+export { taskTool, askClarificationTool, searchWebTool, viewImageTool } from './builtins';
 export {
   SANDBOX_TOOLS,
   bashTool,
@@ -39,7 +39,7 @@ export interface GetAvailableToolsOptions {
  */
 function buildToolRegistry(): Map<string, StructuredToolInterface> {
   const registry = new Map<string, StructuredToolInterface>();
-  for (const t of [searchWebTool, taskTool, ...SANDBOX_TOOLS]) {
+  for (const t of [searchWebTool, taskTool, viewImageTool, ...SANDBOX_TOOLS]) {
     const name = (t as { name?: string }).name;
     if (!name) continue;
     registry.set(name, t as StructuredToolInterface);

@@ -142,4 +142,18 @@ describe('assembleFromFeatures —— vision（多模态）', () => {
     const { chain } = assembleFromFeatures(SUBAGENT_FEATURES, {});
     expect(chain.map((m) => m.name)).not.toContain('VisionMiddleware');
   });
+
+  it('features.vision=true 注入 view_image 工具；未启用不注入', () => {
+    expect(
+      toolNames(assembleFromFeatures({ ...DEFAULT_FEATURES, vision: true }, {}).extraTools),
+    ).toContain('view_image');
+    expect(toolNames(assembleFromFeatures(DEFAULT_FEATURES, {}).extraTools)).not.toContain(
+      'view_image',
+    );
+  });
+
+  it('subagent 拿不到 view_image（与压缩中间件同门，随 features.vision 走）', () => {
+    const { extraTools } = assembleFromFeatures(SUBAGENT_FEATURES, {});
+    expect(toolNames(extraTools)).not.toContain('view_image');
+  });
 });

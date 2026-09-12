@@ -11,7 +11,7 @@ import {
   type PositionedMiddleware,
 } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
-import { taskTool, SANDBOX_TOOLS } from '../tools';
+import { taskTool, SANDBOX_TOOLS, viewImageTool } from '../tools';
 import { visionMiddleware } from '../vision';
 import {
   toolCallIntegrityMiddleware,
@@ -226,6 +226,16 @@ export function assembleFromFeatures(
   // （subagents=false），此处不注入 task，构成防递归硬保证。
   if (subagentsEnabled) {
     extraTools.push(taskTool as StructuredToolInterface);
+  }
+
+  // view_image 工具随 features.vision 注入（与历史压缩中间件同门：模型能看图才有意义）。
+  // 判据与 pushFeature 一致：true=默认启用，对象=自定义实现也算启用。
+  // 子 agent 走 SUBAGENT_FEATURES（vision=false），故两者都拿不到。
+  if (
+    features.vision === true ||
+    (typeof features.vision === 'object' && features.vision !== null)
+  ) {
+    extraTools.push(viewImageTool as StructuredToolInterface);
   }
 
   // 自定义中间件：按 @Next/@Prev 锚点插入（无锚点 / 锚点未命中 → 追加到链尾）
