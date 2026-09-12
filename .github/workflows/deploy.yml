@@ -12,6 +12,14 @@ name: deploy
 on:
   push:
     branches: [main]
+    # 纯文档改动（全部改动都在忽略列表内）不触发任何 job —— 在触发层判断，GitHub 自己算，
+    # 不依赖 checkout 后的 git diff。本机构建会把构建缓存/镜像/日志压在同一块盘上，
+    # 改篇 README 也跑一次全量构建 + 重启 app 曾把整机（含 SSH）压死，详见
+    # docs/cicd-notes.md §11。注意：曾用过 dorny/paths-filter 在 job 内判定，
+    # 但浅克隆（fetch-depth: 1）下它在 push 事件算不出 diff，会退回「匹配」而失效。
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
     branches: [main]
 
@@ -24,21 +32,8 @@ jobs:
   # ── job1：质量门禁（本地钩子同款校验，标准一致）──
   quality:
     runs-on: ubuntu-latest
-    outputs:
-      # 'false' 表示本次改动只碰了文档，无需在生产机上重跑一次全量构建
-      code: ${{ steps.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Detect code changes
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            code:
-              - '**'
-              - '!**/*.md'
-              - '!docs/**'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -72,12 +67,7 @@ jobs:
   # ── job2：传源码到服务器，本地构建并部署（仅 push main，质量门禁通过后）──
   deploy:
     needs: quality
-    # 纯文档改动不部署：本机构建把构建缓存/镜像/日志都压在同一块盘上，改篇 README 也
-    # 跑一次全量构建 + 重启 app 是 2026-09 生产事故的直接诱因。写成 != 'false' 是刻意
-    # 的 fail-open —— 过滤器万一没产出结果，宁可部署，也不能让代码改动停在上不去。
-    if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.quality.outputs.code != 'false'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -402,17 +402,27 @@ pm2 stop all && pm2 delete all && pm2 kill   # delete 防止开机 resurrect
 
 **加固**（逐条对应上面的成因）：
 
-| 层       | 改动                                                                                                                                                                                  |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 触发     | workflow 加 `dorny/paths-filter`：改动只含 `**.md` / `docs/**` 时 `deploy` 直接 skipped。写成 `!= 'false'` 是刻意 fail-open —— 过滤器没产出结果时宁可部署，也不能让代码改动停在上不去 |
-| 构建内存 | Dockerfile builder 阶段 `NODE_OPTIONS=--max-old-space-size=2048`：构建真超内存会以明确的 heap OOM 失败，而不是拖死同机服务                                                            |
-| 磁盘守卫 | `deploy-remote.sh` 构建前检查根分区可用空间（默认 <3G 先自动清构建缓存，仍不足则快速失败并给出清理指引）                                                                              |
-| 磁盘回收 | 部署成功后 `docker builder prune --keep-storage 2GB` + 镜像只留最近 3 个版本（回滚只需上一版）                                                                                        |
-| 日志     | prod compose 统一 `logging: json-file + max-size 10m + max-file 3`                                                                                                                    |
+| 层       | 改动                                                                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 触发     | `on.push.paths-ignore: ['**.md', 'docs/**']`：改动全部落在忽略列表内时**整条流水线不触发**（GitHub 在触发层判定，不依赖 checkout 与 git 历史） |
+| 构建内存 | Dockerfile builder 阶段 `NODE_OPTIONS=--max-old-space-size=2048`：构建真超内存会以明确的 heap OOM 失败，而不是拖死同机服务                     |
+| 磁盘守卫 | `deploy-remote.sh` 构建前检查根分区可用空间（默认 <3G 先自动清构建缓存，仍不足则快速失败并给出清理指引）                                       |
+| 磁盘回收 | 部署成功后 `docker builder prune --keep-storage 2GB` + 镜像只留最近 3 个版本（回滚只需上一版）                                                 |
+| 日志     | prod compose 统一 `logging: json-file + max-size 10m + max-file 3`                                                                             |
 
 **教训**：把「触发条件的粒度」和「资源边界」写进代码 —— 靠人记得「改文档别推 main」是靠不住的；
 同理，任何「在同一台机器上做重活」的设计都必须有硬上限（内存 / 磁盘 / 保留数量），
 否则第一次撞上就是整机级别的故障。
+
+**加固本身的踩坑（第二层）**：第一版把过滤写成 job 内的 `dorny/paths-filter@v3`，
+并刻意 fail-open（`code != 'false'` 才部署）。结果下一个纯文档 push **照样跑了部署**——
+`actions/checkout@v4` 默认 `fetch-depth: 1`，浅克隆里算不出 `before..sha` 的 diff，
+paths-filter 拿不到改动清单就退回了「匹配」。教训有两条：
+
+1. 「什么时候该触发」这类判断放在**触发层**（`on.push.paths-ignore`）最可靠 —— GitHub
+   自己掌握改动清单，不依赖仓库被 checkout 成什么样；
+2. fail-open 的方向对（宁可多部署也不能让代码改动上不去），**但它让过滤器失效时没有任何
+   信号** —— 所以更要选一个不容易失效的实现，而不是靠兜底掩盖。
 
 ---
 
