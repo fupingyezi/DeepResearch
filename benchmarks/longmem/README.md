@@ -27,7 +27,7 @@ cp benchmarks/.env.example benchmarks/.env.local
 ```bash
 # 从项目根目录执行
 
-# 运行全部 500 条问题（S版，~115k tokens 历史）
+# 运行全部 500 条问题（S版；注意历史会被截断，见下方说明）
 pnpm bench:longmem
 
 # 或通过 research-qa/run.ts 路由
@@ -65,6 +65,19 @@ pnpm bench:longmem -- --output benchmarks/results/longmem/my-test.json
 # 并发控制（默认 2）
 pnpm bench:longmem -- --concurrency 1
 ```
+
+## ⚠️ S 变体的历史会被截断（accuracy 不能与官方榜对比）
+
+`dataset.ts` 把每条消息超过 **500 字符**的部分截断（注释写明是「控制 token 消耗」）。
+实测第一条 S 题：原始历史 485,494 字符 → 截断后 183,806 字符（**压掉 62%**），
+粗估 ~45,951 token 与「agent 实测平均输入 46,158 token」吻合 —— 即模型实际只看到
+约 4.6 万 token，而不是数据集标称的 ~115k。
+
+LongMemEval 的难点正是长上下文检索，砍掉六成证据文本会显著降低难度。因此：
+
+- 这里的 accuracy 只能用于**自己前后版本的相对比较**，不能与官方 leaderboard 对齐。
+- 需要对齐官方口径时，把 `dataset.ts` 的 500 字符上限调大或去掉（成本会按比例上升：
+  不截断时每题输入约 12 万 token，约为当前的 2.6 倍）。
 
 ## 两种评测模式：PREFIX vs INGEST
 
