@@ -87,6 +87,7 @@ export {
 } from './queue';
 
 import { getMemoryConfig as _gmc } from './config';
+import { backfillFactEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
 import { retrieveMemory } from './retrieval';
@@ -123,7 +124,24 @@ export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): 
     // retrieve 模式：先按 query 收敛出相关子集，再用更小的预算格式化。
     // 检索无命中（或 query 为空）时不注入，避免无关记忆干扰模型。
     if (opts.mode === 'retrieve') {
-      const picked = retrieveMemory(data, opts.query ?? '', { topK: config.retrieveTopK });
+      // 语义检索：query 一次性向量化（无 Key / 失败 → null，回落纯词面）；
+      // 顺手 fire-and-forget 回填缺失向量的旧数据（内部 in-flight 去重，
+      // 不阻塞本次检索）。
+      let queryEmbedding: number[] | null = null;
+      if (config.embeddingEnabled) {
+        queryEmbedding = await _embedQuery(opts.query ?? '');
+        if (queryEmbedding && config.embeddingBackfillOnLoad) {
+          void _backfill({
+            agentName: opts.agentName ?? null,
+            userId: opts.userId ?? null,
+          });
+        }
+      }
+      const picked = retrieveMemory(data, opts.query ?? '', {
+        topK: config.retrieveTopK,
+        queryEmbedding,
+        hybridWeight: config.embeddingHybridWeight,
+      });
       if (!picked) return '';
       const pickedText = _fmt(picked, config.retrieveMaxTokens);
       if (!pickedText.trim()) return '';

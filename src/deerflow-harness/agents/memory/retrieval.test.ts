@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Fact, MemoryData } from './types';
 import { overlapRatio, retrieveMemory, scoreFact, tokenize } from './retrieval';
 
-function fact(content: string, confidence = 0.9, id = content): Fact {
+function fact(content: string, confidence = 0.9, id = content, embedding?: number[]): Fact {
   return {
     id,
     content,
@@ -11,6 +11,7 @@ function fact(content: string, confidence = 0.9, id = content): Fact {
     confidence,
     createdAt: '2026-01-01T00:00:00.000Z',
     source: 'test',
+    ...(embedding ? { embedding } : {}),
   };
 }
 
@@ -170,5 +171,62 @@ describe('retrieveMemory', () => {
     expect(picked.version).toBe('1.0');
     expect(picked.lastUpdated).toBe(data.lastUpdated);
     expect(Array.isArray(picked.facts)).toBe(true);
+  });
+});
+
+describe('retrieveMemory 混合打分（queryEmbedding）', () => {
+  const QUERY_VEC = [1, 0, 0, 0];
+
+  it('语义相关但词面不重叠的 fact 排到词面命中之上', () => {
+    const hybrid = memory([
+      fact('用户喜欢烘焙面包', 0.9, 'fact_semantic', QUERY_VEC), // 词面 0 分，语义 1.0
+      fact('用户正在研究量子计算', 0.9, 'fact_lexical'), // 词面部分命中，无向量
+    ]);
+    const picked = retrieveMemory(hybrid, '量子计算有什么进展', {
+      queryEmbedding: QUERY_VEC,
+    });
+    expect(picked).not.toBeNull();
+    expect(picked!.facts[0].id).toBe('fact_semantic'); // 0.7×1.0 > 0.3×词面
+
+    // 不给向量时语义 fact 无词面信号，不应入选（回归对照）
+    const lexicalOnly = retrieveMemory(hybrid, '量子计算有什么进展');
+    expect(lexicalOnly!.facts.map((f) => f.id)).toEqual(['fact_lexical']);
+  });
+
+  it('无向量的 fact 在向量供给时与纯词面行为一致（不被惩罚）', () => {
+    const f = fact('量子计算研究', 0.9);
+    const tokens = new Set(tokenize('量子计算'));
+    const withVec = scoreFact(f, tokens, QUERY_VEC);
+    const withoutVec = scoreFact(f, tokens);
+    expect(withVec).toBe(withoutVec);
+  });
+
+  it('维度不匹配的向量被忽略（回落词面）', () => {
+    const f = fact('量子计算研究', 0.9, 'f', [1, 0, 0]); // 3 维 vs query 4 维
+    const tokens = new Set(tokenize('量子计算'));
+    expect(scoreFact(f, tokens, QUERY_VEC)).toBe(scoreFact(f, tokens));
+  });
+
+  it('query 无有效 token 但有向量时不早退', () => {
+    const onlySemantic = memory([fact('用户偏爱简洁的代码风格', 0.9, 'f', QUERY_VEC)]);
+    const picked = retrieveMemory(onlySemantic, '', { queryEmbedding: QUERY_VEC });
+    expect(picked).not.toBeNull();
+    expect(picked!.facts[0].id).toBe('f');
+    // 无向量时空 query 仍返回 null（回归对照）
+    expect(retrieveMemory(onlySemantic, '')).toBeNull();
+  });
+
+  it('余弦低于语义地板（0.35）不参与混合，弱相关不灌入 topK', () => {
+    // 与 QUERY_VEC 余弦恰为 0.3 的单位向量：[3, sqrt(91), 0, 0]/10
+    const weak = [3 / 10, Math.sqrt(91) / 10, 0, 0];
+    const noise = memory([fact('完全无关的内容', 0.9, 'f', weak)]);
+    expect(retrieveMemory(noise, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+  });
+
+  it('置信度加权仍作用在最外层（同向量同文本）', () => {
+    const tokens = new Set(tokenize('量子计算'));
+    const high = scoreFact(fact('量子计算', 1.0, 'h', QUERY_VEC), tokens, QUERY_VEC);
+    const low = scoreFact(fact('量子计算', 0.5, 'l', QUERY_VEC), tokens, QUERY_VEC);
+    expect(high).toBeGreaterThan(low);
   });
 });

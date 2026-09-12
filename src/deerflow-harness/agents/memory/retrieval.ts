@@ -1,15 +1,18 @@
 /**
- * 记忆检索（轻量关键词打分，零外部依赖）
+ * 记忆检索（词面打分 + 可选语义向量混合）
  *
  * 与「全量注入」互补的第二种记忆使用模式：按当前用户输入检索出相关度最高的
  * 少量 facts 与 section，用更小的 token 预算注入 system prompt。
  *
- * 定位说明：这是**词面**相关性（词重叠 + 置信度加权），不是语义检索
- * （无 embedding / 向量库）。词面信号在「用户提到记忆中已有的实体名」这类
- * 场景最有效，对同义改写无能为力；因此检索模式只作为可选模式，默认仍是
- * 全量注入（inject）。
+ * 打分模型：fact 得分 = 混合相关性 × 置信度加权，其中
+ * - 词面分量：query token 重叠率（对「提到记忆中已有实体名」最有效）；
+ * - 语义分量：query 向量与 fact.embedding 的余弦相似度（对同义改写有效），
+ *   仅当 fact 有维度匹配的向量且余弦 ≥ SEMANTIC_MATCH_THRESHOLD 时参与混合
+ *   （未达标视为语义不相关，回落纯词面，防止弱相关噪声灌满 topK）。
+ * 无向量 / 无 Key / API 失败时 queryEmbedding 为 null，行为与纯词面完全一致。
  */
 
+import { cosineSimilarity, isCompatibleVector } from './embeddings';
 import type { Fact, MemoryData, SectionData } from './types';
 
 export interface RetrievalOptions {
@@ -17,10 +20,20 @@ export interface RetrievalOptions {
   topK?: number;
   /** 保留 section 的最低得分（默认 0.05）。 */
   minScore?: number;
+  /** query 的语义向量（buildMemoryContext 一次性向量化；null/缺省 = 纯词面）。 */
+  queryEmbedding?: number[] | null;
+  /** 混合分中余弦相似度权重，0..1（默认 0.7，与 MemoryConfig 默认一致）。 */
+  hybridWeight?: number;
 }
 
 const DEFAULT_TOP_K = 8;
 const DEFAULT_MIN_SCORE = 0.05;
+const DEFAULT_HYBRID_WEIGHT = 0.7;
+/**
+ * 语义分量参与混合的余弦下限（embedding-3 经验值：同文本 ≈ 1.0，相关 ≈ 0.5+，
+ * 无关 ≈ 0.2~0.35）。低于该值视为语义不相关，回落纯词面打分。
+ */
+const SEMANTIC_MATCH_THRESHOLD = 0.35;
 
 /** 中英停用词（只列高频虚词，避免把「的/了/the/a」当有效信号）。 */
 const STOP_WORDS = new Set([
@@ -139,14 +152,32 @@ export function overlapRatio(text: string, queryTokens: Set<string>): number {
 }
 
 /**
- * fact 得分 = 重叠率 × 置信度加权（0.5 + 0.5 × confidence）。
+ * fact 得分 = 混合相关性 × 置信度加权（0.5 + 0.5 × confidence）。
  * 置信度只做加权不做门槛：低置信但高度相关的 fact 仍可能入选。
+ *
+ * 混合相关性：fact 有维度匹配的向量且余弦 ≥ SEMANTIC_MATCH_THRESHOLD 时取
+ * `w × 余弦 + (1-w) × 重叠率`（w = hybridWeight），否则退回纯重叠率——
+ * 老数据（无向量）/ 维度失效 / 语义不相关都以词面分顶替，不被系统性压低。
  */
-export function scoreFact(fact: Fact, queryTokens: Set<string>): number {
+export function scoreFact(
+  fact: Fact,
+  queryTokens: Set<string>,
+  queryEmbedding?: number[] | null,
+  hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
+): number {
   const confidence = Number.isFinite(fact.confidence)
     ? Math.max(0, Math.min(1, fact.confidence))
     : 0;
-  return overlapRatio(fact.content, queryTokens) * (0.5 + 0.5 * confidence);
+  const lexical = overlapRatio(fact.content, queryTokens);
+
+  let semantic: number | null = null;
+  if (queryEmbedding && isCompatibleVector(fact.embedding, queryEmbedding.length)) {
+    const cosine = cosineSimilarity(fact.embedding, queryEmbedding);
+    if (cosine >= SEMANTIC_MATCH_THRESHOLD) semantic = cosine;
+  }
+
+  const base = semantic != null ? hybridWeight * semantic + (1 - hybridWeight) * lexical : lexical;
+  return base * (0.5 + 0.5 * confidence);
 }
 
 /**
@@ -167,13 +198,16 @@ export function retrieveMemory(
   if (!data) return null;
 
   const queryTokens = new Set(tokenize(query));
-  if (queryTokens.size === 0) return null;
+  // 纯图 / 纯 OCR 场景可能没有有效 token，但有语义向量时仍可检索
+  if (queryTokens.size === 0 && !options?.queryEmbedding) return null;
 
   const topK = Math.max(1, options?.topK ?? DEFAULT_TOP_K);
   const minScore = options?.minScore ?? DEFAULT_MIN_SCORE;
+  const queryEmbedding = options?.queryEmbedding ?? null;
+  const hybridWeight = options?.hybridWeight ?? DEFAULT_HYBRID_WEIGHT;
 
   const scoredFacts = (data.facts ?? [])
-    .map((fact) => ({ fact, score: scoreFact(fact, queryTokens) }))
+    .map((fact) => ({ fact, score: scoreFact(fact, queryTokens, queryEmbedding, hybridWeight) }))
     .filter((entry) => entry.score > minScore)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
