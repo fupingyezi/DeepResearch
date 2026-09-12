@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import { getMemoryConfig } from './config';
+import { embedQuery, embedTexts, isCompatibleVector } from './embeddings';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
 import { createEmptyMemory, Fact, FactCategory, MemoryData, utcNowIsoZ } from './types';
@@ -83,6 +84,41 @@ function newFactId(): string {
   return 'fact_' + randomUUID().replace(/-/g, '').slice(0, 8);
 }
 
+/**
+ * 为 facts 中缺失 / 维度失效的条目批量生成向量（≤ ceil(n/64) 次请求）。
+ * 嵌入失败（稀疏 null）时保持无向量原样返回，交由检索侧回填重试。
+ * 注意：以整槽替换（不 mutate 元素）写入，避免触碰 storage 缓存里的原对象。
+ */
+async function embedMissingFacts(data: MemoryData): Promise<void> {
+  const config = getMemoryConfig();
+  if (!config.embeddingEnabled) return;
+  const idx: number[] = [];
+  data.facts.forEach((f, i) => {
+    if (!isCompatibleVector(f.embedding, config.embeddingDimensions)) idx.push(i);
+  });
+  if (idx.length === 0) return;
+  const vectors = await embedTexts(idx.map((i) => data.facts[i].content));
+  idx.forEach((i, k) => {
+    if (vectors[k] != null) data.facts[i] = { ...data.facts[i], embedding: vectors[k]! };
+  });
+}
+
+/**
+ * 构造 LLM 更新 prompt 前剥离 fact 的 embedding 向量：
+ * 100 条 facts × 1024 维浮点会把 prompt 撑到 MB 级，直接不可用。
+ */
+function sanitizeMemoryForPrompt(memory: MemoryData): MemoryData {
+  if (!memory.facts?.length) return memory;
+  return {
+    ...memory,
+    facts: memory.facts.map((f) => {
+      if (f.embedding == null) return f;
+      const { embedding: _embedding, ...rest } = f;
+      return rest;
+    }),
+  };
+}
+
 export async function createMemoryFact(
   content: string,
   category: FactCategory | string = 'context',
@@ -98,14 +134,20 @@ export async function createMemoryFact(
 
   const data = await getMemoryData(agentName, userId);
   const updated: MemoryData = { ...data, facts: [...data.facts] };
-  updated.facts.push({
+  const entry: Fact = {
     id: newFactId(),
     content: normalized,
     category: cat,
     confidence: conf,
     createdAt: utcNowIsoZ(),
     source: 'manual',
-  });
+  };
+  // 顺手生成语义向量（失败不阻塞创建，交由回填重试）
+  if (getMemoryConfig().embeddingEnabled) {
+    const vector = await embedQuery(normalized);
+    if (vector) entry.embedding = vector;
+  }
+  updated.facts.push(entry);
   const ok = await getMemoryStorage().save(updated, { agentName, userId });
   if (!ok) throw new Error('Failed to save memory data after creating fact');
   return updated;
@@ -134,6 +176,7 @@ export async function updateMemoryFact(
   const data = await getMemoryData(agentName, userId);
   const next: Fact[] = [];
   let found = false;
+  let contentChanged = false;
   for (const f of data.facts) {
     if (f.id !== factId) {
       next.push(f);
@@ -144,7 +187,9 @@ export async function updateMemoryFact(
     if (patch.content != null) {
       const c = String(patch.content).trim();
       if (!c) throw new Error('content must be non-empty');
+      if (c !== u.content) contentChanged = true;
       u.content = c;
+      delete u.embedding; // 旧向量对新 content 失效
     }
     if (patch.category != null) {
       u.category = (String(patch.category).trim() || 'context') as FactCategory;
@@ -155,6 +200,14 @@ export async function updateMemoryFact(
     next.push(u);
   }
   if (!found) throw new Error(`fact not found: ${factId}`);
+  // content 变更后重新向量化（失败保持无向量，交由回填重试）
+  if (contentChanged && getMemoryConfig().embeddingEnabled) {
+    const target = next.find((f) => f.id === factId);
+    if (target) {
+      const vector = await embedQuery(target.content);
+      if (vector) target.embedding = vector;
+    }
+  }
   const updated: MemoryData = { ...data, facts: next };
   const ok = await getMemoryStorage().save(updated, { agentName, userId });
   if (!ok) throw new Error(`Failed to save memory after updating fact ${factId}`);
@@ -371,10 +424,11 @@ export class MemoryUpdater {
         Boolean(opts.reinforcementDetected),
       );
 
-      // 用占位符直接 replace，避免 JS 模板字符串语义冲突
+      // 用占位符直接 replace，避免 JS 模板字符串语义冲突；
+      // current 先剥离 embedding 向量（防 MB 级 prompt，见 sanitizeMemoryForPrompt）
       const prompt = MEMORY_UPDATE_PROMPT.replace(
         '{current_memory}',
-        JSON.stringify(current, null, 2),
+        JSON.stringify(sanitizeMemoryForPrompt(current), null, 2),
       )
         .replace('{conversation}', conversation)
         .replace('{correction_hint}', correctionHint);
@@ -435,6 +489,8 @@ export class MemoryUpdater {
 
       let updated = applyUpdates(current, parsed, opts.threadId ?? null);
       updated = stripUploadMentions(updated);
+      // 新增 / 保留的 facts 批量补齐向量后落盘（失败照常 save，等检索侧回填）
+      await embedMissingFacts(updated);
 
       return await getMemoryStorage().save(updated, { agentName, userId });
     } catch (e) {
