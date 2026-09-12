@@ -1,5 +1,6 @@
 import { ModelConfig, ModelProvider } from '../types';
 import { ChatOpenAI } from '@langchain/openai';
+import { UsageRecordingHandler } from '../runtime/usage-accounting';
 
 /** 根据 baseUrl / modelName 推断 provider，config.provider 优先级最高 */
 export function inferProvider(config: ModelConfig): ModelProvider {
@@ -50,7 +51,8 @@ export function createChatModel(config: ModelConfig) {
         `boundary). Falling back to env default model.`,
     );
   }
-  const modelName = rawModelName && !isInheritPlaceholder ? rawModelName : 'deepseek-chat';
+  // 兜底模型名用官方名：deepseek-chat 已不在 GET /models 清单内（旧兼容名）。
+  const modelName = rawModelName && !isInheritPlaceholder ? rawModelName : 'deepseek-flash';
   const temperature = config?.temperature ?? 0.7;
 
   const topP = config?.topP ?? (provider === 'qwen' ? 0.8 : 0.9);
@@ -77,6 +79,10 @@ export function createChatModel(config: ModelConfig) {
     temperature,
     topP,
     maxTokens,
+    // 用量记账（见 runtime/usage-accounting.ts）：这是 lead 与 subagent 唯一的模型工厂，
+    // 一处挂载即可覆盖两者以及中间件自身的 LLM 调用。handler 在**调用时**才经 ALS 解析
+    // 累加器，产品路径没有记账作用域 → no-op，故 agent 实例跨 run 复用也不会串账。
+    callbacks: [new UsageRecordingHandler(modelName)],
   };
   if (frequencyPenalty !== 0) modelOpts.frequencyPenalty = frequencyPenalty;
   if (presencePenalty !== 0) modelOpts.presencePenalty = presencePenalty;

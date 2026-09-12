@@ -39,21 +39,27 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     key: 'deepseek-v4-flash',
     label: 'DeepSeek v4 Flash',
     provider: 'deepseek',
-    modelName: 'deepseek-chat',
-    description: 'DeepSeek 通用对话模型（deepseek-chat），支持图片理解',
-    // 实测（2026-09，8x8 纯色 PNG 经 image_url 直答颜色）：deepseek-chat 接受
-    // 多模态输入。漏标此字段时图片像素根本不会发给模型，只能靠 OCR 文本兜底。
+    // 预置 key 保留旧名（selectedModel 落库，改名会让存量用户回落 NO_MODEL），
+    // 但发给 API 的 modelName 必须是官方名：GET /models 只返回 deepseek-flash
+    // 与 deepseek-v4-pro，deepseek-chat / deepseek-reasoner 已不在清单内。
+    modelName: 'deepseek-flash',
+    description: 'DeepSeek V4.1 Flash，支持图片理解',
+    // 实测（2026-09，8x8 纯色 PNG 经 image_url 直答颜色）：deepseek-flash 答出
+    // 「红色」。漏标此字段时图片像素根本不会发给模型，只能靠 OCR 文本兜底。
     supportsVision: true,
   },
   'deepseek-v4-pro': {
     key: 'deepseek-v4-pro',
     label: 'DeepSeek v4 Pro',
     provider: 'deepseek',
-    modelName: 'deepseek-reasoner',
-    description: 'DeepSeek 推理模型（deepseek-reasoner），支持图片理解',
-    // 同上实测通过（注意推理模型的 reasoning 计入 completion_tokens，
-    // 小 max_tokens 下 content 会为空 —— 见 CLAUDE.md 已知限制）
-    supportsVision: true,
+    modelName: 'deepseek-v4-pro',
+    description: 'DeepSeek V4 Pro 推理模型',
+    // 不能标 supportsVision：同一张 8x8 纯色 PNG，deepseek-v4-pro 返回 HTTP 200
+    // 但 reasoning 里明确写「图片是 unsupported image，无法查看」，content 为
+    // 「无法确定」—— 是静默降级而非报错，标了会让用户以为图发出去了。官方定价页
+    // 「图像理解」一栏对 V4-Pro 也是「不支持」。
+    // 另注：思考模式的 reasoning 计入 completion_tokens，小 max_tokens 下
+    // content 会为空 —— 见 CLAUDE.md 已知限制。
   },
   'openai-4o': {
     key: 'openai-4o',

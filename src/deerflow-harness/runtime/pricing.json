@@ -1,0 +1,24 @@
+{
+  "asOf": "2026-09-12",
+  "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+  "currency": "CNY",
+  "unit": "元 / 1M tokens",
+  "peakWindow": {
+    "timeZone": "Asia/Shanghai",
+    "weekdays": [1, 2, 3, 4, 5],
+    "ranges": [
+      ["09:00", "12:00"],
+      ["14:00", "18:00"]
+    ]
+  },
+  "models": {
+    "deepseek-flash": {
+      "offPeak": { "cacheHit": 0.02, "cacheMiss": 1, "output": 4 },
+      "peak": { "cacheHit": 0.04, "cacheMiss": 2, "output": 8 }
+    },
+    "deepseek-v4-pro": {
+      "offPeak": { "cacheHit": 0.15, "cacheMiss": 4.5, "output": 13.5 },
+      "peak": { "cacheHit": 0.3, "cacheMiss": 9, "output": 27 }
+    }
+  }
+}
