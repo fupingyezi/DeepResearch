@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClient, query } from '@/lib';
 import { getCurrentUser } from '../../auth/_helpers';
+import { getThreadService } from '../../threads/_service';
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -49,6 +50,28 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * 清理与 thread_id 同 id 的 agent 侧数据（threads_meta / runs / LangGraph checkpoint /
+ * 沙箱容器）。
+ *
+ * 复用 ThreadService.deleteThread —— 它已封装「meta 删除 + 沙箱释放 + checkpoint 清理」
+ * 三步与各自的容错，保持「删 thread」只有一份实现。
+ *
+ * 尽力而为：thread 记录本就不存在（老会话）时 store 的 assertOwner 会抛 FORBIDDEN，
+ * 那属于「没什么可清」的正常情况；任何失败都只告警，不影响删除结果。
+ */
+async function cleanupAgentSideData(threadId: string, userId: string): Promise<void> {
+  try {
+    const threadService = await getThreadService();
+    await threadService.deleteThread({ thread_id: threadId, user_id: userId });
+  } catch (error) {
+    console.warn(
+      `[DELETE session] agent-side cleanup failed for ${threadId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 export async function DELETE(request: NextRequest) {
   const user = await getCurrentUser(request);
   if (!user) {
@@ -63,6 +86,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const client = await getClient();
+    let deletedSession: Record<string, unknown>;
     try {
       await client.query('begin');
 
@@ -86,15 +110,7 @@ export async function DELETE(request: NextRequest) {
       }
 
       await client.query('commit');
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: 'Session and all related data deleted successfully',
-          deletedSession: deleteSessionResult.rows[0],
-        },
-        { status: 200 },
-      );
+      deletedSession = deleteSessionResult.rows[0];
     } catch (dbError) {
       await client.query('rollback');
       console.error('Database transaction failed:', dbError);
@@ -108,6 +124,24 @@ export async function DELETE(request: NextRequest) {
     } finally {
       client.release();
     }
+
+    // chat_session / chat_message 已删（同一 id 即 thread_id）。agent 侧那套数据不在
+    // 这个事务管辖内，删完再单独收尾 —— 否则 conversation 从侧栏消失了，threads_meta、
+    // runs 与完整对话 checkpoint 却永久留在库里。
+    //
+    // 残留说明：若该对话的 run 此刻仍在后台跑（run 是 fire-and-forget，没有服务端取消
+    // 接口），它还会继续为这个 thread 写 checkpoint，直到自己结束 —— 残留量被限制在
+    // 「这一轮 run 的 checkpoint」内，而非此前的整段对话历史。
+    await cleanupAgentSideData(sessionId, user.id);
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Session and all related data deleted successfully',
+        deletedSession,
+      },
+      { status: 200 },
+    );
   } catch (error) {
     console.error('Delete session error:', error);
     return NextResponse.json(

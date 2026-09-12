@@ -138,16 +138,18 @@ const useChatSessionStore = create<ChatSessionState>()(
           );
           return { chatSessions: [chatSession, ...otherSessions] };
         } else if (op === 'delete') {
-          const filteredSessions = state.chatSessions.filter(
+          state.chatSessions = state.chatSessions.filter(
             (session) => session.id !== chatSession.id,
           );
 
-          let newcurrentSessionId = state.currentSessionId;
-          let newCurrentMessages: ChatMessageType[] = state.currentMessages;
-
+          // 被删的正是当前对话时，投影（含运行态）必须一起归零：桶已删，再没有任何
+          // 路径会把 isChating 写回，留着 true 会让输入框永远卡在「停止」按钮上
+          // （chat-input 据此渲染），直到用户手动点停止或切走再切回。
           if (state.currentSessionId === chatSession.id) {
-            newcurrentSessionId = '';
-            newCurrentMessages = [];
+            state.currentSessionId = '';
+            state.currentMessages = [];
+            state.isChating = false;
+            state.currentAbortController = null;
           }
 
           // 删除对话时清理其运行桶（中止其可能仍在跑的 run）。
@@ -155,11 +157,11 @@ const useChatSessionStore = create<ChatSessionState>()(
           if (runtime?.abortController) runtime.abortController.abort();
           delete state.sessionRuntimes[String(chatSession.id)];
 
-          return {
-            chatSessions: filteredSessions,
-            currentSessionId: newcurrentSessionId,
-            currentMessages: newCurrentMessages,
-          };
+          // 本分支**只能改 draft、不能 return 新对象**：immer 禁止「既修改 draft 又
+          // 返回新值」（produce 会把 return 值当成整份新 state，二者只能有一个）。
+          // 之前这里两者都做了，导致删除一执行就抛 Immer 错误 —— 请求成功、列表却
+          // 纹丝不动。见 chat-session-store.test.ts。
+          return;
         }
         return {};
       }),
