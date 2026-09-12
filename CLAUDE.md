@@ -598,6 +598,12 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
   退回词面检索且毫无报错。`embeddings.ts` 的维度守卫会识别这种长度不符并告警一次
 - 语义阈值 `SEMANTIC_MATCH_THRESHOLD = 0.6` 系实测标定：embedding-3 中文短文本的**无关基线**
   就在 0.44~0.55，真相关 0.64~0.69，阈值须落在两者之间（详见 `retrieval.ts` 注释）
+- **记忆与提问须同语言**：embedding-3 的跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 只有
+  0.33~0.49，全部低于阈值 → 语义检索静默退化为纯词面）。故 `MEMORY_UPDATE_PROMPT` 明确要求
+  **用用户对话的语言写 summary 与 facts**（专有名词/技术术语保留原文）。存量英文 facts 随
+  updater 改写自然演进，不做一次性迁移
+- 观察入口：`GET /api/memory/retrieve?q=<query>`（逐条 fact 的词面/余弦/是否过阈值/得分/是否入选
+  - 最终注入文本），走与真实注入同一段代码
 - 单请求 64 条上限，`embedTexts` 手动分批串行；`Fact.embedding` 随 memory.json 落盘
 - 旧数据回填：`backfillFactEmbeddings` 补缺失 / 维度不匹配的向量，进程内按存储键去重，
   save 前 reload 并只合并「仍存在且 content 未变」的 fact

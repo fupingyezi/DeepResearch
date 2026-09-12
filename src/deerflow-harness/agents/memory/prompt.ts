@@ -74,6 +74,12 @@ Memory Section Guidelines:
 - longTermBackground: Unchanging foundational facts about the user
 
 **Multilingual Content**:
+- **Write every summary and fact in the language the user uses in the conversation** —
+  a Chinese conversation yields Chinese memory, an English one yields English memory.
+  Rationale: the user reads this memory themselves, and the retrieval mode embeds the
+  latest user message as the query — semantic matching only works when the memory and
+  the question share a language (cross-language cosine stays far below the match
+  threshold).
 - Preserve original language for proper nouns and company names
 - Keep technical terms in their original form (DeepSeek, LangGraph, etc.)
 - Note language capabilities in personalContext
