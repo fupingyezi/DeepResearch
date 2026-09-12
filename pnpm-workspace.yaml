@@ -1,14 +1,25 @@
 # pnpm 配置（pnpm 10+ 把部分设置从 package.json 移到这里）。
 #
 # 关于 allowBuilds：pnpm 11 默认不跑依赖的构建脚本，且**把「存在被忽略的构建脚本」
-# 当成非零退出** —— 这会让 `pnpm install` 与 `pnpm run <script>`（运行前的依赖检查）
-# 直接失败。这里逐项显式声明为 false（= 不需要跑），既清掉那个错误、又保持不执行
-# 第三方 postinstall 的默认安全姿态：
-#   - esbuild / unrs-resolver：通过各自平台的 optional 依赖提供二进制，不跑脚本也能用
-#     （tsx 依赖 esbuild，已实测 `tsx --version` 与脚本执行均正常）
-#   - core-js：其 postinstall 只打印赞助信息，对构建无影响
-# 若将来某个依赖确实需要 postinstall，把它改成 true。
+# 当成非零退出**（strictDepBuilds 默认为真）—— 这会让 `pnpm install` 与
+# `pnpm run <script>`（运行前的依赖检查）直接失败。
+#
+# 这里逐项显式声明为 false（= 确认不需要跑），既清掉那个错误、又保持不执行第三方
+# postinstall 的安全姿态。**这份列表必须按「全新安装」来维护**：本地已装过的环境不会
+# 报出全部被忽略项 —— 2026-09 就因此漏了 cpu-features/ssh2，本地全绿而 CI 红在 install。
+# 新增依赖后请用干净目录验证：见文件末尾注释。
 allowBuilds:
-  core-js: false
+  # 通过各自平台的 optional 依赖提供二进制，不跑脚本也能用（tsx 依赖 esbuild，实测正常）
   esbuild: false
   unrs-resolver: false
+  # postinstall 只打印赞助信息，对构建无影响
+  core-js: false
+  # ssh2 的原生加密绑定是**可选**的：lib/protocol/crypto.js 用 try { require('...sshcrypto.node') }
+  # catch {} 包着，缺失时走纯 JS 实现（本机从未构建该 .node 文件，功能一直正常）
+  ssh2: false
+  # cpu-features 是 ssh2 的 optionalDependency，仅供其探测 CPU 特性
+  cpu-features: false
+#
+# 验证方式（不要只看本地，本地可能已装过）：
+#   git clone . /tmp/ci-verify && cp pnpm-workspace.yaml /tmp/ci-verify/ \
+#     && cd /tmp/ci-verify && pnpm install --frozen-lockfile   # 期望 exit 0 且无 ERR_PNPM_IGNORED_BUILDS
