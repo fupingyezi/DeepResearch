@@ -4,7 +4,12 @@ import { ChatLayoutProps, ChatWindowProps } from '@/types';
 import React, { useCallback, useEffect } from 'react';
 import ChatMessage from './chat-message';
 import ChatInput from './chat-input';
-import { useConversationStore, useFileUploadStore, useModelStore } from '@/store';
+import {
+  useConversationStore,
+  useFileUploadStore,
+  useMemoryModeStore,
+  useModelStore,
+} from '@/store';
 import { useModelConfigStatus } from '@/hooks';
 import { chatWithAgent } from '@/utils/chat';
 import type { ModelPresetName } from '@/config/models';
@@ -39,6 +44,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
     }
   }, [selectedModel, model, setModel]);
 
+  // 记忆注入模式：服务端（users.memory_mode）为准，拉取一次后发送时携带。
+  const memoryMode = useMemoryModeStore((s) => s.mode);
+  useEffect(() => {
+    void useMemoryModeStore.getState().load();
+  }, []);
+
   const handleChangeScroll = useCallback(
     (next: boolean) => {
       setShouldAutoScroll(next);
@@ -58,13 +69,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
         inputValue,
         model: (selectedModel as ModelPresetName) ?? model,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
+        memoryMode,
         ...conversationStore,
       });
       if (opts?.hasFiles) {
         clearUploadedFiles();
       }
     },
-    [uploadedFiles, clearUploadedFiles, model, selectedModel],
+    [uploadedFiles, clearUploadedFiles, model, selectedModel, memoryMode],
   );
 
   // 未配置任何可用 Key 时禁用输入并展示引导文案；加载中也先禁用，避免空跑请求。

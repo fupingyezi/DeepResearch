@@ -137,3 +137,33 @@ export async function backfillOrphanData(userId: string): Promise<void> {
   await query(`update threads_meta set user_id = $1 where user_id is null;`, [userId]);
   await query(`update runs set user_id = $1 where user_id is null;`, [userId]);
 }
+
+/**
+ * 记忆注入模式（users.memory_mode，跨设备一致）。
+ * - `inject`（默认）：全量注入所有 section 与预算内 facts；
+ * - `retrieve`：按本轮用户输入检索 top-K，注入体积更小但只带相关内容。
+ */
+export type MemoryInjectionMode = 'inject' | 'retrieve';
+
+function isMemoryInjectionMode(v: unknown): v is MemoryInjectionMode {
+  return v === 'inject' || v === 'retrieve';
+}
+
+/** 读取用户偏好的记忆注入模式；未设置 / 存量非法值 → null（调用方回落 inject）。 */
+export async function getMemoryMode(userId: string): Promise<MemoryInjectionMode | null> {
+  const res = await query(`select memory_mode from users where id = $1 limit 1;`, [userId]);
+  const row = res.rows[0] as { memory_mode: string | null } | undefined;
+  const value = row?.memory_mode ?? null;
+  return isMemoryInjectionMode(value) ? value : null;
+}
+
+/** 写入用户偏好的记忆注入模式（只接受两个字面量，非法值直接拒绝）。 */
+export async function setMemoryMode(userId: string, mode: MemoryInjectionMode): Promise<void> {
+  if (!isMemoryInjectionMode(mode)) {
+    throw new Error(`invalid memory mode: ${String(mode)}`);
+  }
+  await query(`update users set memory_mode = $1, updated_at = now() where id = $2;`, [
+    mode,
+    userId,
+  ]);
+}

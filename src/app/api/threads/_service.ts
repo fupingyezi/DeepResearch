@@ -13,11 +13,19 @@ import {
   createChatModel,
   createThreadService,
   makeCheckpointer,
+  EMBEDDING_BATCH_LIMIT,
+  getMemoryConfig,
+  maxImageBytesFromEnv,
+  setMemoryConfig,
+  setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
+  setThreadImageFetcher,
   setTitleModelFactory,
   type ThreadService,
   type ModelConfig,
 } from '@/deerflow-harness';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { getFile, getMimeType } from '@/lib/storage';
 import {
   buildModelConfigFromPreset,
   buildModelConfigForUser,
@@ -31,6 +39,8 @@ let service: ThreadService | null = null;
 let initPromise: Promise<ThreadService> | null = null;
 let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
+let embeddingsFactoryRegistered = false;
+let imageFetcherRegistered = false;
 
 /**
  * 把 chat model 工厂注入给 memory 子系统（updater）。
@@ -85,6 +95,79 @@ export function ensureTitleModelFactory(): void {
     });
   });
   titleFactoryRegistered = true;
+}
+
+/**
+ * 把智谱 embedding-3 客户端注入给 memory 子系统（语义检索）。
+ * 无 DEERFLOW_EMBEDDING_API_KEY / ZHIPU_API_KEY 时工厂返回 null，
+ * 检索自动退回关键词词面打分（不报错）。导出供测试与提前初始化使用。
+ */
+export function ensureMemoryEmbeddingsFactory(): void {
+  if (embeddingsFactoryRegistered) return;
+  embeddingsFactoryRegistered = true;
+  setMemoryEmbeddingsFactory(() => {
+    const apiKey = process.env.DEERFLOW_EMBEDDING_API_KEY || process.env.ZHIPU_API_KEY;
+    if (!apiKey) return null;
+    const { embeddingDimensions } = getMemoryConfig();
+    return new OpenAIEmbeddings({
+      model: process.env.DEERFLOW_EMBEDDING_MODEL || 'embedding-3',
+      apiKey,
+      dimensions: embeddingDimensions,
+      batchSize: EMBEDDING_BATCH_LIMIT, // 智谱单请求 64 条上限
+      // 必须显式指定 'float'：OpenAI SDK 在调用方未指定时会把 encoding_format 默认成
+      // 'base64' 并按 base64 解码响应（toFloat32Array），而智谱**忽略**该参数、仍返回
+      // float 数组 —— 结果是数组被当字节流重解释，得到 256 个（原 1024）无意义数值，
+      // 余弦算成 NaN，语义检索静默退回词面检索。指定后 SDK 原样返回，实测维度与语义均正确。
+      encodingFormat: 'float',
+      configuration: {
+        baseURL: process.env.DEERFLOW_EMBEDDING_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+      },
+    });
+  });
+  // env 维度覆盖合并进 MemoryConfig 单例（clamp 256..2048）
+  const dims = Number(process.env.DEERFLOW_EMBEDDING_DIMENSIONS);
+  if (Number.isFinite(dims) && dims > 0) {
+    setMemoryConfig({
+      ...getMemoryConfig(),
+      embeddingDimensions: Math.min(2048, Math.max(256, Math.round(dims))),
+    });
+  }
+}
+
+/**
+ * 把「MinIO 图片字节读取器」注入给 vision 子系统（多模态 HumanMessage 构造）。
+ *
+ * 依赖方向约束：harness 层不反向依赖 app 层（MinIO 客户端在 src/lib/storage），
+ * 故由 app 层注入，模式对齐 setMemoryModelFactory / setTitleModelFactory。
+ * 未注册 / minioKey 缺失 / 读取失败 → 返回 null，构造侧自动把该图降级为文本说明。
+ */
+export function ensureThreadImageFetcher(): void {
+  if (imageFetcherRegistered) return;
+  imageFetcherRegistered = true;
+  setThreadImageFetcher(async (ref) => {
+    if (!ref.minioKey) return null;
+    const maxBytes = maxImageBytesFromEnv();
+    // DB 已知字节数且超限 → 连拉取都省掉（上传上限 50MB，vision 默认 5MB）
+    if (typeof ref.sizeBytes === 'number' && ref.sizeBytes > maxBytes) return null;
+    try {
+      const stream = await getFile(ref.minioKey);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+      }
+      const buffer = Buffer.concat(chunks);
+      if (buffer.length === 0) return null;
+      // mimeType 优先用 DB 值（只有 image/* 才可信，否则智谱会 400）
+      const mimeType =
+        ref.mimeType && ref.mimeType.startsWith('image/')
+          ? ref.mimeType
+          : getMimeType((ref.filename ?? '').split('.').pop() ?? '');
+      return { base64: buffer.toString('base64'), mimeType };
+    } catch (e) {
+      console.warn('[threadImageFetcher] load failed:', ref.fileId, e);
+      return null;
+    }
+  });
 }
 
 /**
@@ -166,6 +249,8 @@ async function build(): Promise<ThreadService> {
 
   ensureMemoryModelFactory();
   ensureTitleModelFactory();
+  ensureMemoryEmbeddingsFactory();
+  ensureThreadImageFetcher();
 
   const defaultModelConfig = getDefaultModelConfig();
 

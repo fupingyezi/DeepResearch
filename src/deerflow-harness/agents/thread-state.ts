@@ -53,7 +53,11 @@ export function mergeArtifacts(
  * Reducer for viewed_images dict - 合并 image 字典
  *
  * 特殊语义：如果 next 是空对象 `{}`，则清空 existing。
- * 中间件可以通过返回 `{}` 在处理后清理 viewed_images 状态。
+ *
+ * **当前无写入者（保留字段）**：图片不再经 state 中转 —— `view_image` 工具把
+ * image blocks 直接内联在 ToolMessage 里，历史图片的压缩由
+ * `vision/vision-middleware.ts` 扫描 messages 完成。保留该 channel 是因为
+ * 删除 schema 字段收益为零、风险非零（checkpoint 里已可能存在该键）。
  */
 export function mergeViewedImages(
   existing: Record<string, ViewedImageData> | undefined,

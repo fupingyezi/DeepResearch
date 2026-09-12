@@ -3,6 +3,7 @@ import {
   FileWordOutlined,
   FileMarkdownOutlined,
   FileTextOutlined,
+  FileImageOutlined,
 } from '@ant-design/icons';
 
 export const formatFileSize = (bytes: number): string => {
@@ -14,6 +15,7 @@ export const formatFileSize = (bytes: number): string => {
 };
 
 export const getFileIcon = (type: string, name: string): React.ComponentType => {
+  if (type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(name)) return FileImageOutlined;
   if (type.includes('pdf') || name.endsWith('.pdf')) return FilePdfOutlined;
   if (type.includes('word') || name.endsWith('.docx')) return FileWordOutlined;
   if (name.endsWith('.md')) return FileMarkdownOutlined;

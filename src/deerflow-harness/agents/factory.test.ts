@@ -108,3 +108,52 @@ describe('assembleFromFeatures —— 位序中间件装配', () => {
     }
   });
 });
+
+describe('assembleFromFeatures —— vision（多模态）', () => {
+  it('features.vision=true 时挂 VisionMiddleware 于位序 10', () => {
+    const { chain } = assembleFromFeatures({ ...DEFAULT_FEATURES, vision: true }, {});
+    const names = chain.map((m) => m.name);
+    expect(names).toContain('VisionMiddleware');
+    // 位序 10：memory(9) 之后、subagentLimit(11) 之前
+    expect(names.indexOf('VisionMiddleware')).toBeGreaterThan(names.indexOf('MemoryMiddleware'));
+    expect(names.indexOf('VisionMiddleware')).toBeLessThan(
+      names.indexOf('SubagentLimitMiddleware'),
+    );
+  });
+
+  it('vision 未启用时不挂 VisionMiddleware', () => {
+    for (const value of [false, undefined] as const) {
+      const { chain } = assembleFromFeatures({ ...DEFAULT_FEATURES, vision: value }, {});
+      expect(chain.map((m) => m.name)).not.toContain('VisionMiddleware');
+    }
+  });
+
+  it('VisionMiddleware 用 beforeAgent（先于模型循环，压缩先于摘要）', () => {
+    const { chain } = assembleFromFeatures({ ...DEFAULT_FEATURES, vision: true }, {});
+    const mw = chain.find((m) => m.name === 'VisionMiddleware') as unknown as {
+      beforeAgent?: unknown;
+      beforeModel?: unknown;
+    };
+    expect(typeof mw.beforeAgent).toBe('function');
+    expect(mw.beforeModel).toBeUndefined();
+  });
+
+  it('subagent（SUBAGENT_FEATURES）不挂 VisionMiddleware', () => {
+    const { chain } = assembleFromFeatures(SUBAGENT_FEATURES, {});
+    expect(chain.map((m) => m.name)).not.toContain('VisionMiddleware');
+  });
+
+  it('features.vision=true 注入 view_image 工具；未启用不注入', () => {
+    expect(
+      toolNames(assembleFromFeatures({ ...DEFAULT_FEATURES, vision: true }, {}).extraTools),
+    ).toContain('view_image');
+    expect(toolNames(assembleFromFeatures(DEFAULT_FEATURES, {}).extraTools)).not.toContain(
+      'view_image',
+    );
+  });
+
+  it('subagent 拿不到 view_image（与压缩中间件同门，随 features.vision 走）', () => {
+    const { extraTools } = assembleFromFeatures(SUBAGENT_FEATURES, {});
+    expect(toolNames(extraTools)).not.toContain('view_image');
+  });
+});

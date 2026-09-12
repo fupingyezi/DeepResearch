@@ -188,10 +188,25 @@ function mergeWithEmpty(parsed: any): MemoryData {
       ),
     },
     facts: Array.isArray(parsed.facts)
-      ? parsed.facts.filter((f: any) => f && typeof f === 'object')
+      ? parsed.facts
+          .filter((f: any) => f && typeof f === 'object')
+          .map((f: any) => sanitizeLoadedFact(f))
       : [],
   };
   return merged;
+}
+
+/**
+ * 结构非法的 embedding（非数组 / 含非有限数）直接剥除，避免污染检索侧。
+ * 维度不匹配的合法向量保留（由检索 / 回填按 config 维度判定失效并重算）。
+ */
+function sanitizeLoadedFact(f: any): any {
+  if (f.embedding != null) {
+    const v: unknown = f.embedding;
+    const ok = Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+    if (!ok) delete f.embedding;
+  }
+  return f;
 }
 
 function mergeSection(s: any, dft: { summary: string; updatedAt: string }) {

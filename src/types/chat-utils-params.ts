@@ -1,6 +1,6 @@
 import { ChatSessionState } from '@/store';
 import type { ModelPresetName } from '@/config/models';
-import type { ChatUploadedFileRef } from './chat-info-define';
+import type { ChatUploadedFileRef, MemoryInjectionMode } from './chat-info-define';
 
 /**
  * 统一聊天入口参数。
@@ -16,6 +16,11 @@ export interface chatWithAgentProps extends ChatSessionState {
   resumeDecision?: string;
   /** 模型预设标识（前端 UI 层语法糖，由 chat-with-agent 映射成 configuration.model.value） */
   model?: ModelPresetName;
+  /**
+   * 记忆注入模式（用户偏好，由 chat-window 从 memoryModeStore 注入）；
+   * 缺省不传该字段，由后端按服务级默认 inject 处理。
+   */
+  memoryMode?: MemoryInjectionMode;
 }
 
 /**

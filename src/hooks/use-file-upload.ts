@@ -15,7 +15,14 @@ export interface UseFileUploadOptions {
 const DEFAULT_MAX_FILE_SIZE_MB = 10;
 
 /**
- * 支持的文件 MIME 白名单。文件名兜底通过 .md / .txt 后缀匹配。
+ * 图片单文件上限（MB）。必须 ≤ 后端 `DEERFLOW_VISION_MAX_IMAGE_MB`（默认 5），
+ * 否则会出现「发送成功但模型没看到图」的静默降级（构造侧超限即丢弃该图）。
+ * 亦在智谱单图 10MB 限制内。
+ */
+const MAX_IMAGE_SIZE_MB = 5;
+
+/**
+ * 支持的文件 MIME 白名单。文件名兜底通过后缀匹配。
  */
 const SUPPORTED_TYPES = [
   'application/pdf',
@@ -23,6 +30,10 @@ const SUPPORTED_TYPES = [
   'text/markdown',
   'text/plain',
   'text/x-markdown',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
 ];
 
 /**
@@ -37,13 +48,16 @@ const useFileUpload = (options: UseFileUploadOptions = {}) => {
   const { addUploadedFile, removeUploadedFile } = useFileUploadStore();
 
   const validateFile = (file: File): boolean => {
-    const isTypeSupported = SUPPORTED_TYPES.includes(file.type) || /\.(md|txt)$/i.test(file.name);
+    const isImage = file.type.startsWith('image/');
+    const isTypeSupported =
+      SUPPORTED_TYPES.includes(file.type) || /\.(md|txt|png|jpe?g|webp|gif)$/i.test(file.name);
     if (!isTypeSupported) {
       alert(`不支持的文件类型: ${file.name}`);
       return false;
     }
 
-    const maxSizeBytes = maxFileSizeMB * 1024 * 1024;
+    // 图片与文档的大小上限不同（图片受视觉链路 5MB 限制）
+    const maxSizeBytes = (isImage ? MAX_IMAGE_SIZE_MB : maxFileSizeMB) * 1024 * 1024;
     if (file.size > maxSizeBytes) {
       alert(`文件过大（>${formatFileSize(maxSizeBytes)}）: ${file.name}`);
       return false;

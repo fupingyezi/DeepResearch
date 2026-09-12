@@ -6,7 +6,8 @@ export type ModelPresetName =
   | 'deepseek-v4-flash'
   | 'deepseek-v4-pro'
   | 'openai-4o'
-  | 'moonshot-v1';
+  | 'moonshot-v1'
+  | 'zhipu-glm-5.3-flash';
 
 export interface ModelPreset {
   key: ModelPresetName;
@@ -15,6 +16,8 @@ export interface ModelPreset {
   modelName: string;
   description: string;
   isBeta?: boolean;
+  /** 原生多模态：聊天可直接传图（image_url content blocks）。 */
+  supportsVision?: boolean;
 }
 
 export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
@@ -52,6 +55,7 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     provider: 'openai',
     modelName: 'gpt-4o',
     description: 'OpenAI 最新多模态模型',
+    supportsVision: true,
   },
   'moonshot-v1': {
     key: 'moonshot-v1',
@@ -59,6 +63,15 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     provider: 'moonshot',
     modelName: 'moonshot-v1-8k',
     description: '月之暗面 Moonshot，支持超长上下文',
+  },
+  'zhipu-glm-5.3-flash': {
+    key: 'zhipu-glm-5.3-flash',
+    label: 'GLM-5.3 Flash (智谱)',
+    provider: 'zhipu',
+    modelName: 'glm-5.3-flash',
+    description: '智谱原生多模态模型，支持图片理解与 1M 长上下文',
+    supportsVision: true,
+    isBeta: true,
   },
 };
 
@@ -74,6 +87,7 @@ const PROVIDER_DEFAULT_BASE_URL: Record<ModelProvider, string | undefined> = {
   deepseek: 'https://api.deepseek.com/v1',
   openai: 'https://api.openai.com/v1',
   moonshot: 'https://api.moonshot.cn/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   unknown: undefined,
 };
 
@@ -162,11 +176,22 @@ export function buildModelConfigFromPreset(presetKey: ModelPresetName): ModelCon
       config.presencePenalty = 0.1;
       break;
 
+    case 'zhipu':
+      // 智谱 GLM 系列（OpenAI 兼容端点）；penalty 置 0 对齐 qwen 保守策略
+      //（兼容层对未识别参数敏感，非零惩罚可能触发回退非流式）
+      config.apiKey = process.env.ZHIPU_API_KEY;
+      config.baseUrl = process.env.ZHIPU_BASE_URL ?? defaultBaseUrl;
+      config.frequencyPenalty = 0;
+      config.presencePenalty = 0;
+      break;
+
     default:
       // unknown provider - use DeepSeek as fallback
       config.apiKey = process.env.DEEPSEEK_API_KEY;
       config.baseUrl = process.env.DEEPSEEK_BASE_URL ?? PROVIDER_DEFAULT_BASE_URL.deepseek;
   }
+
+  if (preset.supportsVision) config.supportsVision = true;
 
   return config;
 }

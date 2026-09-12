@@ -1,7 +1,7 @@
 export { DeerFlowClient } from './client';
 export { createChatModel } from './models';
 export { createBaseAgent } from './agents/factory';
-export { searchWebTool, taskTool, getAvailableTools } from './tools';
+export { searchWebTool, taskTool, viewImageTool, getAvailableTools } from './tools';
 export {
   SubagentExecutor,
   registerSubagent,
@@ -144,10 +144,43 @@ export {
   resetMemoryQueue,
   type AddArgs as MemoryQueueAddArgs,
   type ConversationContext as MemoryConversationContext,
+  // embeddings（语义检索）
+  backfillFactEmbeddings,
+  cosineSimilarity,
+  EMBEDDING_BATCH_LIMIT,
+  embedQuery,
+  embedTexts,
+  getMemoryEmbeddingsFactory,
+  isCompatibleVector,
+  resetMemoryEmbeddingsFactory,
+  setMemoryEmbeddingsFactory,
+  type MemoryEmbeddingsFactory,
   // facade
   buildMemoryContext,
+  previewMemoryRetrieval,
   type BuildMemoryContextOptions,
+  type MemoryRetrievalPreview,
+  // retrieval 明细（预览/调试）
+  previewFactScores,
+  retrievalThresholds,
+  type FactScoreDetail,
 } from './agents/memory';
+
+// vision（多模态：图片字节注入 + 多模态消息构造 + 历史图压缩）
+export {
+  buildHumanMessageContent,
+  contentHasImageBlocks,
+  extractContentTextBlocks,
+  getThreadImageFetcher,
+  maxImageBytesFromEnv,
+  setThreadImageFetcher,
+  visionMiddleware,
+  type BuildContentOptions,
+  type BuildContentResult,
+  type FetchedImage,
+  type ThreadImageFetcher,
+  type ThreadImageRef,
+} from './vision';
 
 export {
   setTitleModelFactory,

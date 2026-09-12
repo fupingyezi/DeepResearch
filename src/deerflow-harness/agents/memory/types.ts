@@ -43,6 +43,11 @@ export interface Fact {
   source: string;
   /** 仅 category==='correction' 时可能存在。 */
   sourceError?: string;
+  /**
+   * 语义向量（智谱 embedding-3；维度见 MemoryConfig.embeddingDimensions）。
+   * 旧数据缺失此字段；维度变更后旧向量视为失效，由回填重算。
+   */
+  embedding?: number[];
 }
 
 export interface MemoryData {

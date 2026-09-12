@@ -22,6 +22,7 @@ import {
 import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
 import type { RunStore } from '../persistence/runs';
 import type { ModelConfig } from '../types';
+import type { ThreadImageRef } from '../vision';
 
 import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
@@ -63,6 +64,12 @@ export interface SubmitRunInput {
   thread_id: string;
   user_id?: string;
   input: string;
+  /**
+   * 本轮随消息附带的线程图片（v3/chat 由 file_content 解析出 minioKey 等）。
+   * 走显式参数而非 metadata —— metadata 会被 `...metadata` 展开进每个事件
+   * 载荷，塞图片引用会污染前端协议。空数组/缺省 = 无图（纯文本，现状行为）。
+   */
+  images?: ThreadImageRef[];
   metadata?: Record<string, any>;
   /**
    * 本次 run 使用的模型配置。带模型配置时由 createClientForModel 解析出对应
@@ -296,7 +303,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       console.info(`${LOG} deleteThread thread_id=${thread_id}`);
     },
 
-    async submitRun({ thread_id, user_id, input, metadata, modelConfig }) {
+    async submitRun({ thread_id, user_id, input, images, metadata, modelConfig }) {
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
@@ -313,7 +320,13 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         user_id,
         threadMeta,
         inputForDb: input,
-        makeStream: () => runClient.stream(input, thread_id, metadata ?? {}),
+        makeStream: () =>
+          runClient.stream(
+            input,
+            thread_id,
+            metadata ?? {},
+            images?.length ? { images } : undefined,
+          ),
       });
     },
 

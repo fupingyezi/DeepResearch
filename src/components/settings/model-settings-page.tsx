@@ -15,6 +15,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   deepseek: 'DeepSeek',
   openai: 'OpenAI',
   moonshot: 'Moonshot (Kimi)',
+  zhipu: '智谱 GLM',
 };
 
 const inputClass =

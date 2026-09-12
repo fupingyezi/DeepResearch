@@ -103,6 +103,8 @@ export async function initialDB() {
         create index if not exists idx_users_role on users(system_role);
         -- 用户当前选用的模型预设（preset key），跨设备一致；null 表示未选择。
         alter table users add column if not exists selected_model varchar(64);
+        -- 记忆注入模式：'inject'（全量注入，默认）| 'retrieve'（按本轮输入检索 top-K）
+        alter table users add column if not exists memory_mode varchar(16);
 
         -- 用户级模型 API Key：按 (user_id, provider) 维度保存，仅存密文/IV/authTag/掩码，
         -- 绝不存明文。一个 provider 的 Key 可服务该 provider 下多个预设模型。

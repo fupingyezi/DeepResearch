@@ -5,7 +5,7 @@ import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 /**
  * Provider 标识。用于针对不同 OpenAI 兼容后端选择适配策略。
  */
-export type ModelProvider = 'openai' | 'qwen' | 'deepseek' | 'moonshot' | 'unknown';
+export type ModelProvider = 'openai' | 'qwen' | 'deepseek' | 'moonshot' | 'zhipu' | 'unknown';
 
 export interface ModelConfig {
   modelName: string;
@@ -22,6 +22,8 @@ export interface ModelConfig {
   frequencyPenalty?: number;
   /** 出现惩罚：>0 抑制重复主题；推荐 0.0~0.3。 */
   presencePenalty?: number;
+  /** 模型可直接接收 image_url content blocks（视觉多模态）。 */
+  supportsVision?: boolean;
 }
 
 /** 统一工具类型 — LangChain StructuredTool 即可 */

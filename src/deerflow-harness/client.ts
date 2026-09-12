@@ -18,6 +18,12 @@ import {
 import { getContext } from './runtime/context';
 import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './mcp';
 import { getEnabledSkillsSignature } from './skills';
+import {
+  buildHumanMessageContent,
+  extractContentTextBlocks,
+  maxImageBytesFromEnv,
+  type ThreadImageRef,
+} from './vision';
 
 interface RuntimeRunOptions {
   memoryEnabled: boolean;
@@ -32,6 +38,8 @@ interface RuntimeRunOptions {
   todoEnabled: boolean;
   mcpEnabled: boolean;
   subagentsEnabled: boolean;
+  /** 视觉多模态：由 modelConfig.supportsVision 驱动（改变工具集，进缓存键）。 */
+  visionEnabled: boolean;
   agentName: string;
   userId: string | null;
   availableSkills?: string[];
@@ -55,6 +63,7 @@ function buildConfigKey(
     opts.todoEnabled,
     opts.mcpEnabled,
     opts.subagentsEnabled,
+    opts.visionEnabled,
     opts.agentName,
     opts.availableSkills?.sort() ?? [],
     mcpSignature,
@@ -91,6 +100,20 @@ function extractInputText(input: { messages: HumanMessage[] } | Command): string
       .join('\n');
   }
   return undefined;
+}
+
+/**
+ * debug 日志专用：content 已是 string 则原样返回，否则 JSON 序列化。
+ * 多模态 content（如 image_url blocks）序列化后含 base64，仅进 console 日志，
+ * 不进 SSE —— 对外的 TOOL_CALL_RESULT 走 extractContentTextBlocks 脱敏。
+ */
+function safeStringifyContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  try {
+    return JSON.stringify(content) ?? '[unserializable]';
+  } catch {
+    return '[unserializable]';
+  }
 }
 
 /**
@@ -226,6 +249,8 @@ export class DeerFlowClient {
         metadata?.subagentsEnabled,
         this.baseOptions.subagentsEnabled !== false,
       ),
+      // 视觉开关由模型能力决定（preset supportsVision 透传），不开放 metadata 覆盖
+      visionEnabled: !!this.modelConfig.supportsVision,
       agentName: this.baseOptions.agentName ?? 'lead',
       userId,
       availableSkills: this.baseOptions.availableSkills,
@@ -324,6 +349,7 @@ export class DeerFlowClient {
         summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
         guardrail: opts.guardrailEnabled,
         todo: opts.todoEnabled,
+        vision: opts.visionEnabled,
       },
     });
 
@@ -354,8 +380,15 @@ export class DeerFlowClient {
     message: string,
     threadId?: string,
     metadata?: Record<string, any>,
+    attachments?: { images?: ThreadImageRef[] },
   ): ClientAgentEventStream {
-    yield* this.streamWithInput({ messages: [new HumanMessage(message)] }, threadId, metadata);
+    // 多模态输入：模型支持视觉且带图时构造 content blocks（image_url data URL）；
+    // 否则退回纯 string（现状行为），图片仍经 uploads 上下文以 OCR 文本形式可见。
+    const { content } = await buildHumanMessageContent(message, attachments?.images ?? [], {
+      supportsVision: !!this.modelConfig.supportsVision,
+      maxImageBytes: maxImageBytesFromEnv(),
+    });
+    yield* this.streamWithInput({ messages: [new HumanMessage(content)] }, threadId, metadata);
   }
 
   /**
@@ -614,15 +647,7 @@ export class DeerFlowClient {
 
         if (debugAi) {
           const resultText =
-            typeof msg?.content === 'string'
-              ? msg.content
-              : (() => {
-                  try {
-                    return JSON.stringify(msg?.content);
-                  } catch {
-                    return '[unserializable]';
-                  }
-                })();
+            typeof msg?.content === 'string' ? msg.content : safeStringifyContent(msg?.content);
           debugLog('tool_message', {
             tool_call_id: msg?.tool_call_id,
             name: msg?.name,
@@ -644,7 +669,9 @@ export class DeerFlowClient {
             {
               toolCallId,
               toolName: msg.name ?? '',
-              result: msg.content,
+              // 多模态 ToolMessage（如 view_image 返回 image blocks）：只取 text
+              // blocks 拼接，防止 base64 灌爆 SSE 事件与前端 parts-reducer
+              result: extractContentTextBlocks(msg.content),
               success: true,
             },
             { sessionId: effectiveThreadId, ...metadata },
@@ -865,16 +892,7 @@ export class DeerFlowClient {
             if (msgType === 'ai') {
               if (debugAi) {
                 // updates 模式的完整 AIMessage：含完整 content 与已聚合的 tool_calls
-                const fullContent =
-                  typeof msg?.content === 'string'
-                    ? msg.content
-                    : (() => {
-                        try {
-                          return JSON.stringify(msg?.content);
-                        } catch {
-                          return '[unserializable]';
-                        }
-                      })();
+                const fullContent = safeStringifyContent(msg?.content);
                 debugLog('ai_message_full', {
                   node: nodeName,
                   content: fullContent,

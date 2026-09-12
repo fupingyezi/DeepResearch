@@ -263,8 +263,14 @@ const SiderContent = () => {
     }
   }, [selectedSession]);
 
+  // 高度约束用 flex-1 + min-h-0，**不要**改回 h-full：
+  // 本组件是 sider.tsx 里 h-screen 列容器的第二个子项（上面还有一行 logo），
+  // h-full 会解析成整屏高 → 整体比容器高出一个 logo 的高度，底部（用户设置入口，
+  // h-11 + mb-3 = 56px）落到视口外；而 body 是 overflow-hidden，被裁掉的部分滚动
+  // 也够不到。会话列表越长越明显（min-height:auto 阻止 flex 压缩）。
+  // flex-1 取「剩余空间」，min-h-0 允许收缩，内层列表才能真正内部滚动。
   return (
-    <div className="flex h-full w-full flex-col items-center gap-6">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-6">
       <div
         className="flex h-10 w-[92%] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[#e5e7eb] bg-white font-medium text-gray-700 shadow-[0px_1px_2px_rgba(16,24,40,0.05)] transition-all hover:border-teal-300 hover:text-teal-700 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
         onClick={() => handleCreateNewSession()}

@@ -1,10 +1,11 @@
 'use client';
 
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Empty, Input, Popconfirm, Select, Spin, Tag, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Segmented, Select, Spin, Tag, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 
 import apiClient from '@/utils/request/api';
+import { useMemoryModeStore, type MemoryMode } from '@/store';
 
 type FactCategory = 'preference' | 'knowledge' | 'context' | 'behavior' | 'goal' | 'correction';
 
@@ -93,6 +94,29 @@ export function MemorySettingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState<FactCategory>('context');
+
+  // 注入模式：服务端（users.memory_mode）为准，挂载时同步一次
+  const memoryMode = useMemoryModeStore((s) => s.mode);
+  const setMemoryModeLocal = useMemoryModeStore((s) => s.setMode);
+  const [modeSaving, setModeSaving] = useState(false);
+
+  const handleMemoryModeChange = async (next: MemoryMode) => {
+    if (next === memoryMode || modeSaving) return;
+    setModeSaving(true);
+    try {
+      await apiClient.put('/memory/mode', { mode: next });
+      setMemoryModeLocal(next); // 成功后才更新本地，失败保持原值
+      message.success(next === 'retrieve' ? '已切换为按需检索' : '已切换为全量注入');
+    } catch {
+      message.error('切换失败，请重试');
+    } finally {
+      setModeSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    void useMemoryModeStore.getState().load();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -191,6 +215,26 @@ export function MemorySettingsPage() {
           系统会从你的对话中沉淀长期记忆，用于个性化研究。你也可以手动管理记忆条目。
         </p>
       </div>
+
+      <section>
+        <h3 className="mb-3 text-[15px] font-medium text-[#111827]">注入模式</h3>
+        <div className="rounded-lg border border-[#e5e7eb] p-3">
+          <Segmented<MemoryMode>
+            value={memoryMode}
+            disabled={modeSaving}
+            onChange={handleMemoryModeChange}
+            options={[
+              { label: '全量注入', value: 'inject' },
+              { label: '按需检索', value: 'retrieve' },
+            ]}
+          />
+          <p className="mt-2 text-[12px] leading-relaxed text-[#9ca3af]">
+            {memoryMode === 'retrieve'
+              ? '按本轮提问检索最相关的记忆条目再注入（语义 + 关键词混合排序），注入内容更少、更聚焦；没有相关记忆时不注入。'
+              : '把全部记忆（画像摘要 + 所有条目）注入每轮对话，信息最全，但占用更多上下文。'}
+          </p>
+        </div>
+      </section>
 
       {sections.length > 0 && (
         <section>

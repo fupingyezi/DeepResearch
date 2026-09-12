@@ -11,7 +11,7 @@
  *  7. TodoMiddleware                    (todo)
  *  8. TitleMiddleware                   (features.autoTitle)
  *  9. MemoryMiddleware                  (features.memory)
- * 10. ViewImageMiddleware               (features.vision)
+ * 10. VisionMiddleware                  (features.vision / 历史图片压缩)
  * 11. SubagentLimitMiddleware           (始终启用)
  * 12. LoopDetectionMiddleware           (始终启用)
  *
@@ -54,7 +54,7 @@ export type { TitleModelFactory, TitleModelOptions } from './title-middleware/ti
 export { publishTitleUpdate, consumeTitleUpdate } from './title-middleware/title-bus';
 export type { TitleUpdatePayload } from './title-middleware/title-bus';
 export { memoryMiddleware } from './memory-middleware';
-export { viewImageMiddleware } from './view-image-middleware';
+export { visionMiddleware } from '../../vision';
 export {
   subagentLimitMiddleware,
   createSubagentLimitMiddleware,
@@ -75,7 +75,7 @@ import { summarizationMiddleware } from './summarization-middleware';
 import { todoMiddleware } from './todo-middleware';
 import { titleMiddleware } from './title-middleware/title-middleware';
 import { memoryMiddleware } from './memory-middleware';
-import { viewImageMiddleware } from './view-image-middleware';
+import { visionMiddleware } from '../../vision';
 // 引用模块级单例仅用于位序文档常量 ORDERED_MIDDLEWARES。
 // 真实链路装配请用 createSubagentLimitMiddleware()，详见 ../factory.ts。
 import { subagentLimitMiddleware } from './subagent-limit-middleware';
@@ -96,7 +96,7 @@ export const ORDERED_MIDDLEWARES = [
   todoMiddleware, // 7
   titleMiddleware, // 8
   memoryMiddleware, // 9
-  viewImageMiddleware, // 10
+  visionMiddleware, // 10
   subagentLimitMiddleware, // 11
   loopDetectionMiddleware, // 12
 ] as const;

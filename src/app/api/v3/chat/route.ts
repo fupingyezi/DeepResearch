@@ -33,6 +33,7 @@ import {
   createSseStream,
   consumeTitleUpdate,
   type ClientAgentEvent,
+  type ThreadImageRef,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
 import { getThreadService, resolveUserModelConfig } from '../../threads/_service';
@@ -206,6 +207,20 @@ export async function POST(request: NextRequest) {
       console.error('[POST /api/v3/chat] resolveFilesByIds failed:', e, { fileIds });
     }
   }
+
+  // 本轮随消息附带的图片（仅 image/*）：走 submitRun 显式参数而非 metadata
+  // （metadata 会被 `...metadata` 展开进每个事件载荷，塞图片引用会污染前端协议）。
+  // 是否真的以多模态下发由 client.stream 按 modelConfig.supportsVision 二次判定 ——
+  // 此处不做视觉能力判断，避免第二个真相源。
+  const images: ThreadImageRef[] = resolvedFiles
+    .filter((f) => f.mimeType.startsWith('image/'))
+    .map((f) => ({
+      fileId: f.fileId,
+      filename: f.filename,
+      mimeType: f.mimeType,
+      minioKey: f.minioKey,
+      sizeBytes: f.sizeBytes,
+    }));
 
   // —— 模型与 Key 解析（前置守卫，置于建会话之前以避免产生空会话） ——
   // 按当前用户解析模型与解密 Key（不再使用环境变量默认 Key）：
@@ -386,6 +401,7 @@ export async function POST(request: NextRequest) {
           thread_id: resolvedThreadId,
           user_id,
           input: inputText,
+          ...(images.length ? { images } : {}),
           ...(modelConfig ? { modelConfig } : {}),
           ...(runMetadata ? { metadata: runMetadata } : {}),
         });
