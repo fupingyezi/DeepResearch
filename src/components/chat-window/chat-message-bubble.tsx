@@ -1,4 +1,4 @@
-import { LoadingOutlined, FileTextOutlined } from '@ant-design/icons';
+import { LoadingOutlined, FileTextOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { Button, Spin } from 'antd';
 import FileItem from '../files/file-items';
 import CustomMarkdown from '../markdown/custom-markdown';
@@ -46,12 +46,15 @@ function deriveFromParts(parts: MessagePart[]): {
   taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null;
   isMultiAgent: boolean;
   filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>>;
+  /** 本轮被取消的说明文案（取最后一条），无则 null */
+  cancelledText: string | null;
 } {
   const textSegments: string[] = [];
   const timelineSteps: TimelineStepPart[] = [];
   let artifactPart: Extract<MessagePart, { type: 'artifact' }> | null = null;
   let taskSummaryPart: Extract<MessagePart, { type: 'task_summary' }> | null = null;
   let isMultiAgent = false;
+  let cancelledText: string | null = null;
   const filePartsForUser: Array<Extract<MessagePart, { type: 'file' | 'image' }>> = [];
 
   for (const part of parts) {
@@ -81,6 +84,10 @@ function deriveFromParts(parts: MessagePart[]): {
       filePartsForUser.push(part);
       continue;
     }
+    if (part.type === 'cancelled') {
+      cancelledText = part.content.text;
+      continue;
+    }
     // tool_result 兜底 part 不在 timeline 中显示
   }
 
@@ -91,6 +98,7 @@ function deriveFromParts(parts: MessagePart[]): {
     taskSummaryPart,
     isMultiAgent,
     filePartsForUser,
+    cancelledText,
   };
 }
 
@@ -111,8 +119,15 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(false);
 
   const derived = useMemo(() => deriveFromParts(message.parts ?? []), [message.parts]);
-  const { bodyText, timelineSteps, artifactPart, taskSummaryPart, isMultiAgent, filePartsForUser } =
-    derived;
+  const {
+    bodyText,
+    timelineSteps,
+    artifactPart,
+    taskSummaryPart,
+    isMultiAgent,
+    filePartsForUser,
+    cancelledText,
+  } = derived;
 
   const [reEditValue, setReEditValue] = useState<string>(bodyText);
 
@@ -343,8 +358,11 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     );
   }
 
-  // loading 气泡：assistant 还没有任何 part
+  // loading 气泡：assistant 还没有任何 part，**且这一条确实还在流式生成**。
+  // 只判 parts 为空的话，被取消 / 出错 / 落库为空的消息会永远转圈 —— 用户点了停止
+  // 仍看到转圈就是这么来的。与 timelineStatus 的 'processing' 用同一组条件。
   if (message.role === 'assistant' && (!message.parts || message.parts.length === 0)) {
+    if (!isChating || !isLastAIMessage) return null;
     return <Spin indicator={<LoadingOutlined style={{ color: '#828282' }} />} size="large" />;
   }
 
@@ -408,6 +426,13 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
             {artifactEntry}
           </>
+        )}
+        {/* 本轮被取消：正文之后单独一行说明（内容保留，只标注中断原因） */}
+        {cancelledText && (
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <MinusCircleOutlined className="text-[12px]" />
+            <span>{cancelledText}</span>
+          </div>
         )}
       </div>
       {renderAdditionalOperator(message.role)}

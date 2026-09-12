@@ -82,6 +82,73 @@ export async function createChatSessionRecord(
   return rowToSessionRecord(res.rows[0]);
 }
 
+/** 会话存在但不属于当前用户（防越权把消息写进别人的会话）。 */
+export class ChatSessionAccessError extends Error {
+  readonly code = 'FORBIDDEN';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatSessionAccessError';
+  }
+}
+
+const PG_UNIQUE_VIOLATION = '23505';
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string })?.code === PG_UNIQUE_VIOLATION;
+}
+
+/**
+ * 读取会话行并按归属校验（不存在返回 null；属于别人抛 ChatSessionAccessError）。
+ *
+ * user_id 为空的历史行视为「无主」放行 —— 与 harness 侧 checkAccess 的约定一致。
+ */
+async function findOwnedSession(
+  sessionId: string,
+  userId: string,
+): Promise<ChatSessionRecord | null> {
+  const res = await query(`select * from chat_session where id = $1 limit 1;`, [sessionId]);
+  const row = res.rows[0];
+  if (!row) return null;
+  if (row.user_id != null && String(row.user_id) !== userId) {
+    throw new ChatSessionAccessError(`chat session ${sessionId} belongs to another user`);
+  }
+  return rowToSessionRecord(row);
+}
+
+/**
+ * 确保会话行存在且归属于该用户 —— v3/chat 每次请求都会调用。
+ *
+ * 为什么不能只保留「没有 sessionId 才建行」：前端首个请求失败（未收到 START）时不会
+ * 重置本地状态，下一轮会把客户端生成的临时 UUID 当「已有会话」发过来。那种情况下跳过
+ * 建行，先建的 threads_meta 就成了无主孤儿，紧接着的 chat_message 插入还会撞
+ * session_id 外键直接 500，run 永远起不来（库里实测残留过 3 条这类孤儿 thread）。
+ *
+ * 语义：
+ *   - 已存在且属于该用户 → 原样返回，**不覆盖标题**（不能把续聊当新建改标题）
+ *   - 不存在 → 按 createChatSessionRecord 的规则建（含 seq_id / 默认标题）
+ *   - 属于别人 → 抛 ChatSessionAccessError
+ */
+export async function ensureChatSessionRecord(
+  input: CreateChatSessionInput,
+): Promise<ChatSessionRecord> {
+  if (input.id && input.id.length > 0) {
+    const existing = await findOwnedSession(input.id, input.userId);
+    if (existing) return existing;
+  }
+
+  try {
+    return await createChatSessionRecord(input);
+  } catch (error) {
+    // 并发重试撞主键：回读一次按归属返回，避免把可自愈的竞争报成 500
+    if (input.id && isUniqueViolation(error)) {
+      const existing = await findOwnedSession(input.id, input.userId);
+      if (existing) return existing;
+    }
+    throw error;
+  }
+}
+
 // chat_message 持久化（parts 模型）
 
 export interface SavedFileMetadata {
@@ -241,6 +308,26 @@ export async function deleteMessagesAtOrAfter(
     sessionId,
     isoTime,
   ]);
+}
+
+/**
+ * 取某 run 的 error 文本（用于判断这轮是不是被取消），run 不存在返回 null。
+ *
+ * 为什么要等：客户端「停止」的时序是先 abort 本地 SSE、再 POST cancel_run，所以断流那一刻
+ * run 往往还是 running —— 不等终态就把 assistant 消息落库，取消标记永远写不上去。
+ * 正常跑完的场景状态早已是终态，不会产生等待。超时（默认 1s）按「未取消」处理。
+ */
+export async function waitRunError(runId: string, timeoutMs = 1000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await query(`select status, error from runs where run_id = $1;`, [runId]);
+    const row = res.rows[0];
+    if (!row) return null;
+    const status = String(row.status ?? '');
+    if (status !== 'running' && status !== 'pending') return (row.error as string | null) ?? null;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 export interface LatestMessageRow {

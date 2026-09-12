@@ -381,6 +381,7 @@ export class DeerFlowClient {
     threadId?: string,
     metadata?: Record<string, any>,
     attachments?: { images?: ThreadImageRef[] },
+    signal?: AbortSignal,
   ): ClientAgentEventStream {
     // 多模态输入：模型支持视觉且带图时构造 content blocks（image_url data URL）；
     // 否则退回纯 string（现状行为），图片仍经 uploads 上下文以 OCR 文本形式可见。
@@ -388,7 +389,12 @@ export class DeerFlowClient {
       supportsVision: !!this.modelConfig.supportsVision,
       maxImageBytes: maxImageBytesFromEnv(),
     });
-    yield* this.streamWithInput({ messages: [new HumanMessage(content)] }, threadId, metadata);
+    yield* this.streamWithInput(
+      { messages: [new HumanMessage(content)] },
+      threadId,
+      metadata,
+      signal,
+    );
   }
 
   /**
@@ -400,8 +406,9 @@ export class DeerFlowClient {
     decision: unknown,
     threadId?: string,
     metadata?: Record<string, any>,
+    signal?: AbortSignal,
   ): ClientAgentEventStream {
-    yield* this.streamWithInput(new Command({ resume: decision }), threadId, metadata);
+    yield* this.streamWithInput(new Command({ resume: decision }), threadId, metadata, signal);
   }
 
   /**
@@ -415,6 +422,7 @@ export class DeerFlowClient {
     input: { messages: HumanMessage[] } | Command,
     threadId?: string,
     metadata?: Record<string, any>,
+    signal?: AbortSignal,
   ): ClientAgentEventStream {
     // 1. 解析本次调用的运行期开关（不修改 this.baseOptions）
     const runOpts = this.resolveRuntimeOptions(metadata);
@@ -495,6 +503,10 @@ export class DeerFlowClient {
       //  - "custom":   工具内部通过 LangGraph writer 推送的自定义事件（subagent task_*）
       const stream = await agent.stream(input, {
         ...config,
+        // 取消信号：LangGraph 会把它并入 graph 的 config.signal，一路下发到 LLM 调用
+        // （@langchain/core → OpenAI 兼容 SDK 的 fetch abort），是服务端唯一能真正
+        // 中断在跑 LLM 请求的通道。删除对话时由 ThreadService 触发。
+        signal,
         streamMode: ['messages', 'updates', 'custom'],
         recursionLimit: 200, // 防止递归调用过早报错
       });
@@ -927,19 +939,24 @@ export class DeerFlowClient {
         if (startEvt) yield startEvt;
       }
     } catch (error: any) {
-      const ev = emit(
-        createAgentEvent<AgentEvent>(
-          AgentEventType.ERROR,
-          agentId,
-          {
-            errorCode: 'AGENT_STREAM_ERROR',
-            errorMessage: error?.message ?? 'Unknown error during stream',
-            recoverable: false,
-          },
-          { sessionId: effectiveThreadId, ...metadata },
-        ),
-      );
-      if (ev) yield ev;
+      // 主动取消（signal 被 abort，例如对话被删除）不发 ERROR 帧：abort 会以
+      // `Error('Abort')` 的形式冒到这里，报成「运行出错」是误报；调用方靠
+      // signal.aborted 判定取消结果。
+      if (!signal?.aborted) {
+        const ev = emit(
+          createAgentEvent<AgentEvent>(
+            AgentEventType.ERROR,
+            agentId,
+            {
+              errorCode: 'AGENT_STREAM_ERROR',
+              errorMessage: error?.message ?? 'Unknown error during stream',
+              recoverable: false,
+            },
+            { sessionId: effectiveThreadId, ...metadata },
+          ),
+        );
+        if (ev) yield ev;
+      }
     } finally {
       if (debugAi) {
         debugLog('=== full AI output ===');

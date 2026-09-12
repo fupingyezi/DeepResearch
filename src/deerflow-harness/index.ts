@@ -221,12 +221,14 @@ export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-brid
 // runtime/service
 export {
   createThreadService,
+  ThreadServiceError,
   type ThreadService,
   type ThreadServiceDeps,
   type CreateThreadInput,
   type ListThreadsOptions,
   type GetThreadInput,
   type DeleteThreadInput,
+  type CancelRunInput,
   type SubmitRunInput,
   type SubscribeInput,
   type GetCheckpointInput,

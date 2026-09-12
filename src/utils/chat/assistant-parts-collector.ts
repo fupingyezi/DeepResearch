@@ -17,6 +17,7 @@ import {
   createPartsStateFromExisting,
   finalizePartsState,
   initialPartsState,
+  makeCancelledPart,
   reducePartsState,
   type PartsState,
 } from './parts-reducer';
@@ -39,7 +40,21 @@ export class AssistantPartsCollector {
     this.state = reducePartsState(this.state, event);
   }
 
-  finalize(fallbackTitle = ''): { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } {
-    return finalizePartsState(this.state, fallbackTitle);
+  /**
+   * 收尾：抽 task_summary / artifact 后返回落库结构。
+   *
+   * @param cancelledText 本轮被取消时的标记文案（用户已取消 / 已被新消息取代）。
+   *   传了就在**最末**补一条 cancelled part —— 放在 finalize 之后追加，是因为
+   *   task_summary / artifact 是 finalize 时补到末尾的，标记必须排在它们之后才符合
+   *   「正文 → 总结 → 本轮到哪儿结束」的阅读顺序。parts 为空则忽略，保持
+   *   「没有任何内容就不落一条空消息」的既有规则。
+   */
+  finalize(
+    fallbackTitle = '',
+    cancelledText?: string | null,
+  ): { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } {
+    const { parts, interrupt } = finalizePartsState(this.state, fallbackTitle);
+    if (!cancelledText || parts.length === 0) return { parts, interrupt };
+    return { parts: [...parts, makeCancelledPart(cancelledText)], interrupt };
   }
 }

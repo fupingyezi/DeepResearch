@@ -32,6 +32,7 @@ type SubagentTaskPart = Extract<MessagePart, { type: 'subagent_task' }>;
 type TextPart = Extract<MessagePart, { type: 'text' }>;
 type ReasoningPart = Extract<MessagePart, { type: 'reasoning' }>;
 type TodoPart = Extract<MessagePart, { type: 'todo' }>;
+type CancelledPart = Extract<MessagePart, { type: 'cancelled' }>;
 
 /**
  * 不可变聚合状态。
@@ -194,6 +195,30 @@ export function appendStandaloneText(state: PartsState, text: string): PartsStat
     ...state,
     parts: [...state.parts, part],
     lastPartType: 'text',
+  };
+}
+
+/**
+ * 构造一个「本轮已取消」标记 part。
+ *
+ * 用途：用户点停止时，消息不能停在「正在思考」的转圈态（气泡的转圈条件是
+ * assistant 且 parts 为空）—— 已产出的内容原样保留，后面单独一行说明是被谁中断的。
+ */
+export function makeCancelledPart(text: string): CancelledPart {
+  return {
+    partId: uuidv4(),
+    type: 'cancelled',
+    createdAt: Date.now(),
+    content: { text },
+  };
+}
+
+/** 把取消标记追加到 parts 末尾。 */
+export function appendCancelledPart(state: PartsState, text: string): PartsState {
+  return {
+    ...state,
+    parts: [...state.parts, makeCancelledPart(text)],
+    lastPartType: 'cancelled',
   };
 }
 

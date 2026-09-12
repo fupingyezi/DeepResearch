@@ -7,8 +7,9 @@ import {
   DeleteOutlined,
   SettingOutlined,
   LoadingOutlined,
+  ExclamationCircleFilled,
 } from '@ant-design/icons';
-import { Popover, Modal } from 'antd';
+import { ConfigProvider, Input, Modal, Popover, message } from 'antd';
 
 import { useCallback, useEffect, useState } from 'react';
 import React from 'react';
@@ -22,14 +23,16 @@ import { useOutsideClick } from '@/hooks';
 import { useAuth } from '@/runtime/context/auth-provider';
 import { SettingsDialog } from '@/components/settings/settings-dialog';
 
+type SessionDialogMode = 'rename' | 'delete';
+
 interface SessionBubbleProps {
   chatSession: ChatSessionType;
   isShowDate: boolean;
+  /** 当前展开「⋯ 菜单」的会话（同时只有一个是打开的） */
   selectedSession: ChatSessionType | null;
-  isModalOpen: boolean;
-  setSelectedSession: (selectedSession: ChatSessionType) => void;
-  setIsModalOpen: (isModalOpen: boolean) => void;
-  setSelectedModal: (selectedModal: 'edit' | 'delete') => void;
+  setSelectedSession: (selectedSession: ChatSessionType | null) => void;
+  /** 打开重命名 / 删除弹窗（弹窗自己持有目标会话，不依赖 selectedSession） */
+  onRequestAction: (mode: SessionDialogMode, session: ChatSessionType) => void;
 }
 
 async function getConversationSessions() {
@@ -63,15 +66,7 @@ const SessionStatusIndicator: React.FC<{ status?: SessionRunStatus }> = ({ statu
 };
 
 const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
-  ({
-    chatSession,
-    isShowDate = false,
-    isModalOpen,
-    selectedSession,
-    setSelectedSession,
-    setIsModalOpen,
-    setSelectedModal,
-  }) => {
+  ({ chatSession, isShowDate = false, selectedSession, setSelectedSession, onRequestAction }) => {
     const [isHover, setIsHover] = useState<boolean>(false);
 
     const { currentSessionId, setCurrentSessionId, getSessionRuntime, setSessionMessages } =
@@ -109,27 +104,21 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
             <div onClick={(e) => e.stopPropagation()}>
               <div
                 className="flex items-center gap-2 rounded-md px-2 py-1 hover:cursor-pointer hover:bg-gray-100"
-                onClick={() => {
-                  setIsModalOpen(true);
-                  setSelectedModal('edit');
-                }}
+                onClick={() => onRequestAction('rename', chatSession)}
               >
                 <EditOutlined />
                 重命名
               </div>
               <div
                 className="flex items-center gap-2 rounded-md px-2 py-1 text-red-600 hover:cursor-pointer hover:bg-gray-100"
-                onClick={() => {
-                  setIsModalOpen(true);
-                  setSelectedModal('delete');
-                }}
+                onClick={() => onRequestAction('delete', chatSession)}
               >
                 <DeleteOutlined /> 删除此对话
               </div>
             </div>
           }
           placement="right"
-          open={selectedSession?.id === chatSession.id && !isModalOpen}
+          open={selectedSession?.id === chatSession.id}
         >
           <div
             className="relative flex min-h-10 w-full items-center gap-2 overflow-hidden rounded-xl px-3 leading-10 transition-colors hover:cursor-pointer hover:bg-[#eef0f2]"
@@ -161,7 +150,7 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
                   style={{ fontSize: 20 }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedSession(chatSession);
+                    setSelectedSession(selectedSession?.id === chatSession.id ? null : chatSession);
                   }}
                 />
               </div>
@@ -176,10 +165,19 @@ const SessionBubble: React.FC<SessionBubbleProps> = React.memo(
 SessionBubble.displayName = 'SessionBubble';
 
 const SiderContent = () => {
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [selectedModal, setSelectedModal] = useState<'edit' | 'delete'>('edit');
   const [selectedSession, setSelectedSession] = useState<ChatSessionType | null>(null);
-  const [renameValue, setRenameValue] = useState<string>(selectedSession?.title || '');
+  // 弹窗目标状态与 selectedSession（Popover 开合态）**必须**分开存：
+  // useOutsideClick 在 document 上挂 click 监听，会清空 selectedSession，而
+  // Next App Router 把 React root 挂载在 document 上（next/dist/client/app-index.js
+  // 里 `const appElement = document`），Popover 菜单项里的 e.stopPropagation() 属于
+  // 同节点监听器、拦不住它 —— 点「删除此对话」的那一次 click 会先把 selectedSession
+  // 清成 null，弹窗虽能打开，点确定时却因「没有目标」直接 return，请求根本发不出去。
+  const [dialog, setDialog] = useState<{
+    mode: SessionDialogMode;
+    session: ChatSessionType;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState<string>('');
+  const [submitting, setSubmitting] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const { user } = useAuth();
 
@@ -198,47 +196,50 @@ const SiderContent = () => {
     setCurrentSessionId('');
   }, [setCurrentSessionId]);
 
-  // 点击编辑session
-  const handleSelectEditSession = useCallback(
-    (chatSession: ChatSessionType) => {
-      if (chatSession.id === selectedSession?.id) {
-        setSelectedSession(null);
-      } else {
-        setSelectedSession(chatSession);
-      }
-    },
-    [selectedSession?.id],
-  );
+  // Popover 菜单项 → 打开弹窗。显式收起 Popover，不依赖 document 监听那次清空。
+  const handleRequestAction = useCallback((mode: SessionDialogMode, session: ChatSessionType) => {
+    setSelectedSession(null);
+    setRenameValue(session.title);
+    setDialog({ mode, session });
+  }, []);
 
-  // 编辑session操作确定
-  const handleModalOk = async () => {
-    if (!selectedSession) return;
-    if (selectedModal === 'edit') {
-      await apiClient
-        .post('/conversations/update_session', {
-          sessionId: selectedSession?.id,
-          title: renameValue,
-        })
-        .then(() => {
-          const updateSession: ChatSessionType = {
-            ...selectedSession,
-            title: renameValue,
-            updated_at: Date.now(),
-          };
-          updateChatSession(updateSession, 'edit');
-        });
-    } else {
-      await apiClient
-        .delete('/conversations/update_session', {
-          body: JSON.stringify({ sessionId: selectedSession?.id }),
-        })
-        .then(() => {
-          updateChatSession(selectedSession, 'delete');
-        });
+  const closeDialog = () => {
+    if (submitting) return; // 提交中不许关闭，避免结果落空／重复提交
+    setDialog(null);
+  };
+
+  // 弹窗确认：重命名 / 删除
+  const handleDialogOk = async () => {
+    if (!dialog || submitting) return;
+    const { mode, session } = dialog;
+    const title = renameValue.trim();
+
+    if (mode === 'rename' && !title) {
+      message.warning('对话名称不能为空');
+      return;
     }
 
-    setIsModalOpen(false);
-    setSelectedSession(null);
+    setSubmitting(true);
+    try {
+      if (mode === 'rename') {
+        await apiClient.post('/conversations/update_session', { sessionId: session.id, title });
+        updateChatSession({ ...session, title, updated_at: Date.now() }, 'edit');
+      } else {
+        await apiClient.delete('/conversations/update_session', {
+          body: JSON.stringify({ sessionId: session.id }),
+        });
+        updateChatSession(session, 'delete');
+        message.success('对话已删除');
+      }
+      setDialog(null);
+    } catch (error) {
+      // 此前这条链路完全没有错误处理：请求失败时弹窗既不关也不提示，看起来就像
+      // 「点了没反应」。失败必须让用户看见。
+      console.error(`${mode} session failed:`, error);
+      message.error(mode === 'rename' ? '重命名失败，请稍后重试' : '删除失败，请稍后重试');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // 初始化session列表
@@ -252,16 +253,10 @@ const SiderContent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // session 编辑 popover 监听：仅在 selected 且 modal 关闭时挂监听
-  useOutsideClick(!!selectedSession && !isModalOpen, () => {
+  // 点空白处收起「⋯ 菜单」。弹窗目标已独立存放，这里清空不会波及弹窗。
+  useOutsideClick(!!selectedSession, () => {
     setSelectedSession(null);
   });
-
-  useEffect(() => {
-    if (selectedSession) {
-      setRenameValue(selectedSession.title);
-    }
-  }, [selectedSession]);
 
   // 高度约束用 flex-1 + min-h-0，**不要**改回 h-full：
   // 本组件是 sider.tsx 里 h-screen 列容器的第二个子项（上面还有一行 logo），
@@ -281,14 +276,12 @@ const SiderContent = () => {
       <div className="scrollbar-hide flex min-h-0 w-[92%] flex-1 flex-col overflow-y-scroll">
         {chatSessions.map((session, index) => (
           <SessionBubble
-            key={index}
+            key={String(session.id)}
             chatSession={session}
             isShowDate={checkDifferentDay(session, index)}
-            isModalOpen={isModalOpen}
             selectedSession={selectedSession}
-            setSelectedSession={handleSelectEditSession}
-            setIsModalOpen={setIsModalOpen}
-            setSelectedModal={setSelectedModal}
+            setSelectedSession={setSelectedSession}
+            onRequestAction={handleRequestAction}
           />
         ))}
       </div>
@@ -308,25 +301,68 @@ const SiderContent = () => {
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
-      <Modal
-        title={selectedModal === 'edit' ? '重命名' : '删除对话'}
-        open={isModalOpen}
-        onCancel={() => setIsModalOpen(false)}
-        onOk={() => handleModalOk()}
-        centered
-      >
-        {selectedModal === 'edit' && (
-          <textarea
+      {/* 局部 ConfigProvider：只给这两个弹窗换圆角与主色（对齐侧栏 teal 设计语言），
+          不引入全局主题，设置页等处的 antd 弹窗保持原样。 */}
+      <ConfigProvider theme={{ token: { borderRadiusLG: 16, colorPrimary: '#0f766e' } }}>
+        {/* 删除确认：破坏性操作 —— 说清「不可恢复」+ 回显是哪一条，按钮用 danger 红 */}
+        <Modal
+          open={dialog?.mode === 'delete'}
+          onCancel={closeDialog}
+          onOk={handleDialogOk}
+          title={
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-red-50">
+                <ExclamationCircleFilled className="text-[15px] text-red-500" />
+              </span>
+              <span className="text-[15px] font-semibold text-[#111827]">删除对话</span>
+            </div>
+          }
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          cancelButtonProps={{ disabled: submitting }}
+          confirmLoading={submitting}
+          maskClosable={false}
+          centered
+          width={400}
+        >
+          <div className="space-y-3 pt-1">
+            <p className="m-0 text-[13px] leading-6 text-[#4b5563]">
+              删除后，该对话的消息与文件记录将无法恢复。
+            </p>
+            {dialog && dialog.mode === 'delete' && (
+              <div className="truncate rounded-xl bg-[#f3f4f6] px-3 py-2 text-[13px] text-[#374151]">
+                {dialog.session.title}
+              </div>
+            )}
+          </div>
+        </Modal>
+
+        {/* 重命名：输入框 + 回车即提交 */}
+        <Modal
+          open={dialog?.mode === 'rename'}
+          onCancel={closeDialog}
+          onOk={handleDialogOk}
+          title={<span className="text-[15px] font-semibold text-[#111827]">重命名对话</span>}
+          okText="保存"
+          cancelText="取消"
+          cancelButtonProps={{ disabled: submitting }}
+          confirmLoading={submitting}
+          maskClosable={false}
+          centered
+          width={400}
+        >
+          <Input
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
-            rows={1}
-            className="scrollbar-hide w-full resize-none overflow-y-auto rounded-xl border-2 border-sky-100 px-3 py-2 focus:outline-none"
-          ></textarea>
-        )}
-        {selectedModal === 'delete' && (
-          <div className="font-serif text-2xl text-red-500">确定要删除对话吗🤕</div>
-        )}
-      </Modal>
+            onPressEnter={handleDialogOk}
+            maxLength={60}
+            autoFocus
+            placeholder="请输入对话名称"
+            className="mt-1"
+          />
+        </Modal>
+      </ConfigProvider>
     </div>
   );
 };

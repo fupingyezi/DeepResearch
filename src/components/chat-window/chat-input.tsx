@@ -8,6 +8,7 @@ import { ChatInputProps } from '@/types';
 import { useConversationStore } from '@/store';
 import { useFileUpload, useTextareaAutoHeight } from '@/hooks';
 import { enhancePrompt } from '@/utils/prompt';
+import { cancelRunOnServer } from '@/utils/chat/cancel-run';
 
 /** 增强提示词图标：主体四角星 + 右上角小四角星（fill 跟随 currentColor 变色） */
 const EnhanceStarIcon = ({ className }: { className?: string }) => (
@@ -41,7 +42,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   className,
 }) => {
   const isChating = useConversationStore((s) => s.isChating);
-  const currentAbortController = useConversationStore((s) => s.currentAbortController);
+  const currentSessionId = useConversationStore((s) => s.currentSessionId);
   const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
   const [inputValue, setInputValue] = useState('');
   // 提示词增强：null = 当前文本未被增强（星星态）；非 null = 增强后的原文快照（撤销态）
@@ -56,20 +57,32 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // 高度自适应：把读 scrollHeight + 写 height 收敛到一次 layout 帧内
   useTextareaAutoHeight(textareaRef, inputValue, 100);
 
+  // 停止：两件事都要做，且**先发取消请求再 abort**。
+  // 服务端 run 是 fire-and-forget，只断 SSE 的话它会继续生成并把完整回答落库；而服务端在
+  // 落库 assistant 消息前会等 run 落到终态再判断这轮是否被取消（见 waitRunError），
+  // 先发的取消请求正好落进那个窗口，取消标记才能一起写进 parts（刷新后仍在）。
+  const handleStop = () => {
+    const sid = String(currentSessionId);
+    if (sid) void cancelRunOnServer(sid);
+    abortCurrentChat();
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // 统一前置守卫：disabled 状态下任何路径都不应产生副作用
+
+    // 停止优先于一切守卫：正在跑就必须能停下来。此前 disabled 分支在前，而聊天中
+    // disabled 恒为 true（chat-window 传的是 isChating || guardDisabled），于是「停止」
+    // 成了一个点了完全没反应的死按钮 —— 不 abort、运行态不变、按钮也不变回发送。
+    if (isChating) {
+      handleStop();
+      return;
+    }
+
+    // 统一前置守卫：disabled 状态下任何发送路径都不应产生副作用
     if (disabled) return;
     if (isComposingRef.current) return;
 
     if (!localUploadedFiles.every((file) => file.parsedStatus === 'success')) {
-      return;
-    }
-
-    if (isChating) {
-      if (currentAbortController) {
-        abortCurrentChat();
-      }
       return;
     }
 

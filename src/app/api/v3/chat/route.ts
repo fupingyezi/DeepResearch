@@ -39,7 +39,8 @@ import type { MessagePart, ChatMessageType } from '@/types';
 import { getThreadService, resolveUserModelConfig } from '../../threads/_service';
 import { getCurrentUser } from '../../auth/_helpers';
 import {
-  createChatSessionRecord,
+  ChatSessionAccessError,
+  ensureChatSessionRecord,
   insertAssistantMessageRecord,
   insertUserMessageRecord,
   updateAssistantMessageParts,
@@ -47,6 +48,7 @@ import {
   resolveFilesByIds,
   deleteMessagesAtOrAfter,
   getLatestMessageByRole,
+  waitRunError,
   type ChatSessionRecord,
   type SavedFileMetadata,
 } from '../../conversations/_service';
@@ -164,6 +166,22 @@ function pickEarlier(a: Date | undefined, b: Date | undefined): Date | undefined
   return a.getTime() <= b.getTime() ? a : b;
 }
 
+/**
+ * run 的 error 文本 → 「本轮被取消」标记文案；不是取消则返回 null。
+ *
+ * 文案与 harness 侧 ThreadService 写入的取消原因一一对应（runtime/service.ts 的
+ * RUN_CANCELLED_* 常量）：用户点停止 / 被新消息抢占 / 对话被删（后者用户看不到，
+ * 会话本身都没了）。前端停止时也会就地加同一条标记，两边文案保持一致。
+ */
+function cancelledMarkerText(runError: string | null): string | null {
+  // 用 includes 而非 startsWith：取消原因可能被 LangChain 的中间件链包一层前缀
+  // （实测 `Error in middleware "SubagentLimitMiddleware": cancelled: stopped by user`）
+  if (!runError || !runError.includes('cancelled:')) return null;
+  if (runError.includes('stopped by user')) return '用户已取消';
+  if (runError.includes('superseded by a new run')) return '已被新消息取代';
+  return '本轮已取消';
+}
+
 export async function POST(request: NextRequest) {
   const currentUser = await getCurrentUser(request);
   if (!currentUser) {
@@ -242,27 +260,40 @@ export async function POST(request: NextRequest) {
   const modelConfig = modelResolution.modelConfig;
 
   // —— sessionId 分流 ——
+  // 无论有没有传 sessionId，都先「确保会话行存在」：传进来的 id 未必真的落过库 ——
+  // 前端首个请求失败（没收到 START）时不会重置本地状态，下一轮会把本地生成的临时 UUID
+  // 当「已有会话」发过来。旧实现只在「没传 sessionId」时建行，于是这种情况会先建成
+  // threads_meta 孤儿，紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
   const incomingSessionId =
     typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : null;
 
-  let resolvedThreadId = incomingSessionId ?? '';
-  let createdChatSession: ChatSessionRecord | null = null;
+  let resolvedThreadId = '';
+  let chatSession: ChatSessionRecord | null = null;
 
-  if (!incomingSessionId) {
-    try {
-      const title = inputText.slice(0, 15) || 'New thread';
-      createdChatSession = await createChatSessionRecord({ title, userId: user_id });
-      resolvedThreadId = createdChatSession.id;
-    } catch (e) {
-      console.error('[POST /api/v3/chat] createChatSessionRecord failed:', e);
-      return new Response(
-        JSON.stringify({
-          error: 'failed to create chat session',
-          message: (e as Error)?.message,
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
+  try {
+    const title = inputText.slice(0, 15) || 'New thread';
+    chatSession = await ensureChatSessionRecord({
+      id: incomingSessionId ?? undefined,
+      title,
+      userId: user_id,
+    });
+    resolvedThreadId = chatSession.id;
+  } catch (e) {
+    if (e instanceof ChatSessionAccessError) {
+      console.warn('[POST /api/v3/chat] session access denied:', (e as Error)?.message);
+      return new Response(JSON.stringify({ error: 'forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
+    console.error('[POST /api/v3/chat] ensureChatSessionRecord failed:', e);
+    return new Response(
+      JSON.stringify({
+        error: 'failed to create chat session',
+        message: (e as Error)?.message,
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
   }
 
   // 单路径：始终走 submitRun（fire-and-forget）+ StreamBridge.subscribe。
@@ -425,7 +456,10 @@ export async function POST(request: NextRequest) {
     thread_id: resolvedThreadId,
     sessionId: resolvedThreadId,
   };
-  if (createdChatSession) startPayload.chatSession = createdChatSession;
+  // 总是回传会话记录：正常新建时前端要把它加进侧栏；「临时 id 首次落库」那种续聊也
+  // 需要（此前这类对话因为没落库、永远不进侧栏）；真正的续聊则被 store 的 addChatSession
+  // 按同 id 幂等跳过，重复下发无副作用。
+  if (chatSession) startPayload.chatSession = chatSession;
   if (typeof userMessageId === 'string') startPayload.userMessageId = userMessageId;
   if (typeof assistantMessageId === 'string') startPayload.assistantMessageId = assistantMessageId;
 
@@ -456,8 +490,13 @@ export async function POST(request: NextRequest) {
       }
     } finally {
       if (collector && typeof assistantMessageId === 'string') {
+        // 这轮是被取消的吗？落库的 parts 才是刷新后的真相源，取消标记必须服务端也写一份，
+        // 否则「已产出内容 + 用户已取消」只在当前页面上存在，刷新就没了。
+        // run_id 在下方 submitRun 之后才赋值，但本段在流消费结束时才执行，届时必然已就绪
+        const cancelledText = cancelledMarkerText(await waitRunError(run_id));
+
         const finalized: { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } =
-          collector.finalize(inputText);
+          collector.finalize(inputText, cancelledText);
         if (finalized.parts.length > 0) {
           try {
             if (shouldUpdateOnResume) {
