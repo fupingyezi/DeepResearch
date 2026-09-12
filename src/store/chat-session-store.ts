@@ -229,16 +229,16 @@ const useChatSessionStore = create<ChatSessionState>()(
 
     abortCurrentChat: () =>
       set((state) => {
-        if (state.currentAbortController) {
-          state.currentAbortController.abort();
-          state.currentAbortController = null;
-          state.isChating = false;
-          const sid = String(state.currentSessionId);
-          const runtime = sid ? state.sessionRuntimes[sid] : undefined;
-          if (runtime) {
-            runtime.abortController = null;
-            runtime.status = 'idle';
-          }
+        // 绝不能因为「拿不到 abortController」就整个 no-op：句柄可能因投影/桶迁移丢失，
+        // 但用户的停止意图必须生效 —— 否则按钮卡在停止态、流继续跑，看起来就是点了没反应。
+        state.currentAbortController?.abort();
+        state.currentAbortController = null;
+        state.isChating = false;
+        const sid = String(state.currentSessionId);
+        const runtime = sid ? state.sessionRuntimes[sid] : undefined;
+        if (runtime) {
+          runtime.abortController = null;
+          runtime.status = 'idle';
         }
       }),
 

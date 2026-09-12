@@ -35,8 +35,20 @@ import {
 } from '@/config/models';
 import { getDecryptedKey, getSelectedModel } from '@deerflow-harness/auth';
 
-let service: ThreadService | null = null;
-let initPromise: Promise<ThreadService> | null = null;
+// dev 下用 globalThis 兜住单例：Next.js 会按路由分别编译、热更时重新求值模块，
+// 纯模块级变量会分裂出多份实例 —— 各路由看到各自的 activeRuns / StreamBridge，
+// 于是「删除对话时取消在跑的 run」「停止按钮取消 run」「按 run 订阅事件流」这类
+// 跨路由操作会静默失效（请求落在没有那个 run 的实例上）。生产单次打包无此问题，
+// 与 lib/db 的 pg pool 同一套做法。
+const globalForService = globalThis as unknown as {
+  __threadService?: ThreadService;
+  __threadServiceInit?: Promise<ThreadService>;
+};
+
+let service: ThreadService | null =
+  process.env.NODE_ENV === 'production' ? null : (globalForService.__threadService ?? null);
+let initPromise: Promise<ThreadService> | null =
+  process.env.NODE_ENV === 'production' ? null : (globalForService.__threadServiceInit ?? null);
 let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
 let embeddingsFactoryRegistered = false;
@@ -304,8 +316,10 @@ export async function getThreadService(): Promise<ThreadService> {
   if (!initPromise) {
     initPromise = build().then((s) => {
       service = s;
+      if (process.env.NODE_ENV !== 'production') globalForService.__threadService = s;
       return s;
     });
+    if (process.env.NODE_ENV !== 'production') globalForService.__threadServiceInit = initPromise;
   }
   return initPromise;
 }
