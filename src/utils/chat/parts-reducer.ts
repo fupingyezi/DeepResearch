@@ -39,6 +39,8 @@ type TodoPart = Extract<MessagePart, { type: 'todo' }>;
  * - lastPartType：用于 UI debug；reducer 内部不再依赖此字段做合并判定
  * - indexByToolCallId / indexByTaskId：O(1) 反查 part 下标
  * - interrupt：顶层 human-in-the-loop 标记，不入 parts
+ * - failed：本轮是否收到过 ERROR 事件；用于在收尾时区分「正常完成」与「中途失败」，
+ *   决定是否把未闭合的 todo 项收尾（见 finalizePartsState）
  */
 export interface PartsState {
   readonly parts: readonly MessagePart[];
@@ -46,6 +48,7 @@ export interface PartsState {
   readonly indexByToolCallId: ReadonlyMap<string, number>;
   readonly indexByTaskId: ReadonlyMap<string, number>;
   readonly interrupt: ChatMessageType['interrupt'];
+  readonly failed: boolean;
 }
 
 export const initialPartsState: PartsState = {
@@ -54,6 +57,7 @@ export const initialPartsState: PartsState = {
   indexByToolCallId: new Map(),
   indexByTaskId: new Map(),
   interrupt: null,
+  failed: false,
 };
 
 /**
@@ -77,6 +81,7 @@ export function createPartsStateFromExisting(parts: readonly MessagePart[]): Par
     indexByToolCallId,
     indexByTaskId,
     interrupt: null,
+    failed: false,
   };
 }
 
@@ -119,10 +124,13 @@ export function reducePartsState(state: PartsState, event: ClientAgentEvent): Pa
         },
       };
 
+    case Et.ERROR:
+      // 只置标记，不改 parts（错误文案由调用方按场景决定是否追加）
+      return state.failed ? state : { ...state, failed: true };
+
     case Et.START:
     case Et.END:
     case Et.HEARTBEAT:
-    case Et.ERROR:
       return state;
 
     default: {
@@ -141,8 +149,34 @@ export function finalizePartsState(
   state: PartsState,
   fallbackTitle = '',
 ): { parts: MessagePart[]; interrupt: ChatMessageType['interrupt'] } {
-  const finalParts = extractFinalMessageParts([...state.parts], fallbackTitle);
-  return { parts: finalParts, interrupt: state.interrupt };
+  // 正常结束时闭合仍处于 in_progress 的待办：
+  // agent 循环在「模型产出最终回答且不再调工具」时结束，而最后一项待办的产出
+  // 往往就是这段最终回答本身 —— 模型没有机会再发一次 write_todos 把它标成完成，
+  // 于是清单会永远停在最后一项转圈。既然本轮已正常结束（回答已交付），
+  // 把残留的 in_progress 视为完成，与用户看到的事实一致。
+  // 注意：failed=true（中途出错）时不收尾 —— 那时任务可能确实没做完。
+  const settled = state.failed ? state : closeOpenTodos(state);
+  const finalParts = extractFinalMessageParts([...settled.parts], fallbackTitle);
+  return { parts: finalParts, interrupt: settled.interrupt };
+}
+
+/** 把 todo part 中仍为 in_progress 的项标记为 completed；无变化时返回原 state。 */
+function closeOpenTodos(state: PartsState): PartsState {
+  const index = state.parts.findIndex((part) => part.type === 'todo');
+  if (index < 0) return state;
+
+  const part = state.parts[index] as TodoPart;
+  if (!part.content.todos.some((todo) => todo.status === 'in_progress')) return state;
+
+  const settled: TodoPart = {
+    ...part,
+    content: {
+      todos: part.content.todos.map((todo) =>
+        todo.status === 'in_progress' ? { ...todo, status: 'completed' } : todo,
+      ),
+    },
+  };
+  return { ...state, parts: replaceAt(state.parts, index, settled) };
 }
 
 /**

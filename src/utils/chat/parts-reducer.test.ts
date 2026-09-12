@@ -4,7 +4,7 @@ import { ClientAgentEventType } from '@deerflow-harness/runtime/sse/client-event
 import type { ClientAgentEvent } from '@deerflow-harness/runtime/sse/client-event';
 import type { MessagePart } from '@/types';
 
-import { initialPartsState, reducePartsState } from './parts-reducer';
+import { finalizePartsState, initialPartsState, reducePartsState } from './parts-reducer';
 
 type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -90,5 +90,70 @@ describe('reducePartsState —— TODO_UPDATE', () => {
     const state = reducePartsState(initialPartsState, todoEvent([]));
     expect(todoParts(state.parts)).toHaveLength(1);
     expect(todoParts(state.parts)[0].content.todos).toEqual([]);
+  });
+});
+
+describe('finalizePartsState —— 收尾闭合未完成的 todo', () => {
+  it('正常结束时把残留的 in_progress 标为 completed', () => {
+    // 复现真实场景：模型最后一次 write_todos 把最后一项置为 in_progress，
+    // 随后直接产出最终回答结束循环，没有机会再发一次 write_todos。
+    let state = reducePartsState(
+      initialPartsState,
+      todoEvent([
+        { content: '调研', status: 'completed' },
+        { content: '综合撰写文章', status: 'in_progress' },
+      ]),
+    );
+    state = reducePartsState(state, { ...chunkEvent('报告正文'), eventType: 'end' } as never);
+
+    const { parts } = finalizePartsState(state);
+    const todos = parts.find((p) => p.type === 'todo')?.content.todos ?? [];
+    expect(todos.map((t) => t.status)).toEqual(['completed', 'completed']);
+  });
+
+  it('中途失败（收到 ERROR）时不收尾，保留真实状态', () => {
+    let state = reducePartsState(
+      initialPartsState,
+      todoEvent([
+        { content: '调研', status: 'completed' },
+        { content: '综合撰写文章', status: 'in_progress' },
+      ]),
+    );
+    state = reducePartsState(state, {
+      eventType: ClientAgentEventType.ERROR,
+      timestamp: Date.now(),
+      agentId: 'lead',
+      payload: { errorCode: 'E', errorMessage: 'boom', recoverable: false },
+    } as unknown as ClientAgentEvent);
+
+    const { parts } = finalizePartsState(state);
+    const todos = parts.find((p) => p.type === 'todo')?.content.todos ?? [];
+    expect(todos.map((t) => t.status)).toEqual(['completed', 'in_progress']);
+  });
+
+  it('无 todo part 或无 in_progress 项时不改变 parts 引用', () => {
+    const withoutTodo = finalizePartsState(initialPartsState);
+    expect(withoutTodo.parts).toEqual([]);
+
+    const allDone = reducePartsState(
+      initialPartsState,
+      todoEvent([{ content: 'A', status: 'completed' }]),
+    );
+    const before = allDone.parts[0];
+    const { parts } = finalizePartsState(allDone);
+    expect(parts.find((p) => p.type === 'todo')).toBe(before);
+  });
+
+  it('pending 项不被收尾（模型明确标记为未开始）', () => {
+    const state = reducePartsState(
+      initialPartsState,
+      todoEvent([
+        { content: 'A', status: 'in_progress' },
+        { content: 'B', status: 'pending' },
+      ]),
+    );
+    const { parts } = finalizePartsState(state);
+    const todos = parts.find((p) => p.type === 'todo')?.content.todos ?? [];
+    expect(todos.map((t) => t.status)).toEqual(['completed', 'pending']);
   });
 });

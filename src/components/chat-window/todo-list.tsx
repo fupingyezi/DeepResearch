@@ -12,8 +12,14 @@ type TodoItem = TodoPart['content']['todos'][number];
  *
  * 数据来自 `todo_update` 事件（write_todos 工具每轮下发的全量清单），
  * 同一条消息内只保留一份 part（latest-wins），故这里只做纯渲染。
+ *
+ * `streaming=false`（消息已结束/失败/中止）时不再用旋转图标：那种情况下不会
+ * 再有新事件到达，继续转圈会误导用户「还在进行」。
  */
-const TodoList: React.FC<{ todos: TodoItem[] }> = ({ todos }) => {
+const TodoList: React.FC<{ todos: TodoItem[]; streaming?: boolean }> = ({
+  todos,
+  streaming = false,
+}) => {
   if (todos.length === 0) return null;
 
   const completedCount = todos.filter((t) => t.status === 'completed').length;
@@ -33,8 +39,12 @@ const TodoList: React.FC<{ todos: TodoItem[] }> = ({ todos }) => {
             {todo.status === 'completed' && (
               <CheckCircleFilled className="mt-0.5 shrink-0 text-green-500" />
             )}
-            {todo.status === 'in_progress' && (
+            {todo.status === 'in_progress' && streaming && (
               <LoadingOutlined className="mt-0.5 shrink-0 text-teal-500" />
+            )}
+            {todo.status === 'in_progress' && !streaming && (
+              // 流已结束但该项未闭合（失败/中止）：静态标记，不再旋转
+              <span className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-amber-400" />
             )}
             {todo.status === 'pending' && (
               <span className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-gray-300" />

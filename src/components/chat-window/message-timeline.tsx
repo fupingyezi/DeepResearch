@@ -435,7 +435,13 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ steps, status, interr
             return <SubagentTaskBubble key={step.partId} step={step} index={subagentCounter++} />;
           }
           if (step.type === 'todo') {
-            return <TodoList key={step.partId} todos={step.content.todos} />;
+            return (
+              <TodoList
+                key={step.partId}
+                todos={step.content.todos}
+                streaming={status === 'processing'}
+              />
+            );
           }
           return null;
         })}
