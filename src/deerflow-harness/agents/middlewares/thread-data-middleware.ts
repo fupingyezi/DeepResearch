@@ -57,6 +57,31 @@ const LOAD_UPLOADED_FILES_SQL = `
   limit 10;
 `;
 
+/**
+ * 加载本会话关联的上传文件（元信息 + 解析全文）。
+ *
+ * **导出供 UploadsMiddleware 直接调用**：LangChain v1 中每个中间件节点的输入被限制为
+ * 该中间件自身声明的私有 state + `messages`（见 `MiddlewareNode` 的
+ * `nodeOptions.input = derivePrivateState(stateSchema)`），**跨中间件的 state 读取不成立**
+ * —— 下游读不到本中间件写入的 `state.uploadedFiles`。故下游需要能自行取数。
+ */
+export async function loadSessionUploadedFiles(threadId: string): Promise<UploadedFile[]> {
+  const res = await query(LOAD_UPLOADED_FILES_SQL, [threadId]);
+  const rows = (res.rows ?? []) as UploadedFileRow[];
+  return rows.map((row) => ({
+    fileId: String(row.id),
+    filename: String(row.filename ?? ''),
+    mimeType: String(row.mime_type ?? ''),
+    sizeBytes: Number(row.size_bytes ?? 0),
+    minioKey: String(row.minio_key ?? ''),
+    content: row.content ?? null,
+    uploadedAt:
+      row.uploaded_at instanceof Date
+        ? row.uploaded_at.toISOString()
+        : new Date(row.uploaded_at).toISOString(),
+  }));
+}
+
 export const threadDataMiddleware = createMiddleware({
   name: 'ThreadDataMiddleware',
   beforeAgent: async (state: any) => {
@@ -69,29 +94,9 @@ export const threadDataMiddleware = createMiddleware({
       const existing = state?.uploadedFiles;
       if (Array.isArray(existing) && existing.length > 0) return undefined;
 
-      const res = await query(LOAD_UPLOADED_FILES_SQL, [threadId]);
-      const rows = (res.rows ?? []) as UploadedFileRow[];
-      if (rows.length === 0) {
-        // 仍写入空数组 + threadData 占位，避免下游每次都判空
-        return {
-          uploadedFiles: [] as UploadedFile[],
-          threadData: buildThreadData(threadId),
-        };
-      }
+      const uploadedFiles = await loadSessionUploadedFiles(threadId);
 
-      const uploadedFiles: UploadedFile[] = rows.map((row) => ({
-        fileId: String(row.id),
-        filename: String(row.filename ?? ''),
-        mimeType: String(row.mime_type ?? ''),
-        sizeBytes: Number(row.size_bytes ?? 0),
-        minioKey: String(row.minio_key ?? ''),
-        content: row.content ?? null,
-        uploadedAt:
-          row.uploaded_at instanceof Date
-            ? row.uploaded_at.toISOString()
-            : new Date(row.uploaded_at).toISOString(),
-      }));
-
+      // 空数组也写入 + threadData 占位，避免下游每次都判空
       return {
         uploadedFiles,
         threadData: buildThreadData(threadId),
