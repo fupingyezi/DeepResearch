@@ -592,6 +592,12 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 - 供应商智谱 `embedding-3`（OpenAI 兼容 `/embeddings`，`dimensions` 可配 256..2048，默认 1024），
   工厂由 app 层 `_service.ts` 经 `setMemoryEmbeddingsFactory` 注入；**未注册 / 无 Key / API 失败
   一律静默降级回词面打分，绝不抛出**
+- **必须显式传 `encodingFormat: 'float'`**：OpenAI SDK 在调用方未指定时会把 `encoding_format`
+  默认成 `'base64'` 并按 base64 解码响应（`toFloat32Array`），而智谱**忽略**该参数、仍返回 float
+  数组 —— 数组被当字节流重解释，1024 维静默变成 256 个无意义数值，余弦算出 NaN，语义检索**悄悄**
+  退回词面检索且毫无报错。`embeddings.ts` 的维度守卫会识别这种长度不符并告警一次
+- 语义阈值 `SEMANTIC_MATCH_THRESHOLD = 0.6` 系实测标定：embedding-3 中文短文本的**无关基线**
+  就在 0.44~0.55，真相关 0.64~0.69，阈值须落在两者之间（详见 `retrieval.ts` 注释）
 - 单请求 64 条上限，`embedTexts` 手动分批串行；`Fact.embedding` 随 memory.json 落盘
 - 旧数据回填：`backfillFactEmbeddings` 补缺失 / 维度不匹配的向量，进程内按存储键去重，
   save 前 reload 并只合并「仍存在且 content 未变」的 fact

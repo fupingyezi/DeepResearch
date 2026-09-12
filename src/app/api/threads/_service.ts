@@ -114,6 +114,11 @@ export function ensureMemoryEmbeddingsFactory(): void {
       apiKey,
       dimensions: embeddingDimensions,
       batchSize: EMBEDDING_BATCH_LIMIT, // 智谱单请求 64 条上限
+      // 必须显式指定 'float'：OpenAI SDK 在调用方未指定时会把 encoding_format 默认成
+      // 'base64' 并按 base64 解码响应（toFloat32Array），而智谱**忽略**该参数、仍返回
+      // float 数组 —— 结果是数组被当字节流重解释，得到 256 个（原 1024）无意义数值，
+      // 余弦算成 NaN，语义检索静默退回词面检索。指定后 SDK 原样返回，实测维度与语义均正确。
+      encodingFormat: 'float',
       configuration: {
         baseURL: process.env.DEERFLOW_EMBEDDING_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
       },

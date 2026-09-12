@@ -23,6 +23,14 @@ export type MemoryEmbeddingsFactory = () => Embeddings | null;
 let _factory: MemoryEmbeddingsFactory | null = null;
 let warnedEmbedFailure = false;
 let warnedBackfillFailure = false;
+/** 按 key 去重的告警（避免每轮检索刷屏）。 */
+const warnedKeys = new Set<string>();
+
+function warnOnce(key: string, message: string): void {
+  if (warnedKeys.has(key)) return;
+  warnedKeys.add(key);
+  console.warn(message);
+}
 
 export function setMemoryEmbeddingsFactory(factory: MemoryEmbeddingsFactory | null): void {
   _factory = factory;
@@ -37,18 +45,40 @@ export function resetMemoryEmbeddingsFactory(): void {
   _factory = null;
   warnedEmbedFailure = false;
   warnedBackfillFailure = false;
+  warnedKeys.clear();
 }
 
 /** 智谱 embedding-3 单请求输入条数上限。 */
 export const EMBEDDING_BATCH_LIMIT = 64;
 
-/** 单条文本向量化；工厂缺失 / 失败 / 空文本 → null（调用方回落 lexical）。 */
+/**
+ * 维度守卫：返回向量的长度必须与配置一致。
+ *
+ * 存在的意义：provider/SDK 层面的编码格式不一致会让向量**静默地**变成另一个长度且
+ * 数值无意义（实测：OpenAI SDK 默认按 base64 解码 + 智谱忽略该参数 → 1024 维被当成
+ * 字节流重解释成 256 个乱数），余弦算出 NaN，混合检索悄悄退回词面检索而毫无报错。
+ * 这里把「长度不符」显式识别出来并按失败处理（回落词面），同时告警一次。
+ */
+function isExpectedLength(vector: unknown): vector is number[] {
+  const { embeddingDimensions } = getMemoryConfig();
+  if (!Array.isArray(vector)) return false;
+  if (vector.length === embeddingDimensions) return true;
+  warnOnce(
+    `vector-dimension-mismatch:${vector.length}`,
+    `[memory/embeddings] 返回向量维度 ${vector.length} 与配置 embeddingDimensions=${embeddingDimensions} 不符，` +
+      `已按失败处理（回落词面检索）。请检查 embedding provider 的编码格式/维度参数。`,
+  );
+  return false;
+}
+
+/** 单条文本向量化；工厂缺失 / 失败 / 空文本 / 维度不符 → null（调用方回落 lexical）。 */
 export async function embedQuery(text: string): Promise<number[] | null> {
   if (!text.trim()) return null;
   const embeddings = createEmbeddingsInstance();
   if (!embeddings) return null;
   try {
-    return await embeddings.embedQuery(text);
+    const vector = await embeddings.embedQuery(text);
+    return isExpectedLength(vector) ? vector : null;
   } catch (e) {
     warnEmbedFailureOnce('embedQuery', e);
     return null;
@@ -70,7 +100,8 @@ export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> 
     try {
       const vectors = await embeddings.embedDocuments(batch);
       for (let j = 0; j < batch.length; j++) {
-        out[i + j] = vectors[j] ?? null;
+        const vector = vectors[j];
+        out[i + j] = isExpectedLength(vector) ? vector : null;
       }
     } catch (e) {
       warnEmbedFailureOnce(`embedDocuments(batch #${Math.floor(i / EMBEDDING_BATCH_LIMIT)})`, e);

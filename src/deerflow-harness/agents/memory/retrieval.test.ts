@@ -216,11 +216,29 @@ describe('retrieveMemory 混合打分（queryEmbedding）', () => {
     expect(retrieveMemory(onlySemantic, '')).toBeNull();
   });
 
-  it('余弦低于语义地板（0.35）不参与混合，弱相关不灌入 topK', () => {
+  it('余弦低于语义地板不参与混合，弱相关不灌入 topK', () => {
     // 与 QUERY_VEC 余弦恰为 0.3 的单位向量：[3, sqrt(91), 0, 0]/10
     const weak = [3 / 10, Math.sqrt(91) / 10, 0, 0];
     const noise = memory([fact('完全无关的内容', 0.9, 'f', weak)]);
     expect(retrieveMemory(noise, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+  });
+
+  /**
+   * 阈值边界按实测标定锁定（见 retrieval.ts SEMANTIC_MATCH_THRESHOLD 注释）：
+   * embedding-3 中文短文本的**无关基线**就在 0.44~0.55（如「今天天气不错适合出门散步」
+   * ↔「用户的猫叫豆豆」= 0.550），真相关 0.64~0.69。阈值必须落在两者之间。
+   */
+  it('地板取 0.6：无关基线量级（0.55）被挡下，真相关量级（0.65）放行', () => {
+    // 与 QUERY_VEC 余弦恰为 c 的单位向量：[c, sqrt(1-c²), 0, 0]
+    const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+
+    const baseline = memory([fact('完全无关的内容', 0.9, 'f', unit(0.55))]);
+    expect(retrieveMemory(baseline, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+
+    const relevant = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
+    const picked = retrieveMemory(relevant, '随便聊聊', { queryEmbedding: QUERY_VEC });
+    expect(picked).not.toBeNull();
+    expect(picked!.facts.map((f) => f.id)).toEqual(['f']);
   });
 
   it('置信度加权仍作用在最外层（同向量同文本）', () => {

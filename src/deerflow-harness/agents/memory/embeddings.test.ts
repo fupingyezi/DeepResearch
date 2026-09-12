@@ -77,8 +77,14 @@ describe('cosineSimilarity / isCompatibleVector', () => {
 });
 
 describe('embedQuery / embedTexts', () => {
+  beforeEach(() => {
+    // 维度守卫要求返回向量长度与配置一致，故把配置维度对齐为假向量的 DIMS
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
+  });
+
   afterEach(() => {
     resetMemoryEmbeddingsFactory();
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
     vi.restoreAllMocks();
   });
 
@@ -93,6 +99,26 @@ describe('embedQuery / embedTexts', () => {
     setMemoryEmbeddingsFactory(() => null);
     await expect(embedQuery('量子计算')).resolves.toBeNull();
     expect(await embedTexts(['a'])).toEqual([null]);
+  });
+
+  /**
+   * 维度守卫：provider/SDK 编码格式不一致会让向量静默变成另一个长度且数值无意义
+   * （实测 OpenAI SDK 默认 base64 解码 + 智谱忽略该参数 → 1024 维被当字节流重解释成
+   * 256 个乱数，余弦 NaN）。这类问题必须显式识别并按失败处理，否则语义检索会静默失效。
+   */
+  it('返回向量维度与配置不符 → 按失败处理并告警一次', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const wrongDims = Array.from({ length: DIMS + 3 }, () => 0.5);
+    setMemoryEmbeddingsFactory(
+      () => fakeEmbeddings(async (batch) => batch.map(() => wrongDims)) as unknown as Embeddings,
+    );
+
+    await expect(embedQuery('量子计算')).resolves.toBeNull();
+    await expect(embedTexts(['a', 'b'])).resolves.toEqual([null, null]);
+    // 重复调用只告警一次，避免刷屏
+    await embedQuery('另一条');
+    const dimWarnings = warn.mock.calls.filter((c) => String(c[0]).includes('embeddingDimensions'));
+    expect(dimWarnings).toHaveLength(1);
   });
 
   it('超过 64 条时按 EMBEDDING_BATCH_LIMIT 切片多次调用', async () => {
