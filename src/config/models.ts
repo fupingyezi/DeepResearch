@@ -40,14 +40,20 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     label: 'DeepSeek v4 Flash',
     provider: 'deepseek',
     modelName: 'deepseek-chat',
-    description: 'DeepSeek 通用对话模型（deepseek-chat），适合大多数任务',
+    description: 'DeepSeek 通用对话模型（deepseek-chat），支持图片理解',
+    // 实测（2026-09，8x8 纯色 PNG 经 image_url 直答颜色）：deepseek-chat 接受
+    // 多模态输入。漏标此字段时图片像素根本不会发给模型，只能靠 OCR 文本兜底。
+    supportsVision: true,
   },
   'deepseek-v4-pro': {
     key: 'deepseek-v4-pro',
     label: 'DeepSeek v4 Pro',
     provider: 'deepseek',
     modelName: 'deepseek-reasoner',
-    description: 'DeepSeek 推理模型（deepseek-reasoner），适合复杂推理',
+    description: 'DeepSeek 推理模型（deepseek-reasoner），支持图片理解',
+    // 同上实测通过（注意推理模型的 reasoning 计入 completion_tokens，
+    // 小 max_tokens 下 content 会为空 —— 见 CLAUDE.md 已知限制）
+    supportsVision: true,
   },
   'openai-4o': {
     key: 'openai-4o',
