@@ -35,6 +35,7 @@ import { ChatOpenAI } from '@langchain/openai';
 
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
 import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
+import { getMemoryUpdateStats } from '../../src/deerflow-harness/agents/memory/updater';
 import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/pricing';
 import {
   UsageAccumulator,
@@ -508,6 +509,14 @@ interface LongMemReport {
      * 单独暴露的原因：这些是**评测环境故障**，混进分母会伪装成「模型答错」。
      */
     infraFailureCount: number;
+    /**
+     * 记忆更新（写记忆）的成功/失败计数。
+     *
+     * 失败的形态是**静默丢事实**：模型顶到 maxTokens → 响应为空或 JSON 被截断 →
+     * 解析失败 → 跳过本次更新。它不影响 accuracy 的分母，却会让「记忆模式」的
+     * 成绩无理由地偏低，所以必须显式报出来（此前只在日志里打一行，极易忽略）。
+     */
+    memoryUpdates: { attempted: number; succeeded: number; failed: number };
     /** 按 question_type 分组的统计（correct/judged 只含有效判定，与整体口径一致） */
     byType: Record<
       string,
@@ -588,6 +597,7 @@ function generateReport(
       correctCount,
       accuracy: judgedCount > 0 ? Math.round((correctCount / judgedCount) * 10000) / 10000 : 0,
       infraFailureCount,
+      memoryUpdates: getMemoryUpdateStats(),
       avgLatencyMs:
         successResults.length > 0
           ? Math.round(
@@ -725,6 +735,16 @@ function printReport(report: LongMemReport): void {
     }
   } else {
     console.log('\n  [提示] 未执行 LLM judge 评估（使用了 --no-judge）。准确率不可用。');
+  }
+
+  // ── 记忆更新是否丢事实（静默失败必须说出来）──
+  const mu = summary.memoryUpdates;
+  if (mu.failed > 0) {
+    console.log(
+      `\n  ⚠️  记忆更新失败 ${mu.failed}/${mu.attempted} 次（成功写入 ${mu.succeeded} 次）：` +
+        `失败的更新**没有写入任何事实**，本轮的「记忆模式」成绩因此偏低；` +
+        `常见原因是输出顶到 maxTokens（已从 8192 提到 16384，仍失败请再调大）。`,
+    );
   }
 
   // ── 成本（token 是实测，金额按 pricing.json 估算）──

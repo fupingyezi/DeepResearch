@@ -56,7 +56,9 @@ export function installMemoryModelFactory(config: {
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       streaming: false,
-      maxTokens: 8192,
+      // 与产品侧一致（_service.ts）：8192 会让思考模型的输出顶到上限，
+      // 导致记忆抽取返回空/被截断的 JSON 而静默丢事实。
+      maxTokens: 16384,
       temperature: 0.2,
       topP: 0.8,
     } as ModelConfig),

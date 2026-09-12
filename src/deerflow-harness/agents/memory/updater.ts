@@ -396,6 +396,26 @@ export interface UpdateMemoryOptions {
   reinforcementDetected?: boolean;
 }
 
+/**
+ * 记忆更新的计数器 —— 让「更新失败」不再只留一行日志。
+ *
+ * 背景：更新失败的形态是**静默丢事实**（模型顶到 maxTokens → 响应为空或被截断 →
+ * JSON 解析失败 → 跳过本次更新）。日志混在长输出里很容易被忽略，而后果是记忆里
+ * 少了若干条事实、评测的 memory 相关指标默默变差。基准测试会把这两个数写进报告
+ * （`memoryUpdateFailures`），产品侧也可据此做监控。
+ */
+const memoryUpdateStats = { attempted: 0, succeeded: 0, failed: 0 };
+
+export function getMemoryUpdateStats(): { attempted: number; succeeded: number; failed: number } {
+  return { ...memoryUpdateStats };
+}
+
+export function resetMemoryUpdateStats(): void {
+  memoryUpdateStats.attempted = 0;
+  memoryUpdateStats.succeeded = 0;
+  memoryUpdateStats.failed = 0;
+}
+
 export class MemoryUpdater {
   constructor(private readonly modelName: string | null = null) {}
 
@@ -411,9 +431,16 @@ export class MemoryUpdater {
     if (!config.enabled) return false;
     if (!Array.isArray(messages) || messages.length === 0) return false;
 
+    memoryUpdateStats.attempted += 1;
+    /** 记账后返回 false，避免每条失败路径都要记得手动 ++ */
+    const fail = (): false => {
+      memoryUpdateStats.failed += 1;
+      return false;
+    };
+
     try {
       const conversation = formatConversationForUpdate(messages);
-      if (!conversation.trim()) return false;
+      if (!conversation.trim()) return fail();
 
       const agentName = opts.agentName ?? null;
       const userId = opts.userId ?? null;
@@ -436,7 +463,7 @@ export class MemoryUpdater {
       const model = this.getModel();
       if (!model) {
         console.warn('[memory/updater] No model factory configured; skip LLM update.');
-        return false;
+        return fail();
       }
 
       // 关键：显式 callbacks: [] 切断与外层（HTTP SSE）的 callback handler 链。
@@ -476,14 +503,14 @@ export class MemoryUpdater {
               (e2 as Error).message,
               { len: text.length, tail: text.slice(-120) },
             );
-            return false;
+            return fail();
           }
         } else {
           console.warn('[memory/updater] Failed to parse LLM JSON:', (e as Error).message, {
             len: text.length,
             tail: text.slice(-120),
           });
-          return false;
+          return fail();
         }
       }
 
@@ -492,10 +519,12 @@ export class MemoryUpdater {
       // 新增 / 保留的 facts 批量补齐向量后落盘（失败照常 save，等检索侧回填）
       await embedMissingFacts(updated);
 
-      return await getMemoryStorage().save(updated, { agentName, userId });
+      const saved = await getMemoryStorage().save(updated, { agentName, userId });
+      if (saved) memoryUpdateStats.succeeded += 1;
+      return saved;
     } catch (e) {
       console.error('[memory/updater] Memory update failed:', e);
-      return false;
+      return fail();
     }
   }
 }

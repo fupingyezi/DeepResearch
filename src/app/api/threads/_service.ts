@@ -73,7 +73,11 @@ function ensureMemoryModelFactory(): void {
     return createChatModel({
       ...base,
       streaming: false,
-      maxTokens: 8192,
+      // 16384 而非 8192：记忆抽取要输出「更新后的各 section + facts JSON」，而思考模型的
+      // reasoning 计入 completion_tokens。实测 8192 时输出次均 7,548 token 已顶到上限，
+      // 10 次更新里 4 次失败（2 次空响应、2 次 JSON 被截断），**静默丢掉事实**。
+      // 上限只是预算、不是开销：模型用不到就不会生成。
+      maxTokens: 16384,
       temperature: 0.2,
       topP: 0.8,
     });
