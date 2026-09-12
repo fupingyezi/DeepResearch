@@ -211,8 +211,19 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
 
 ## 六、注意事项
 
-- `.env.production` 只存在服务器上，CI 不会覆盖它；改完重启生效：
-  `docker compose --env-file .env.production -f docker-compose.prod.yaml up -d`
+- `.env.production` 只存在服务器上，CI 不会覆盖它；改完必须**重建 app 容器**才生效
+  （`env_file` 只在容器创建时注入，`docker compose restart` 不会重读）：
+
+  ```bash
+  cd /opt/mini-deepresearch
+  # 关键：把当前镜像 tag 传给 APP_IMAGE。不传会回落到 compose 里的 deepresearch:latest，
+  # 而部署只打 deepresearch:<sha> 的 tag —— 要么拉取失败、要么误用旧镜像。
+  APP_IMAGE="$(docker inspect --format '{{.Config.Image}}' \
+    "$(docker compose --env-file .env.production -f docker-compose.prod.yaml ps -q app)")"
+  APP_IMAGE="$APP_IMAGE" docker compose --env-file .env.production \
+    -f docker-compose.prod.yaml up -d app
+  ```
+
 - `docker-compose.prod.yaml` 与 `scripts/*` 每次部署会被 CI 覆盖为仓库最新版，
   不要直接在服务器上改这两个（要改就改仓库）
 - 长期记忆 / 沙箱文件 / 自定义技能 / MCP 启用状态都在 named volume 里，
