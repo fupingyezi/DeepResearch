@@ -114,6 +114,11 @@ export function createBenchmarkAgent(options: {
       let ttftMs = 0;
       const toolNames: string[] = [];
       const events: ClientAgentEvent[] = [];
+      // 流内 ERROR 事件：client.stream() **通常不抛**，而是发一个 ERROR 事件再 END。
+      // 只靠 catch 判错的话，失败的 run 会被当成「正常但答得短」：报告显示 Errors 0，
+      // 却被计进 accuracy 分母变成「模型答错」，并在 JSONL 导出时被静默丢弃
+      // （实测 500 题里 7 条如此）。
+      let streamError: string | undefined;
 
       // ⚠️ 关键：每个 benchmark 项目必须用唯一 thread_id 建立 RuntimeContext。
       // LoopDetectionMiddleware 是进程级单例，其 toolFreq 计数器按 thread_id 隔离。
@@ -162,6 +167,12 @@ export function createBenchmarkAgent(options: {
                 if (event.eventType === ClientAgentEventType.TOOL_CALL) {
                   toolNames.push((event as any).payload?.toolName ?? 'unknown');
                 }
+
+                if (event.eventType === ClientAgentEventType.ERROR) {
+                  streamError =
+                    (event as any).payload?.errorMessage ??
+                    `agent stream error (${(event as any).payload?.errorCode ?? 'unknown'})`;
+                }
               }
 
               // 记忆更新走 debounce 队列（afterAgent 只入队，LLM 调用在 setTimeout 里）。
@@ -187,6 +198,23 @@ export function createBenchmarkAgent(options: {
               error: true,
               errorMessage: `run 超时（${options.timeoutMs}ms），已中止`,
               errorKind: 'timeout',
+            },
+            events,
+            usage,
+          };
+        }
+
+        if (streamError) {
+          return {
+            output: fullText.trim(),
+            metrics: {
+              ttftMs,
+              totalLatencyMs: Date.now() - startTime,
+              toolCallCount: toolNames.length,
+              toolNames,
+              error: true,
+              errorMessage: streamError,
+              errorKind: 'agent',
             },
             events,
             usage,

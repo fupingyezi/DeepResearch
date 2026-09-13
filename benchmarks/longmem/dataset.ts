@@ -250,6 +250,17 @@ export function exportToJSONL(
       hypothesis: output,
     }));
 
+  // 空输出的条目会被丢掉（官方格式里没有「无回答」的表示）。**必须报出来**：
+  // 否则「导出 492 条」与「报告 500 条成功」对不上，用官方脚本评出的分母也不一致，
+  // 而日志里没有任何线索。这些条目通常是 agent 侧 ERROR 事件导致的空回答。
+  const dropped = results.length - lines.length;
+  if (dropped > 0) {
+    console.warn(
+      `[LongMemEval] ${dropped}/${results.length} 条因输出为空被排除出官方 JSONL` +
+        `（用官方脚本评估时分母会比本地报告小 ${dropped} 条）`,
+    );
+  }
+
   const jsonl = lines.map((l) => JSON.stringify(l)).join('\n');
 
   const dir = path.dirname(outputPath);
