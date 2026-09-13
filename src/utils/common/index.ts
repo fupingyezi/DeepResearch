@@ -3,4 +3,5 @@ export { isObjectWithKey, hasMeaningfulArgs } from './type-guards';
 export { extractMessageContentText } from './message-content';
 export { toIso, formatYmd } from './date';
 export { firstSentence } from './text';
+export { casefold } from './casefold';
 export { createRafFlusher, type RafFlusher } from './raf-flush';

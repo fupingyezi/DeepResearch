@@ -6,7 +6,7 @@
  *
  * - max_facts 限制（按 confidence 倒排截断）
  * - factConfidenceThreshold 过滤
- * - 同 content 去重（casefold trim）
+ * - 同 content 去重（Unicode casefold + trim）
  * - 上传事件清洗（_strip_upload_mentions_from_memory）
  * - correction/reinforcement hint 注入
  * - 失败安静吞没，返回 false（不抛出）
@@ -20,7 +20,7 @@ import { embedQuery, embedTexts, isCompatibleVector } from './embeddings';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
 import { createEmptyMemory, Fact, FactCategory, MemoryData, utcNowIsoZ } from './types';
-import { extractMessageContentText } from '@/utils/common';
+import { casefold, extractMessageContentText } from '@/utils/common';
 
 // Model factory injection
 export type MemoryModelFactory = (modelName: string | null | undefined) => BaseChatModel;
@@ -246,7 +246,7 @@ function factContentKey(content: any): string | null {
   if (typeof content !== 'string') return null;
   const s = content.trim();
   if (!s) return null;
-  return s.toLocaleLowerCase();
+  return casefold(s).normalize('NFC');
 }
 
 function applyUpdates(current: MemoryData, update: any, threadId: string | null): MemoryData {
