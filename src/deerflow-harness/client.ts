@@ -5,6 +5,7 @@ import { BaseCheckpointSaver, Command } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
+import { getExtraMiddlewares, getExtraMiddlewaresSignature } from './agents/extra-middlewares';
 import { createSummarizationMiddleware } from './agents/middlewares';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool } from './tools';
@@ -45,11 +46,13 @@ interface RuntimeRunOptions {
   availableSkills?: string[];
 }
 
-function buildConfigKey(
+/** agent 缓存键（导出仅供单测锁定键形态；装配见 ensureAgent）。 */
+export function buildConfigKey(
   modelConfig: ModelConfig,
   opts: RuntimeRunOptions,
   mcpSignature: string,
   skillSignature: string,
+  extraMiddlewareSignature: string,
 ): AgentConfigKey {
   return JSON.stringify([
     modelConfig.modelName,
@@ -68,6 +71,7 @@ function buildConfigKey(
     opts.availableSkills?.sort() ?? [],
     mcpSignature,
     skillSignature,
+    extraMiddlewareSignature,
   ]);
 }
 
@@ -311,6 +315,7 @@ export class DeerFlowClient {
    *
    * mcpTools 由 caller 预加载并透传（与 systemPrompt 注入的工具同源）；缓存键纳入
    * MCP/skill 启用签名，使配置变更后（关闭 memory 的可缓存场景）agent 自动重建。
+   * extra-middlewares 注册表签名同契约：晚注册（首建之后）经签名变化使缓存失效。
    */
   private async ensureAgent(
     systemPrompt: string,
@@ -319,7 +324,14 @@ export class DeerFlowClient {
   ): Promise<any> {
     const mcpSignature = await getEnabledMcpSignature();
     const skillSignature = await getEnabledSkillsSignature();
-    const key = buildConfigKey(this.modelConfig, opts, mcpSignature, skillSignature);
+    const extraMiddlewareSignature = getExtraMiddlewaresSignature('lead');
+    const key = buildConfigKey(
+      this.modelConfig,
+      opts,
+      mcpSignature,
+      skillSignature,
+      extraMiddlewareSignature,
+    );
     const cacheable = !opts.memoryEnabled;
 
     if (cacheable) {
@@ -337,6 +349,7 @@ export class DeerFlowClient {
       systemPrompt,
       checkpointer: this.checkpointer,
       provider,
+      extraMiddlewares: getExtraMiddlewares('lead'),
       features: {
         memory: opts.memoryEnabled,
         autoTitle: opts.autoTitleEnabled,

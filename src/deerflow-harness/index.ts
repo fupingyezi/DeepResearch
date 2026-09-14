@@ -1,6 +1,15 @@
 export { DeerFlowClient } from './client';
 export { createChatModel } from './models';
 export { createBaseAgent } from './agents/factory';
+export {
+  registerExtraMiddleware,
+  getExtraMiddlewares,
+  getExtraMiddlewaresSignature,
+  resetExtraMiddlewares,
+  type MiddlewareScope,
+  type RegisterExtraMiddlewareOptions,
+} from './agents/extra-middlewares';
+export { Next, Prev, type MiddlewareAnchor } from './agents/features';
 export { searchWebTool, taskTool, viewImageTool, getAvailableTools } from './tools';
 export {
   SubagentExecutor,
