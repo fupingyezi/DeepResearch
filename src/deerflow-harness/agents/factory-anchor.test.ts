@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMiddleware, type AgentMiddleware } from 'langchain';
 
 import { assembleFromFeatures } from './factory';
@@ -62,6 +62,43 @@ describe('assembleFromFeatures —— @Next/@Prev 锚点插入', () => {
     expect(indexOf(chain, 'ClassDecorated')).toBe(
       indexOf(chain, 'ToolErrorHandlingMiddleware') - 1,
     );
+  });
+
+  it('类锚点按类名命中内置实例（链上是普通对象，构造函数比对不了）', () => {
+    // 文档里的用法一：@Next 装饰自定义类，锚点给内置中间件的**类名**。
+    // 链上实例是 createMiddleware 造的普通对象（constructor 恒为 Object），
+    // 只能靠「类名 === 实例 name」命中。
+    const AnchorClass = class ToolErrorHandlingMiddleware {};
+    const Decorated = class CustomAfterClassAnchor {};
+    Next(AnchorClass)(Decorated as never);
+    const custom = createMiddleware({ name: 'CustomAfterClassAnchor' }) as AgentMiddleware;
+    Object.defineProperty(custom, 'constructor', { value: Decorated });
+
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [custom] });
+
+    expect(indexOf(chain, 'CustomAfterClassAnchor')).toBe(
+      indexOf(chain, 'ToolErrorHandlingMiddleware') + 1,
+    );
+  });
+
+  it('锚点未命中时告警一次，同键重复装配不再刷屏', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // 与「锚点不在链上」用例同源：DEFAULT_FEATURES 没有 MemoryMiddleware
+      const build = () => positioned('CustomWarnOnce', memoryMiddleware, 'prev');
+      const warnings = () =>
+        warn.mock.calls.filter(([msg]) => String(msg).includes('CustomWarnOnce'));
+
+      const { chain } = assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [build()] });
+
+      expect(warnings()).toHaveLength(1);
+      expect(indexOf(chain, 'CustomWarnOnce')).toBe(chain.length - 1); // 仍然不丢中间件
+
+      assembleFromFeatures(DEFAULT_FEATURES, { extraMiddlewares: [build()] });
+      expect(warnings()).toHaveLength(1); // 第二次同键保持静默
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('无锚点的自定义中间件追加到链尾', () => {

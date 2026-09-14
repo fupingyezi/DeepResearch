@@ -257,7 +257,7 @@ export function assembleFromFeatures(
  * - 优先按构造函数同一性匹配；生产构建可能压缩类名，退化到 `name` 相等；
  * - `_prevAnchor` 插入到**第一个**匹配实例之前；`_nextAnchor` 插入到
  *   **最后一个**匹配实例之后（同名中间件可能在链上出现多次）；
- * - 无锚点或锚点不在链上时追加到链尾（保持历史语义）。
+ * - 无锚点或锚点不在链上时追加到链尾（保持历史语义），后者额外告警一次。
  */
 function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware): void {
   const resolved = resolveAnchor(middleware);
@@ -272,6 +272,7 @@ function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware)
     .filter(({ existing }) => matchesAnchor(existing, anchor));
 
   if (matches.length === 0) {
+    warnAnchorMiss(middleware, anchor);
     chain.push(middleware);
     return;
   }
@@ -281,6 +282,30 @@ function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware)
   } else {
     chain.splice(matches[matches.length - 1].index + 1, 0, middleware);
   }
+}
+
+/**
+ * 锚点未命中告警（同「中间件名 + 锚点名」只告警一次）。
+ *
+ * 「锚点不在链上 → 追加链尾」的静默降级会让顺序问题变成无报错的玄学行为，
+ * 所以这里必须出声；但 `memoryEnabled=true` 时 agent 每轮重建（见 client.ts
+ * 的缓存键例外），不去重就会按轮次刷屏，故按 key 只报一次。
+ */
+const warnedAnchorMisses = new Set<string>();
+
+function warnAnchorMiss(middleware: AgentMiddleware, anchor: MiddlewareAnchor): void {
+  const mwName = (middleware as { name?: string }).name ?? '(anonymous)';
+  const anchorName =
+    typeof anchor === 'function'
+      ? anchor.name
+      : ((anchor as { name?: string }).name ?? '(anonymous)');
+  const key = `${mwName}|${anchorName}`;
+  if (warnedAnchorMisses.has(key)) return;
+  warnedAnchorMisses.add(key);
+  console.warn(
+    `[mw] 锚点未命中：${mwName} 声明的锚点 ${anchorName} 不在链上，已退化为追加链尾。` +
+      `常见原因：锚点对应的 feature 未开启，或锚点传了类名而链上是 createMiddleware 实例`,
+  );
 }
 
 /** 解析中间件的插入锚点；无锚点返回 null。 */
@@ -298,13 +323,21 @@ function resolveAnchor(
   return null;
 }
 
-/** 判断链上中间件是否命中锚点：锚点为类时比构造函数，为实例时先同一性再比 name。 */
+/**
+ * 判断链上中间件是否命中锚点：锚点为类时比构造函数（再退化比构造函数名、
+ * 中间件 `name`），为实例时先同一性再比 `name`。
+ *
+ * 第三条（`existing.name === anchor.name`）不可省：链上内置中间件都是
+ * `createMiddleware()` 造出的普通对象，`constructor` 恒为 `Object`，类锚点
+ * 若不比 `name` 就永远匹配不上，会静默退化成追加链尾。
+ */
 function matchesAnchor(existing: AgentMiddleware, anchor: MiddlewareAnchor): boolean {
   if (existing === anchor) return true;
   if (typeof anchor === 'function') {
     return (
       existing.constructor === anchor ||
-      (existing.constructor as { name?: string } | undefined)?.name === anchor.name
+      (existing.constructor as { name?: string } | undefined)?.name === anchor.name ||
+      (existing as { name?: string }).name === anchor.name
     );
   }
   return (existing as { name?: string }).name === (anchor as { name?: string }).name;

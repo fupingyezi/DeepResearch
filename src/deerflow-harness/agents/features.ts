@@ -39,7 +39,10 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
 /**
  * 插入锚点：既接受中间件**类**（`@Next(LoopDetectionMiddleware)` 装饰类），
  * 也接受中间件**实例**（内置中间件多为 `createMiddleware()` 实例，如
- * `loopDetectionMiddleware`）。装配时先按同一性匹配，再退化按 `name` 匹配。
+ * `loopDetectionMiddleware`）。装配时先按同一性匹配，再退化按 `name` 匹配 ——
+ * 链上内置中间件是 `createMiddleware()` 造出的普通对象（`constructor` 恒为
+ * `Object`），故类锚点靠**类名与实例 `name` 相等**命中；构造函数比对只对
+ * `class X extends AgentMiddleware` 形态的中间件有效。
  */
 export type MiddlewareAnchor = AgentMiddleware | (new (...args: any[]) => AgentMiddleware);
 
