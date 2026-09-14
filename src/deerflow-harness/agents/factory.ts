@@ -8,7 +8,9 @@ import {
   DEFAULT_FEATURES,
   type FeatureToggle,
   type MiddlewareAnchor,
-  type PositionedMiddleware,
+  resolveMiddlewareAnchor,
+  anchorDisplayName,
+  middlewareDisplayName,
 } from './features';
 import { AssembelOptions, ModelProvider } from '../types';
 import { taskTool, SANDBOX_TOOLS, viewImageTool } from '../tools';
@@ -239,48 +241,52 @@ export function assembleFromFeatures(
   }
 
   // 自定义中间件：按 @Next/@Prev 锚点插入（无锚点 / 锚点未命中 → 追加到链尾）
-  for (const middleware of extraMiddlewares ?? []) {
-    insertWithAnchor(chain, middleware);
-  }
+  insertExtrasWithAnchors(chain, extraMiddlewares ?? []);
 
   return { chain, extraTools };
 }
 
 /**
- * 按 `@Next` / `@Prev` 装饰器声明的锚点，把自定义中间件插入链中。
+ * 按 `@Next` / `@Prev` 装饰器声明的锚点，把自定义中间件批量插入链中。
  *
- * 锚点读取：装饰器把锚点写在**类（构造函数）**上，而 `createMiddleware()`
- * 会剥离实例上的未知字段，因此两个位置都要读 —— 优先实例字段（手工
- * `Object.assign` 场景），回退构造函数静态字段（`@Next` / `@Prev` 装饰类场景）。
+ * 两阶段插入：先对**插入前的链快照**解析全部落位坐标，再按坐标统一 splice。
+ * 若逐个插入，每次 splice 都改变链长，后续锚点匹配与坐标都会受先前插入的
+ * extra 干扰——两个 `@Next(X)` 会逆序落成 `[X, B, A]`。快照语义同时明确了
+ * 「extra 不能锚定另一个 extra」：extras 只对内置链解析锚点。
  *
- * 匹配规则：
- * - 优先按构造函数同一性匹配；生产构建可能压缩类名，退化到 `name` 相等；
+ * 匹配规则（与单插入时期一致）：
  * - `_prevAnchor` 插入到**第一个**匹配实例之前；`_nextAnchor` 插入到
  *   **最后一个**匹配实例之后（同名中间件可能在链上出现多次）；
- * - 无锚点或锚点不在链上时追加到链尾（保持历史语义），后者额外告警一次。
+ * - 无锚点或锚点不在链上时追加到链尾，后者额外告警一次。
  */
-function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware): void {
-  const resolved = resolveAnchor(middleware);
-  if (!resolved) {
-    chain.push(middleware);
-    return;
-  }
-  const { anchor, side } = resolved;
+function insertExtrasWithAnchors(chain: AgentMiddleware[], extras: AgentMiddleware[]): void {
+  if (extras.length === 0) return;
 
-  const matches = chain
-    .map((existing, index) => ({ existing, index }))
-    .filter(({ existing }) => matchesAnchor(existing, anchor));
+  // 阶段一：无锚 / 未命中 → 尾坐标（与显式尾坐标在阶段二同序处理）
+  const plans = extras.map((middleware, order) => {
+    const resolved = resolveMiddlewareAnchor(middleware);
+    let index = chain.length;
+    if (resolved) {
+      const matches: number[] = [];
+      chain.forEach((existing, i) => {
+        if (matchesAnchor(existing, resolved.anchor)) matches.push(i);
+      });
+      if (matches.length === 0) {
+        warnAnchorMiss(middleware, resolved.anchor);
+      } else {
+        index = resolved.side === 'prev' ? matches[0] : matches[matches.length - 1] + 1;
+      }
+    }
+    return { middleware, index, order };
+  });
 
-  if (matches.length === 0) {
-    warnAnchorMiss(middleware, anchor);
-    chain.push(middleware);
-    return;
-  }
-
-  if (side === 'prev') {
-    chain.splice(matches[0].index, 0, middleware);
-  } else {
-    chain.splice(matches[matches.length - 1].index + 1, 0, middleware);
+  // 阶段二：快照坐标升序 + extraMiddlewares 数组序决胜（不依赖 sort 稳定性）；
+  // 累计偏移补偿先前插入对坐标的推移。同坐标（含尾坐标）按数组序先后落位。
+  const ordered = plans.sort((a, b) => a.index - b.index || a.order - b.order);
+  let offset = 0;
+  for (const plan of ordered) {
+    chain.splice(plan.index + offset, 0, plan.middleware);
+    offset += 1;
   }
 }
 
@@ -294,11 +300,8 @@ function insertWithAnchor(chain: AgentMiddleware[], middleware: AgentMiddleware)
 const warnedAnchorMisses = new Set<string>();
 
 function warnAnchorMiss(middleware: AgentMiddleware, anchor: MiddlewareAnchor): void {
-  const mwName = (middleware as { name?: string }).name ?? '(anonymous)';
-  const anchorName =
-    typeof anchor === 'function'
-      ? anchor.name
-      : ((anchor as { name?: string }).name ?? '(anonymous)');
+  const mwName = middlewareDisplayName(middleware);
+  const anchorName = anchorDisplayName(anchor);
   const key = `${mwName}|${anchorName}`;
   if (warnedAnchorMisses.has(key)) return;
   warnedAnchorMisses.add(key);
@@ -306,21 +309,6 @@ function warnAnchorMiss(middleware: AgentMiddleware, anchor: MiddlewareAnchor): 
     `[mw] 锚点未命中：${mwName} 声明的锚点 ${anchorName} 不在链上，已退化为追加链尾。` +
       `常见原因：锚点对应的 feature 未开启，或锚点传了类名而链上是 createMiddleware 实例`,
   );
-}
-
-/** 解析中间件的插入锚点；无锚点返回 null。 */
-function resolveAnchor(
-  middleware: AgentMiddleware,
-): { anchor: MiddlewareAnchor; side: 'prev' | 'next' } | null {
-  const positioned = middleware as PositionedMiddleware;
-  if (positioned._prevAnchor) return { anchor: positioned._prevAnchor, side: 'prev' };
-  if (positioned._nextAnchor) return { anchor: positioned._nextAnchor, side: 'next' };
-  // 装饰器把锚点写在类（构造函数）上，而 createMiddleware 会剥离实例未知字段，
-  // 因此再回退读一次构造函数的静态字段。
-  const ctor = middleware.constructor as unknown as PositionedMiddleware | undefined;
-  if (ctor?._prevAnchor) return { anchor: ctor._prevAnchor, side: 'prev' };
-  if (ctor?._nextAnchor) return { anchor: ctor._nextAnchor, side: 'next' };
-  return null;
 }
 
 /**

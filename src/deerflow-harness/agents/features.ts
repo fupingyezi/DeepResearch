@@ -81,3 +81,34 @@ export function Prev(anchor: MiddlewareAnchor) {
     return target;
   };
 }
+
+/**
+ * 解析中间件的插入锚点；无锚点返回 null。
+ *
+ * 锚点可能写在两处：装饰器写在**类（构造函数）**上，而 `createMiddleware()`
+ * 会剥离实例上的未知字段，因此先读实例字段（手工 `Object.assign` 场景），
+ * 再回退构造函数静态字段（`@Next` / `@Prev` 装饰类场景）。`_prevAnchor` 优先。
+ */
+export function resolveMiddlewareAnchor(middleware: AgentMiddleware): {
+  anchor: MiddlewareAnchor;
+  side: 'prev' | 'next';
+} | null {
+  const positioned = middleware as PositionedMiddleware;
+  if (positioned._prevAnchor) return { anchor: positioned._prevAnchor, side: 'prev' };
+  if (positioned._nextAnchor) return { anchor: positioned._nextAnchor, side: 'next' };
+  const ctor = middleware.constructor as unknown as PositionedMiddleware | undefined;
+  if (ctor?._prevAnchor) return { anchor: ctor._prevAnchor, side: 'prev' };
+  if (ctor?._nextAnchor) return { anchor: ctor._nextAnchor, side: 'next' };
+  return null;
+}
+
+/** 锚点的显示名（类取类名，实例取 `name`），用于日志与签名。 */
+export function anchorDisplayName(anchor: MiddlewareAnchor): string {
+  if (typeof anchor === 'function') return anchor.name;
+  return (anchor as { name?: string }).name ?? '(anonymous)';
+}
+
+/** 中间件的显示名，用于日志与签名。 */
+export function middlewareDisplayName(middleware: AgentMiddleware): string {
+  return (middleware as { name?: string }).name ?? '(anonymous)';
+}
