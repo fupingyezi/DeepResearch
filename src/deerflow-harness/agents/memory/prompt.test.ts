@@ -95,6 +95,23 @@ describe('formatMemoryForInjection token 预算', () => {
     expect(text).not.toContain('likes cats');
   });
 
+  it('缺省按 confidence 降序注入（inject 模式现状）', () => {
+    const facts = [fact('low item', 0.5), fact('high item', 0.99), fact('mid item', 0.7)];
+    const text = formatMemoryForInjection(memory(facts), 500);
+    const high = text.indexOf('high item');
+    const mid = text.indexOf('mid item');
+    const low = text.indexOf('low item');
+    expect(high).toBeLessThan(mid);
+    expect(mid).toBeLessThan(low);
+  });
+
+  it('preserveFactOrder: true 保持传入序（retrieve 模式的相关度序）', () => {
+    // 传入序即检索相关度序：低 confidence 在前也不得被重排
+    const facts = [fact('most relevant', 0.5), fact('less relevant', 0.99)];
+    const text = formatMemoryForInjection(memory(facts), 500, { preserveFactOrder: true });
+    expect(text.indexOf('most relevant')).toBeLessThan(text.indexOf('less relevant'));
+  });
+
   it('facts 为空时不产生 Facts 段', () => {
     const data = memory([], {
       user: {

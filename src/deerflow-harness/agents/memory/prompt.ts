@@ -166,9 +166,18 @@ function coerceConfidence(value: any, dft = 0.0): number {
 
 // formatMemoryForInjection
 
+export interface FormatMemoryForInjectionOptions {
+  /**
+   * true = 保持传入 facts 顺序（retrieve 模式已按检索相关度降序，
+   * 预算截断应优先牺牲低相关条目）；缺省 false = 按 confidence 降序（inject 模式）。
+   */
+  preserveFactOrder?: boolean;
+}
+
 export function formatMemoryForInjection(
   memoryData: MemoryData | null | undefined,
   maxTokens = 2000,
+  options?: FormatMemoryForInjectionOptions,
 ): string {
   if (!memoryData) return '';
 
@@ -210,8 +219,10 @@ export function formatMemoryForInjection(
           typeof f.content === 'string' &&
           f.content.trim().length > 0,
       )
-      .slice()
-      .sort((a, b) => coerceConfidence(b.confidence, 0) - coerceConfidence(a.confidence, 0));
+      .slice();
+    if (!options?.preserveFactOrder) {
+      ranked.sort((a, b) => coerceConfidence(b.confidence, 0) - coerceConfidence(a.confidence, 0));
+    }
 
     const baseText = sections.join('\n\n');
     const baseTokens = baseText ? countTokens(baseText) : 0;

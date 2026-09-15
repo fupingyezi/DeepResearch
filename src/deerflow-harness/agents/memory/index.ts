@@ -157,7 +157,9 @@ async function retrieveForInjection(
     queryEmbedding,
     hybridWeight: config.embeddingHybridWeight,
   });
-  const pickedText = picked ? _fmt(picked, config.retrieveMaxTokens) : '';
+  const pickedText = picked
+    ? _fmt(picked, config.retrieveMaxTokens, { preserveFactOrder: true })
+    : '';
   return {
     queryEmbedding,
     picked,
@@ -191,8 +193,8 @@ export interface MemoryRetrievalPreview {
 /**
  * 预览检索效果：走与真实注入完全相同的代码路径，返回逐条打分明细 + 最终注入文本。
  *
- * 用途：`memoryMode: 'retrieve'` 目前无前端开关，本入口让「哪些 fact 被选中、
- * 词面/余弦各占多少、为什么没选中」可直接观察（见 /api/memory/retrieve）。
+ * 让「哪些 fact 被选中、词面/余弦各占多少、为什么没选中」可直接观察
+ * （见 /api/memory/retrieve）。
  */
 export async function previewMemoryRetrieval(opts: {
   agentName?: string | null;
