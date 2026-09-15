@@ -39,7 +39,10 @@ export const DEFAULT_FEATURES: RuntimeFeatures = {
 /**
  * 插入锚点：既接受中间件**类**（`@Next(LoopDetectionMiddleware)` 装饰类），
  * 也接受中间件**实例**（内置中间件多为 `createMiddleware()` 实例，如
- * `loopDetectionMiddleware`）。装配时先按同一性匹配，再退化按 `name` 匹配。
+ * `loopDetectionMiddleware`）。装配时先按同一性匹配，再退化按 `name` 匹配 ——
+ * 链上内置中间件是 `createMiddleware()` 造出的普通对象（`constructor` 恒为
+ * `Object`），故类锚点靠**类名与实例 `name` 相等**命中；构造函数比对只对
+ * `class X extends AgentMiddleware` 形态的中间件有效。
  */
 export type MiddlewareAnchor = AgentMiddleware | (new (...args: any[]) => AgentMiddleware);
 
@@ -77,4 +80,35 @@ export function Prev(anchor: MiddlewareAnchor) {
     (target as PositionedMiddleware)._prevAnchor = anchor;
     return target;
   };
+}
+
+/**
+ * 解析中间件的插入锚点；无锚点返回 null。
+ *
+ * 锚点可能写在两处：装饰器写在**类（构造函数）**上，而 `createMiddleware()`
+ * 会剥离实例上的未知字段，因此先读实例字段（手工 `Object.assign` 场景），
+ * 再回退构造函数静态字段（`@Next` / `@Prev` 装饰类场景）。`_prevAnchor` 优先。
+ */
+export function resolveMiddlewareAnchor(middleware: AgentMiddleware): {
+  anchor: MiddlewareAnchor;
+  side: 'prev' | 'next';
+} | null {
+  const positioned = middleware as PositionedMiddleware;
+  if (positioned._prevAnchor) return { anchor: positioned._prevAnchor, side: 'prev' };
+  if (positioned._nextAnchor) return { anchor: positioned._nextAnchor, side: 'next' };
+  const ctor = middleware.constructor as unknown as PositionedMiddleware | undefined;
+  if (ctor?._prevAnchor) return { anchor: ctor._prevAnchor, side: 'prev' };
+  if (ctor?._nextAnchor) return { anchor: ctor._nextAnchor, side: 'next' };
+  return null;
+}
+
+/** 锚点的显示名（类取类名，实例取 `name`），用于日志与签名。 */
+export function anchorDisplayName(anchor: MiddlewareAnchor): string {
+  if (typeof anchor === 'function') return anchor.name;
+  return (anchor as { name?: string }).name ?? '(anonymous)';
+}
+
+/** 中间件的显示名，用于日志与签名。 */
+export function middlewareDisplayName(middleware: AgentMiddleware): string {
+  return (middleware as { name?: string }).name ?? '(anonymous)';
 }

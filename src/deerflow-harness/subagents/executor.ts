@@ -3,6 +3,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
 
 import { createBaseAgent } from '../agents/factory';
+import { getExtraMiddlewares } from '../agents/extra-middlewares';
 import { DEFAULT_FEATURES, type RuntimeFeatures } from '../agents/features';
 import { createChatModel, inferProvider } from '../models';
 import { getContext } from '../runtime/context';
@@ -425,6 +426,9 @@ export class SubagentExecutor {
         tools: this.tools,
         systemPrompt: config.systemPrompt,
         provider,
+        // 注册表 scope='subagent'/'both' 的自定义中间件进子 agent 链
+        // （每次执行独立构建，无需缓存签名）
+        extraMiddlewares: getExtraMiddlewares('subagent'),
         features: SUBAGENT_FEATURES,
       });
 
