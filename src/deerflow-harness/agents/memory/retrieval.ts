@@ -6,9 +6,11 @@
  *
  * 打分模型：fact 得分 = 混合相关性 × 置信度加权，其中
  * - 词面分量：query token 重叠率（对「提到记忆中已有实体名」最有效）；
- * - 语义分量：query 向量与 fact.embedding 的余弦相似度（对同义改写有效），
- *   仅当 fact 有维度匹配的向量且余弦 ≥ SEMANTIC_MATCH_THRESHOLD 时参与混合
+ * - 语义分量：query 向量与文本向量的余弦相似度（对同义改写有效），
+ *   仅当文本有维度匹配的向量且余弦 ≥ 语义门槛时参与混合
  *   （未达标视为语义不相关，回落纯词面，防止弱相关噪声灌满 topK）。
+ * facts 与 sections（topOfMind / history）走同一套混合打分核心（hybridScoreParts），
+ * 同义改写在 section 选段同样能命中。
  * 无向量 / 无 Key / API 失败时 queryEmbedding 为 null，行为与纯词面完全一致。
  */
 
@@ -24,6 +26,8 @@ export interface RetrievalOptions {
   queryEmbedding?: number[] | null;
   /** 混合分中余弦相似度权重，0..1（默认 0.7，与 MemoryConfig 默认一致）。 */
   hybridWeight?: number;
+  /** 语义分量参与混合的余弦下限，0..1（默认 0.6，与 MemoryConfig 默认一致）。 */
+  semanticMatchThreshold?: number;
 }
 
 const DEFAULT_TOP_K = 8;
@@ -160,20 +164,58 @@ export function overlapRatio(text: string, queryTokens: Set<string>): number {
 }
 
 /**
+ * 混合打分上下文：facts 与 sections 共用同一套打分参数，
+ * 两类打分口径不会漂移（含语义门槛与混合权重）。
+ */
+export interface ScoreContext {
+  queryTokens: Set<string>;
+  /** null/缺省 = 纯词面。 */
+  queryEmbedding?: number[] | null;
+  hybridWeight?: number;
+  /** 语义分量参与混合的余弦下限，0..1（默认 0.6）。 */
+  semanticMatchThreshold?: number;
+}
+
+/**
+ * 混合相关度核心：词面重叠 + 过门槛的余弦加权混合。
+ * 无向量 / 维度失效 / 余弦未达门槛时语义分量整体退出（开关而非衰减），
+ * 退回纯词面——弱相关噪声不会借短文本高余弦基线混入。
+ */
+export function hybridScoreParts(
+  text: string,
+  embedding: number[] | undefined,
+  ctx: ScoreContext,
+): { lexical: number; cosine: number | null; semanticUsed: boolean; base: number } {
+  const lexical = overlapRatio(text, ctx.queryTokens);
+  const threshold = ctx.semanticMatchThreshold ?? SEMANTIC_MATCH_THRESHOLD;
+
+  let cosine: number | null = null;
+  let semanticUsed = false;
+  if (ctx.queryEmbedding && isCompatibleVector(embedding, ctx.queryEmbedding.length)) {
+    cosine = cosineSimilarity(embedding, ctx.queryEmbedding);
+    semanticUsed = cosine >= threshold;
+  }
+
+  const w = ctx.hybridWeight ?? DEFAULT_HYBRID_WEIGHT;
+  const base = semanticUsed && cosine != null ? w * cosine + (1 - w) * lexical : lexical;
+  return { lexical, cosine, semanticUsed, base };
+}
+
+/**
  * fact 得分 = 混合相关性 × 置信度加权（0.5 + 0.5 × confidence）。
  * 置信度只做加权不做门槛：低置信但高度相关的 fact 仍可能入选。
  *
- * 混合相关性：fact 有维度匹配的向量且余弦 ≥ SEMANTIC_MATCH_THRESHOLD 时取
+ * 混合相关性：fact 有维度匹配的向量且余弦过门槛时取
  * `w × 余弦 + (1-w) × 重叠率`（w = hybridWeight），否则退回纯重叠率——
  * 老数据（无向量）/ 维度失效 / 语义不相关都以词面分顶替，不被系统性压低。
  */
-export function scoreFact(
-  fact: Fact,
-  queryTokens: Set<string>,
-  queryEmbedding?: number[] | null,
-  hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
-): number {
-  return factScoreParts(fact, queryTokens, queryEmbedding, hybridWeight).score;
+export function scoreFact(fact: Fact, ctx: ScoreContext): number {
+  return factScoreParts(fact, ctx).score;
+}
+
+/** section 得分：无 confidence 概念，直接取混合相关度（与 facts 同一口径）。 */
+export function scoreSection(section: SectionData, ctx: ScoreContext): number {
+  return hybridScoreParts(section.summary ?? '', section.embedding, ctx).base;
 }
 
 /** fact 打分的分量明细（供预览/调试展示；打分口径与 scoreFact 同源，不会漂移）。 */
@@ -195,27 +237,12 @@ export interface FactScoreParts {
  * 单独导出是为了让「检索预览」能展示 词面 / 余弦 / 阈值 / 加权 每一步，
  * 同时保证与真实排序用的是同一套公式。
  */
-export function factScoreParts(
-  fact: Fact,
-  queryTokens: Set<string>,
-  queryEmbedding?: number[] | null,
-  hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
-): FactScoreParts {
+export function factScoreParts(fact: Fact, ctx: ScoreContext): FactScoreParts {
   const confidence = Number.isFinite(fact.confidence)
     ? Math.max(0, Math.min(1, fact.confidence))
     : 0;
-  const lexical = overlapRatio(fact.content, queryTokens);
-
-  let cosine: number | null = null;
-  let semanticUsed = false;
-  if (queryEmbedding && isCompatibleVector(fact.embedding, queryEmbedding.length)) {
-    cosine = cosineSimilarity(fact.embedding, queryEmbedding);
-    semanticUsed = cosine >= SEMANTIC_MATCH_THRESHOLD;
-  }
-
-  const base =
-    semanticUsed && cosine != null ? hybridWeight * cosine + (1 - hybridWeight) * lexical : lexical;
-  return { lexical, cosine, semanticUsed, base, score: base * (0.5 + 0.5 * confidence) };
+  const parts = hybridScoreParts(fact.content, fact.embedding, ctx);
+  return { ...parts, score: parts.base * (0.5 + 0.5 * confidence) };
 }
 
 /** 检索预览：逐条 fact 的打分明细 + 是否真的被注入。 */
@@ -240,17 +267,21 @@ export function previewFactScores(
   options?: RetrievalOptions,
 ): FactScoreDetail[] {
   if (!data || !Array.isArray(data.facts)) return [];
-  const queryTokens = new Set(tokenize(query));
-  const queryEmbedding = options?.queryEmbedding ?? null;
-  const hybridWeight = options?.hybridWeight ?? DEFAULT_HYBRID_WEIGHT;
+  const ctx: ScoreContext = {
+    queryTokens: new Set(tokenize(query)),
+    queryEmbedding: options?.queryEmbedding ?? null,
+    hybridWeight: options?.hybridWeight,
+    semanticMatchThreshold: options?.semanticMatchThreshold,
+  };
 
   const pickedIds = new Set(
     (
       retrieveMemory(data, query, {
         topK: options?.topK,
         minScore: options?.minScore,
-        queryEmbedding,
-        hybridWeight,
+        queryEmbedding: ctx.queryEmbedding,
+        hybridWeight: ctx.hybridWeight,
+        semanticMatchThreshold: ctx.semanticMatchThreshold,
       })?.facts ?? []
     ).map((f) => f.id),
   );
@@ -261,7 +292,7 @@ export function previewFactScores(
       content: fact.content,
       category: fact.category,
       confidence: fact.confidence,
-      ...factScoreParts(fact, queryTokens, queryEmbedding, hybridWeight),
+      ...factScoreParts(fact, ctx),
       picked: pickedIds.has(fact.id),
     }))
     .sort((a, b) => b.score - a.score);
@@ -280,8 +311,8 @@ export function retrievalThresholds(): { semanticMatch: number; minScore: number
  * `formatMemoryForInjection`）：
  * - facts：得分 > minScore 的条目按得分降序取 topK；
  * - user 段：workContext / personalContext 视为身份信息恒保留（通常很短），
- *   topOfMind 属时效内容，按 query 相关性取舍；
- * - history 段：三段各按相关性评分，只保留得分最高且达标的一段。
+ *   topOfMind 属时效内容，按 query 相关性取舍（混合打分，同义改写可命中）；
+ * - history 段：三段各按相关性评分（混合打分），只保留得分最高且达标的一段。
  *
  * query 为空或全部落空时返回 null（调用方据此跳过注入，避免噪声）。
  */
@@ -298,11 +329,15 @@ export function retrieveMemory(
 
   const topK = Math.max(1, options?.topK ?? DEFAULT_TOP_K);
   const minScore = options?.minScore ?? DEFAULT_MIN_SCORE;
-  const queryEmbedding = options?.queryEmbedding ?? null;
-  const hybridWeight = options?.hybridWeight ?? DEFAULT_HYBRID_WEIGHT;
+  const scoreCtx: ScoreContext = {
+    queryTokens,
+    queryEmbedding: options?.queryEmbedding ?? null,
+    hybridWeight: options?.hybridWeight,
+    semanticMatchThreshold: options?.semanticMatchThreshold,
+  };
 
   const scoredFacts = (data.facts ?? [])
-    .map((fact) => ({ fact, score: scoreFact(fact, queryTokens, queryEmbedding, hybridWeight) }))
+    .map((fact) => ({ fact, score: scoreFact(fact, scoreCtx) }))
     .filter((entry) => entry.score > minScore)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
@@ -329,7 +364,7 @@ export function retrieveMemory(
   let bestHistoryScore = 0;
   for (const [key, section] of historyCandidates) {
     if (!section?.summary) continue;
-    const score = overlapRatio(section.summary, queryTokens);
+    const score = scoreSection(section, scoreCtx);
     if (score > bestHistoryScore) {
       bestHistoryScore = score;
       bestHistoryKey = key;
@@ -349,7 +384,8 @@ export function retrieveMemory(
 
   const hasFact = scoredFacts.length > 0;
   const hasUser = Boolean(user.workContext?.summary || user.personalContext?.summary);
-  const hasTopOfMind = overlapRatio(user.topOfMind?.summary ?? '', queryTokens) >= minScore;
+  const hasTopOfMind =
+    user.topOfMind?.summary != null && scoreSection(user.topOfMind, scoreCtx) >= minScore;
   const hasHistory = Boolean(
     pickedHistory.recentMonths.summary ||
     pickedHistory.earlierContext.summary ||

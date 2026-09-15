@@ -155,7 +155,7 @@ export {
   type AddArgs as MemoryQueueAddArgs,
   type ConversationContext as MemoryConversationContext,
   // embeddings（语义检索）
-  backfillFactEmbeddings,
+  backfillMemoryEmbeddings,
   cosineSimilarity,
   EMBEDDING_BATCH_LIMIT,
   embedQuery,

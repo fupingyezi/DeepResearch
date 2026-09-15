@@ -34,7 +34,7 @@ export type { MemoryStorage } from './storage';
 export { FileMemoryStorage, getMemoryStorage, resetMemoryStorage } from './storage';
 
 export {
-  backfillFactEmbeddings,
+  backfillMemoryEmbeddings,
   cosineSimilarity,
   EMBEDDING_BATCH_LIMIT,
   embedQuery,
@@ -42,6 +42,7 @@ export {
   getMemoryEmbeddingsFactory,
   isCompatibleVector,
   resetMemoryEmbeddingsFactory,
+  SCORED_SECTION_SLOTS,
   setMemoryEmbeddingsFactory,
   type MemoryEmbeddingsFactory,
 } from './embeddings';
@@ -101,7 +102,7 @@ export {
 } from './queue';
 
 import { getMemoryConfig as _gmc } from './config';
-import { backfillFactEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
+import { backfillMemoryEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
 import {

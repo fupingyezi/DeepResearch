@@ -7,16 +7,16 @@
  *   **绝不抛出** —— 对应决策「无向量 / 无 Key / API 失败自动回落关键词检索」。
  * - 智谱 embedding-3 单请求最多 64 条文本：embedTexts 手动按批切片，
  *   不依赖 OpenAIEmbeddings 自带 batchSize（后端无关、便于 mock 测试）。
- * - 旧数据回填：backfillFactEmbeddings 补齐缺失 / 维度不匹配的 fact 向量，
- *   进程内 per-storage-key 去重；嵌入完成后重新 reload 再合并保存，只补
- *   「仍存在且 content 未变」的 fact，尽量避开与 LLM updater 的并发写互踩。
+ * - 旧数据回填：backfillMemoryEmbeddings 补齐缺失 / 维度不匹配的 fact 与
+ *   section 向量，进程内 per-storage-key 去重；嵌入完成后重新 reload 再合并保存，
+ *   只补「仍存在且 content / summary 未变」的条目，尽量避开与 LLM updater 的并发写互踩。
  */
 
 import type { Embeddings } from '@langchain/core/embeddings';
 
 import { getMemoryConfig } from './config';
 import { getMemoryStorage } from './storage';
-import type { Fact } from './types';
+import type { Fact, MemoryData, SectionData } from './types';
 
 export type MemoryEmbeddingsFactory = () => Embeddings | null;
 
@@ -135,14 +135,39 @@ export function isCompatibleVector(v: unknown, dims: number): v is number[] {
 const backfillInFlight = new Set<string>();
 
 /**
- * 回填旧数据：为缺失 / 维度不匹配的 facts 补齐向量并落盘。
+ * 参与检索打分的 section 槽位（topOfMind + history 三段）。
+ * 恒保留的 workContext/personalContext 不参与打分，不嵌向量——
+ * 1024 维浮点数组 JSON 序列化每条约 15-20KB，无决策作用的向量纯占体积。
+ * 写入侧补齐（updater.embedMissingSections）与回填共用此集合。
+ */
+export const SCORED_SECTION_SLOTS = [
+  ['user', 'topOfMind'],
+  ['history', 'recentMonths'],
+  ['history', 'earlierContext'],
+  ['history', 'longTermBackground'],
+] as const;
+
+/** 按 group/slot 取 section；UserSection/HistorySection 字面量 key 需经 unknown 中转索引。 */
+function scoredSection(data: MemoryData, group: 'user' | 'history', slot: string): SectionData {
+  return (
+    (data[group] as unknown as Record<string, SectionData>)[slot] ?? { summary: '', updatedAt: '' }
+  );
+}
+
+/**
+ * 回填旧数据：为缺失 / 维度不匹配的 facts 与打分 sections 补齐向量并落盘。
  * 检索侧命中后 fire-and-forget 调用，失败静默（warn 一次）。
  *
+ * facts 与 sections 合并在同一函数、同一 in-flight 锁、同一次 embed 批里处理——
+ * 两个独立回填各自 reload-merge-save 会互相制造「A 合并前 B 已 save → A 丢掉 B」
+ * 的交错窗口，合并后单次 save 彻底消除这对竞态。
+ *
  * 并发语义：嵌入期间 updater 可能落盘新内容，故 save 前重新 reload 并只合并
- * 「仍存在且 content 未变」的 fact；残余竞态窗口由 FileMemoryStorage 原子写
- * （tmp+rename）保证文件不损坏，由 updater 下一轮重写兜底收敛。
+ * 「仍存在且 content / summary 未变」的条目（facts 按 id+content、sections 按
+ * 槽位+summary 守卫）；残余竞态窗口由 FileMemoryStorage 原子写（tmp+rename）
+ * 保证文件不损坏，由 updater 下一轮重写兜底收敛。
  */
-export async function backfillFactEmbeddings(opts: {
+export async function backfillMemoryEmbeddings(opts: {
   agentName?: string | null;
   userId?: string | null;
 }): Promise<void> {
@@ -157,24 +182,44 @@ export async function backfillFactEmbeddings(opts: {
   try {
     const storage = getMemoryStorage();
     const latest = await storage.reload(scope);
-    const missing = latest.facts.filter(
+
+    const missingFacts = latest.facts.filter(
       (f) => !isCompatibleVector(f.embedding, config.embeddingDimensions),
     );
-    if (missing.length === 0) return;
+    const missingSections = SCORED_SECTION_SLOTS.filter(([group, slot]) => {
+      const section = scoredSection(latest, group, slot);
+      return section.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions);
+    });
+    if (missingFacts.length === 0 && missingSections.length === 0) return;
 
-    const vectors = await embedTexts(missing.map((f) => f.content));
+    const vectors = await embedTexts([
+      ...missingFacts.map((f) => f.content),
+      ...missingSections.map(([group, slot]) => scoredSection(latest, group, slot).summary),
+    ]);
     if (vectors.every((v) => v == null)) return; // 全部失败：等下次回填重试
 
     // save 前重新读最新数据合并，避免覆盖嵌入期间 updater 的并发写入
     const toSave = await storage.reload(scope);
     const vectorById = new Map<string, number[]>();
     const contentById = new Map<string, string>();
-    missing.forEach((f, i) => {
+    missingFacts.forEach((f, i) => {
       if (vectors[i] != null) {
         vectorById.set(f.id, vectors[i]!);
         contentById.set(f.id, f.content);
       }
     });
+    const sectionVectorBySlot = new Map<string, number[]>();
+    const sectionSummaryBySlot = new Map<string, string>();
+    missingSections.forEach(([group, slot], j) => {
+      const vector = vectors[missingFacts.length + j];
+      if (vector != null) {
+        sectionVectorBySlot.set(`${group}.${slot}`, vector);
+        sectionSummaryBySlot.set(`${group}.${slot}`, scoredSection(latest, group, slot).summary);
+      }
+    });
+
+    let dirty = false;
+    const next = { ...toSave };
 
     const mergedFacts = toSave.facts.map((f: Fact) => {
       const vector = vectorById.get(f.id);
@@ -183,8 +228,64 @@ export async function backfillFactEmbeddings(opts: {
       return { ...f, embedding: vector };
     });
     if (mergedFacts.some((f, i) => f !== toSave.facts[i])) {
-      await storage.save({ ...toSave, facts: mergedFacts }, scope);
+      next.facts = mergedFacts;
+      dirty = true;
     }
+
+    // section 合并守卫：槽位 summary 未变（相对嵌入时）、且仍未被 updater 补齐才写；
+    // 整槽替换（不动 toSave 原对象，与 facts 侧同纪律）
+    const sectionVectorFor = (slotKey: string, currentSummary: string): number[] | null => {
+      const vector = sectionVectorBySlot.get(slotKey);
+      if (vector == null) return null;
+      if (sectionSummaryBySlot.get(slotKey) !== currentSummary) return null; // summary 已变
+      return vector;
+    };
+    const topOfMindVec = sectionVectorFor('user.topOfMind', next.user.topOfMind.summary);
+    if (topOfMindVec && !isCompatibleVector(next.user.topOfMind.embedding, topOfMindVec.length)) {
+      next.user = {
+        ...next.user,
+        topOfMind: { ...next.user.topOfMind, embedding: topOfMindVec },
+      };
+      dirty = true;
+    }
+    const recentVec = sectionVectorFor('history.recentMonths', next.history.recentMonths.summary);
+    if (recentVec && !isCompatibleVector(next.history.recentMonths.embedding, recentVec.length)) {
+      next.history = {
+        ...next.history,
+        recentMonths: { ...next.history.recentMonths, embedding: recentVec },
+      };
+      dirty = true;
+    }
+    const earlierVec = sectionVectorFor(
+      'history.earlierContext',
+      next.history.earlierContext.summary,
+    );
+    if (
+      earlierVec &&
+      !isCompatibleVector(next.history.earlierContext.embedding, earlierVec.length)
+    ) {
+      next.history = {
+        ...next.history,
+        earlierContext: { ...next.history.earlierContext, embedding: earlierVec },
+      };
+      dirty = true;
+    }
+    const longTermVec = sectionVectorFor(
+      'history.longTermBackground',
+      next.history.longTermBackground.summary,
+    );
+    if (
+      longTermVec &&
+      !isCompatibleVector(next.history.longTermBackground.embedding, longTermVec.length)
+    ) {
+      next.history = {
+        ...next.history,
+        longTermBackground: { ...next.history.longTermBackground, embedding: longTermVec },
+      };
+      dirty = true;
+    }
+
+    if (dirty) await storage.save(next, scope);
   } catch (e) {
     if (!warnedBackfillFailure) {
       warnedBackfillFailure = true;

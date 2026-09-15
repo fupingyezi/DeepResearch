@@ -94,8 +94,12 @@ describe('updater 写侧嵌入', () => {
   });
 
   it('注入 LLM 的 current_memory 剥离了 embedding 字段（防 MB 级 prompt）', async () => {
-    // 预置一条带向量的 fact
+    // 预置一条带向量的 fact 与一个带向量的 section
     await createMemoryFact('既有事实', 'context', 0.9, null, 'u2');
+    const scope = { agentName: null, userId: 'u2' };
+    const preset = await getMemoryStorage().reload(scope);
+    preset.user.topOfMind = { summary: '既有关注点', updatedAt: '', embedding: vec(3) };
+    await getMemoryStorage().save(preset, scope);
     setMemoryModelFactory(() => fakeModel(JSON.stringify({ newFacts: [] }), prompts));
 
     const ok = await new MemoryUpdater().updateMemory([humanMsg('随便聊聊')], { userId: 'u2' });
@@ -163,5 +167,122 @@ describe('updater 写侧嵌入', () => {
     const target = updated.facts.find((f) => f.id === factId)!;
     expect(target.embedding).toEqual(vec(9)); // 原向量保留
     expect(target.confidence).toBe(0.95);
+  });
+
+  it('LLM 重写 section 时旧向量作废并重嵌；未触碰的 section 旧向量保留', async () => {
+    const scope = { agentName: null, userId: 'u7' };
+    const preset = {
+      version: '1.0' as const,
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '旧关注点', updatedAt: '', embedding: vec(9) },
+      },
+      history: {
+        recentMonths: { summary: '最近在做的项目', updatedAt: '', embedding: vec(8) },
+        earlierContext: { summary: '', updatedAt: '' },
+        longTermBackground: { summary: '', updatedAt: '' },
+      },
+      facts: [],
+    };
+    await getMemoryStorage().save(preset, scope);
+
+    setMemoryModelFactory(() =>
+      fakeModel(
+        JSON.stringify({
+          user: { topOfMind: { summary: '新的关注点', shouldUpdate: true } },
+          history: {},
+          newFacts: [],
+        }),
+        prompts,
+      ),
+    );
+    setMemoryEmbeddingsFactory(() => fakeEmbeddings(async (texts) => texts.map(() => vec(1))));
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('聊聊近况')], { userId: 'u7' });
+    expect(ok).toBe(true);
+
+    const saved = await getMemoryStorage().reload(scope);
+    expect(saved.user.topOfMind.summary).toBe('新的关注点');
+    expect(saved.user.topOfMind.embedding).toEqual(vec(1)); // 重写后重嵌
+    expect(saved.history.recentMonths.embedding).toEqual(vec(8)); // 未触碰：旧向量保留
+  });
+
+  it('LLM shouldUpdate 但 summary 未变时整槽保留（连同旧向量，不重嵌）', async () => {
+    const scope = { agentName: null, userId: 'u8' };
+    const preset = {
+      version: '1.0' as const,
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '稳定的关注点', updatedAt: '', embedding: vec(7) },
+      },
+      history: {
+        recentMonths: { summary: '', updatedAt: '' },
+        earlierContext: { summary: '', updatedAt: '' },
+        longTermBackground: { summary: '', updatedAt: '' },
+      },
+      facts: [],
+    };
+    await getMemoryStorage().save(preset, scope);
+
+    setMemoryModelFactory(() =>
+      fakeModel(
+        JSON.stringify({
+          user: { topOfMind: { summary: ' 稳定的关注点 ', shouldUpdate: true } }, // trim 后同文
+          newFacts: [],
+        }),
+        prompts,
+      ),
+    );
+    setMemoryEmbeddingsFactory(() => fakeEmbeddings(async (texts) => texts.map(() => vec(1))));
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('聊聊近况')], { userId: 'u8' });
+    expect(ok).toBe(true);
+
+    const saved = await getMemoryStorage().reload(scope);
+    expect(saved.user.topOfMind.embedding).toEqual(vec(7)); // 未变：原槽连同旧向量保留
+  });
+
+  it('section summary 被 stripUploadMentions 改写时旧向量失效并按新文本重嵌', async () => {
+    const scope = { agentName: null, userId: 'u9' };
+    const preset = {
+      version: '1.0' as const,
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '在准备婚礼。', updatedAt: '', embedding: vec(9) },
+      },
+      history: {
+        recentMonths: {
+          summary: 'uploaded a file for review. 也在做性能优化。',
+          updatedAt: '',
+          embedding: vec(9),
+        },
+        earlierContext: { summary: '', updatedAt: '' },
+        longTermBackground: { summary: '', updatedAt: '' },
+      },
+      facts: [],
+    };
+    await getMemoryStorage().save(preset, scope);
+
+    setMemoryModelFactory(() => fakeModel(JSON.stringify({ newFacts: [] }), prompts));
+    setMemoryEmbeddingsFactory(() =>
+      fakeEmbeddings(async (texts) => texts.map((t) => vec(t.length))),
+    );
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('继续')], { userId: 'u9' });
+    expect(ok).toBe(true);
+
+    const saved = await getMemoryStorage().reload(scope);
+    const summary = saved.history.recentMonths.summary;
+    expect(summary).not.toContain('uploaded');
+    // strip 后按清洗过的文本重嵌（向量 seed = 清洗后文本长度），而非沿用旧 vec(9)
+    expect(saved.history.recentMonths.embedding).toEqual(vec(summary.length));
+    // 未被 strip 的 section 不受影响
+    expect(saved.user.topOfMind.embedding).toEqual(vec(9));
   });
 });
