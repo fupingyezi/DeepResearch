@@ -34,7 +34,8 @@ const DEFAULT_TOP_K = 8;
 const DEFAULT_MIN_SCORE = 0.05;
 const DEFAULT_HYBRID_WEIGHT = 0.7;
 /**
- * 语义分量参与混合的余弦下限。
+ * 语义分量参与混合的余弦下限（模块兜底值，真实生效值经 ScoreContext 传入，
+ * 上游取自 MemoryConfig.semanticMatchThreshold，默认同为 0.6）。
  *
  * 依据对 embedding-3 的实测标定（中文短文本，1024 维）：
  * - 真相关：0.64 ~ 0.69（「他写服务端喜欢用什么编程语言？」↔「…TypeScript…后端服务开发」= 0.677；
@@ -296,14 +297,6 @@ export function previewFactScores(
       picked: pickedIds.has(fact.id),
     }))
     .sort((a, b) => b.score - a.score);
-}
-
-/**
- * 预览用：模块内**不可配置**的两个门槛常量，便于解读打分明细。
- * （topK / hybridWeight 来自 MemoryConfig，真实值请从 getMemoryConfig() 取。）
- */
-export function retrievalThresholds(): { semanticMatch: number; minScore: number } {
-  return { semanticMatch: SEMANTIC_MATCH_THRESHOLD, minScore: DEFAULT_MIN_SCORE };
 }
 
 /**

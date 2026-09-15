@@ -317,6 +317,44 @@ describe('section 混合打分（queryEmbedding）', () => {
   });
 });
 
+describe('语义门槛可配（semanticMatchThreshold）', () => {
+  const QUERY_VEC = [1, 0, 0, 0];
+  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+
+  it('门槛调低后原被挡下的基线量级（0.55）参与混合并入选', () => {
+    const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.55))]);
+    // 默认 0.6：挡下（与上方「地板取 0.6」用例同源）
+    expect(retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+    // 门槛 0.5：0.55 过线，按 0.7×0.55 参与混合
+    const picked = retrieveMemory(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      semanticMatchThreshold: 0.5,
+    });
+    expect(picked!.facts.map((f) => f.id)).toEqual(['f']);
+  });
+
+  it('门槛调高后真相关量级（0.65）也被挡下', () => {
+    const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
+    expect(
+      retrieveMemory(data, '随便聊聊', {
+        queryEmbedding: QUERY_VEC,
+        semanticMatchThreshold: 0.7,
+      }),
+    ).toBeNull();
+  });
+
+  it('预览明细的 semanticUsed 反映生效门槛', () => {
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.55))]);
+    const [detail] = previewFactScores(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      semanticMatchThreshold: 0.5,
+    });
+    expect(detail.cosine).toBeCloseTo(0.55, 10);
+    expect(detail.semanticUsed).toBe(true);
+    expect(detail.base).toBeCloseTo(0.7 * 0.55, 10);
+  });
+});
+
 describe('previewFactScores（检索预览）', () => {
   const QUERY_VEC = [1, 0, 0, 0];
   const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];

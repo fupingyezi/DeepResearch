@@ -172,7 +172,6 @@ export {
   type MemoryRetrievalPreview,
   // retrieval 明细（预览/调试）
   previewFactScores,
-  retrievalThresholds,
   type FactScoreDetail,
 } from './agents/memory';
 

@@ -59,15 +59,17 @@ export {
 
 export {
   factScoreParts,
+  hybridScoreParts,
   overlapRatio,
   previewFactScores,
-  retrievalThresholds,
   retrieveMemory,
   scoreFact,
+  scoreSection,
   tokenize,
   type FactScoreDetail,
   type FactScoreParts,
   type RetrievalOptions,
+  type ScoreContext,
 } from './retrieval';
 
 export {
@@ -105,12 +107,7 @@ import { getMemoryConfig as _gmc } from './config';
 import { backfillMemoryEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
-import {
-  previewFactScores,
-  retrieveMemory,
-  retrievalThresholds,
-  type FactScoreDetail,
-} from './retrieval';
+import { previewFactScores, retrieveMemory, type FactScoreDetail } from './retrieval';
 import type { MemoryData } from './types';
 
 export interface BuildMemoryContextOptions {
@@ -157,6 +154,8 @@ async function retrieveForInjection(
     topK: config.retrieveTopK,
     queryEmbedding,
     hybridWeight: config.embeddingHybridWeight,
+    minScore: config.retrieveMinScore,
+    semanticMatchThreshold: config.semanticMatchThreshold,
   });
   const pickedText = picked
     ? _fmt(picked, config.retrieveMaxTokens, { preserveFactOrder: true })
@@ -179,8 +178,10 @@ export interface MemoryRetrievalPreview {
     embeddingBackfillOnLoad: boolean;
     retrieveTopK: number;
     retrieveMaxTokens: number;
+    retrieveMinScore: number;
+    semanticMatchThreshold: number;
   };
-  /** 不可配置的两个门槛常量。 */
+  /** 两个打分门槛的生效值（取自 MemoryConfig，便于解读打分明细）。 */
   thresholds: { semanticMatch: number; minScore: number };
   /** query 是否成功向量化（false = 无 Key / API 失败，本次为纯词面检索）。 */
   embedded: boolean;
@@ -222,14 +223,22 @@ export async function previewMemoryRetrieval(opts: {
       embeddingBackfillOnLoad: config.embeddingBackfillOnLoad,
       retrieveTopK: config.retrieveTopK,
       retrieveMaxTokens: config.retrieveMaxTokens,
+      retrieveMinScore: config.retrieveMinScore,
+      semanticMatchThreshold: config.semanticMatchThreshold,
     },
-    thresholds: retrievalThresholds(),
+    thresholds: {
+      semanticMatch: config.semanticMatchThreshold,
+      minScore: config.retrieveMinScore,
+    },
     embedded: outcome.queryEmbedding != null,
     queryEmbeddingDim: outcome.queryEmbedding?.length ?? null,
+    // 与此处 retrieveForInjection 传参保持同一组 config 派生参数：预览与真实注入同源
     facts: previewFactScores(data, opts.query, {
       topK: config.retrieveTopK,
       queryEmbedding: outcome.queryEmbedding,
       hybridWeight: config.embeddingHybridWeight,
+      minScore: config.retrieveMinScore,
+      semanticMatchThreshold: config.semanticMatchThreshold,
     }),
     injectedText: outcome.injectedText,
   };
