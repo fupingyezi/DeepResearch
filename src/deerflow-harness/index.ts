@@ -123,6 +123,7 @@ export {
   resetMemoryStorage,
   // prompt utilities
   countTokens,
+  estimateTokensHeuristic,
   formatConversationForUpdate,
   formatMemoryForInjection,
   MEMORY_UPDATE_PROMPT,

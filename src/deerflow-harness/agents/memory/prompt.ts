@@ -5,8 +5,8 @@
  *
  * Token 计数：
  * - tiktoken 在 Node 端可用 `js-tiktoken`，但属可选依赖。
- * - 这里默认使用启发式 `len/4`，可在外部调用
- *   `setTokenCounter(...)` 注入更精确实现。
+ * - 默认使用 CJK 感知启发式（CJK ≈ 1 token/字，其余 ≈ 4 字符/token），
+ *   可在外部调用 `setTokenCounter(...)` 注入更精确实现。
  */
 
 export const MEMORY_UPDATE_PROMPT = `You are a memory management system. Your task is to analyze a conversation and update the user's memory profile.
@@ -127,11 +127,25 @@ import type { MemoryData, Fact } from './types';
 
 export type TokenCounter = (text: string) => number;
 
-let _tokenCounter: TokenCounter = (text) => Math.floor(text.length / 4);
+/** CJK 判定范围：U+3400-4DBF（Extension A）、U+4E00-9FFF（基本区）、U+F900-FAFF（兼容区）。 */
+const CJK_CHAR_RE = /[㐀-䶿一-鿿豈-﫿]/g;
 
-/** 注入更精确的 token 计数实现（如 js-tiktoken）。默认按字符 / 4 估算。 */
+/**
+ * CJK 感知启发式：CJK ≈ 1 token/字（中文约 1~1.5 字符占 1 token），其余 ≈ 4 字符/token。
+ * 纯 `len/4` 对中文低估约 4 倍，token 预算形同虚设（800 预算实际可塞 ~3200 汉字）。
+ * 非 CJK 段用 ceil：换算误差宁可高估，不超预算。
+ */
+export function estimateTokensHeuristic(text: string): number {
+  if (!text) return 0;
+  const cjk = (text.match(CJK_CHAR_RE) ?? []).length;
+  return cjk + Math.ceil((text.length - cjk) / 4);
+}
+
+let _tokenCounter: TokenCounter = estimateTokensHeuristic;
+
+/** 注入更精确的 token 计数实现（如 js-tiktoken）；null 重置回 CJK 感知启发式。 */
 export function setTokenCounter(counter: TokenCounter | null): void {
-  _tokenCounter = counter ?? ((text) => Math.floor(text.length / 4));
+  _tokenCounter = counter ?? estimateTokensHeuristic;
 }
 
 export function countTokens(text: string): number {
@@ -139,7 +153,7 @@ export function countTokens(text: string): number {
   try {
     return _tokenCounter(text);
   } catch {
-    return Math.floor(text.length / 4);
+    return estimateTokensHeuristic(text);
   }
 }
 
