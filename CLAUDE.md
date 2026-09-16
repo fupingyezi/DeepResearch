@@ -626,13 +626,18 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 检索实现（`memory/retrieval.ts`，纯函数；词面 + 语义混合打分）：
 
 - 分词：latin 词（小写、去停用词）+ CJK 单字与二元组（bigram，让「量子」能命中「量子计算」）
-- 词面分量 `overlap = 重叠率(|fact∩query| / |query|) × (0.5 + 0.5 × confidence)`
-- 语义分量 `cosine = cos(query 向量, fact.embedding)`，需 ≥ `SEMANTIC_MATCH_THRESHOLD`（0.5）才参与
-- `scoreFact = w × cosine + (1-w) × overlap`（`w = MemoryConfig.embeddingHybridWeight`，默认 0.7）；
-  无向量 / 维度不匹配 / 未过阈值 → 退回纯词面打分
+- 词面分量 `overlap = 重叠率(|text∩query| / |query|) × (0.5 + 0.5 × confidence)`
+- 语义分量 `cosine = cos(query 向量, text.embedding)`，需 ≥ 门槛才参与
+- `base = w × cosine + (1-w) × overlap`（`w = MemoryConfig.embeddingHybridWeight`，默认 0.7）；
+  无向量 / 维度不匹配 / 未过门槛 → 退回纯词面打分
+- **facts 与 sections 同一套混合打分核心**（`hybridScoreParts`）：topOfMind 与 history 选段
+  同样走语义，同义改写场景不会因词面零重叠而整体落空；section 无 confidence，得分直接取 `base`
 - 取舍：facts 取 top-K（默认 8）；workContext / personalContext 视为身份信息恒保留；
   topOfMind 按相关性取舍；history 三段只保留最相关的一段
-- query 为空或全部落空 → 不注入（避免无关记忆干扰模型）
+- query 为空或全部落空 → 不注入（避免无关记忆干扰模型）；词面与语义双空（如 resume 无本轮文本
+  且 checkpoint 无历史）→ 回落全量注入
+- 检索 query：词面用「近 3 轮用户输入拼接」（省略式提问「它呢？」能命中上一轮实体词），
+  语义只用当前轮（拼串会稀释向量语义，门槛标定基于单句）
 
 **向量基础设施**（`memory/embeddings.ts`）：
 
@@ -643,22 +648,27 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
   默认成 `'base64'` 并按 base64 解码响应（`toFloat32Array`），而智谱**忽略**该参数、仍返回 float
   数组 —— 数组被当字节流重解释，1024 维静默变成 256 个无意义数值，余弦算出 NaN，语义检索**悄悄**
   退回词面检索且毫无报错。`embeddings.ts` 的维度守卫会识别这种长度不符并告警一次
-- 语义阈值 `SEMANTIC_MATCH_THRESHOLD = 0.6` 系实测标定：embedding-3 中文短文本的**无关基线**
-  就在 0.44~0.55，真相关 0.64~0.69，阈值须落在两者之间（详见 `retrieval.ts` 注释）
+- 语义阈值 `MemoryConfig.semanticMatchThreshold`（默认 0.6）系实测标定：embedding-3 中文短文本的
+  **无关基线**就在 0.44~0.55，真相关 0.64~0.69，阈值须落在两者之间（标定依据详见 `retrieval.ts`
+  注释）；换 embedding 模型 / 语言后基线可能偏移，可在线调整
 - **记忆与提问须同语言**：embedding-3 的跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 只有
   0.33~0.49，全部低于阈值 → 语义检索静默退化为纯词面）。故 `MEMORY_UPDATE_PROMPT` 明确要求
   **用用户对话的语言写 summary 与 facts**（专有名词/技术术语保留原文）。存量英文 facts 随
   updater 改写自然演进，不做一次性迁移
 - 观察入口：`GET /api/memory/retrieve?q=<query>`（逐条 fact 的词面/余弦/是否过阈值/得分/是否入选
   - 最终注入文本），走与真实注入同一段代码
-- 单请求 64 条上限，`embedTexts` 手动分批串行；`Fact.embedding` 随 memory.json 落盘
-- 旧数据回填：`backfillFactEmbeddings` 补缺失 / 维度不匹配的向量，进程内按存储键去重，
-  save 前 reload 并只合并「仍存在且 content 未变」的 fact
+- 单请求 64 条上限，`embedTexts` 手动分批串行；`Fact.embedding` 与 `SectionData.embedding`
+  随 memory.json 落盘（section 只为参与打分的 4 个槽位生成——topOfMind + history 三段；
+  workContext/personalContext 恒保留、不打分、不嵌）
+- 旧数据回填：`backfillMemoryEmbeddings` 补缺失 / 维度不匹配的 facts **与 sections** 向量，
+  进程内按存储键去重，save 前 reload 并只合并「仍存在且 content / summary 未变」的条目
+  （两类同函数同锁同一次 embed 批，避免两个独立回填 reload-merge-save 互踩）
 - **无向量库 / 无 ANN 索引**：facts 受 `maxFacts`（默认 100）约束，检索即内存线性扫描余弦
 
 **定位说明**：语义分量让同义改写也能召回（词面检索做不到）；但向量存在 memory.json 里、
 不做 ANN，facts 规模显著增长后线性扫描会成为瓶颈，届时需另接向量存储。
-检索参数见 `MemoryConfig.retrieveTopK` / `retrieveMaxTokens` / `embeddingHybridWeight`。
+检索参数见 `MemoryConfig.retrieveTopK` / `retrieveMaxTokens` / `retrieveMinScore` /
+`semanticMatchThreshold` / `embeddingHybridWeight`。
 
 #### Memory 手动 CRUD API
 
@@ -1076,9 +1086,9 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
 4. 单元测试覆盖建设中（vitest 已接入，当前覆盖中间件装配、防递归、guardrail 规则、
    记忆检索、checkpoint 行为约束、remote 沙箱等核心纯逻辑）
-5. 记忆检索为「词面重叠率 × confidence」与 embedding 余弦的加权混合（`embeddingHybridWeight`
-   默认 0.7），但**无向量库 / 无 ANN 索引**：向量随 facts 存 memory.json，检索即内存线性扫描，
-   受 `maxFacts`（默认 100）约束；facts 规模显著增长后需另接向量存储
+5. 记忆检索为词面重叠率与 embedding 余弦的门控加权混合（`embeddingHybridWeight` 默认 0.7），
+   facts 与 sections 同一口径；但**无向量库 / 无 ANN 索引**：向量随 facts/sections 存 memory.json，
+   检索即内存线性扫描，受 `maxFacts`（默认 100）约束；facts 规模显著增长后需另接向量存储
 6. remote 沙箱的并发上限按进程独立计（不做跨进程协调），多进程部署时实际连接数 = 上限 × 进程数
 7. `view_image` 仅支持**本会话上传的图片**（按文件名）；沙箱产物图片（如 matplotlib 输出）未支持 ——
    `Sandbox` 基类只有文本 `readFile`，要支持需为 local/docker/remote 三个后端各加二进制读取

@@ -16,6 +16,12 @@ export interface SectionData {
   summary: string;
   /** ISO-8601 with `Z` suffix; 空字符串表示 "从未更新过"。 */
   updatedAt: string;
+  /**
+   * 语义向量。仅参与检索打分的 section 生成（topOfMind 与 history 三段）；
+   * 恒保留的 workContext/personalContext 不参与打分、不存向量。
+   * 旧数据缺失；summary 改写后旧向量随整槽替换丢弃，由写侧重嵌或回填补齐。
+   */
+  embedding?: number[];
 }
 
 export interface UserSection {

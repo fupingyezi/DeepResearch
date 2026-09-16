@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Embeddings } from '@langchain/core/embeddings';
 
 import {
-  backfillFactEmbeddings,
+  backfillMemoryEmbeddings,
   cosineSimilarity,
   EMBEDDING_BATCH_LIMIT,
   embedQuery,
@@ -157,7 +157,7 @@ describe('embedQuery / embedTexts', () => {
   });
 });
 
-describe('backfillFactEmbeddings', () => {
+describe('backfillMemoryEmbeddings', () => {
   let tmpFile: string;
 
   beforeEach(async () => {
@@ -190,7 +190,7 @@ describe('backfillFactEmbeddings', () => {
     const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
 
-    await backfillFactEmbeddings(scope);
+    await backfillMemoryEmbeddings(scope);
 
     // 只为 fact_b 嵌入
     expect(fake.calls.flat()).toEqual(['没有向量']);
@@ -210,7 +210,7 @@ describe('backfillFactEmbeddings', () => {
     const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(2)));
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
 
-    await backfillFactEmbeddings(scope);
+    await backfillMemoryEmbeddings(scope);
     const reloaded = await getMemoryStorage().reload(scope);
     expect(reloaded.facts[0]?.embedding).toEqual(vec(2));
   });
@@ -231,7 +231,7 @@ describe('backfillFactEmbeddings', () => {
     });
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
 
-    await backfillFactEmbeddings(scope);
+    await backfillMemoryEmbeddings(scope);
 
     const reloaded = await getMemoryStorage().reload(scope);
     const ids = reloaded.facts.map((f) => f.id);
@@ -254,8 +254,8 @@ describe('backfillFactEmbeddings', () => {
     });
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
 
-    const p1 = backfillFactEmbeddings(scope);
-    const p2 = backfillFactEmbeddings(scope);
+    const p1 = backfillMemoryEmbeddings(scope);
+    const p2 = backfillMemoryEmbeddings(scope);
     release();
     await Promise.all([p1, p2]);
 
@@ -266,8 +266,69 @@ describe('backfillFactEmbeddings', () => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, storagePath: tmpFile, embeddingEnabled: false });
     const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
-    await backfillFactEmbeddings({ agentName: null, userId: null });
+    await backfillMemoryEmbeddings({ agentName: null, userId: null });
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it('section 缺向量时补齐打分槽位（topOfMind + history），恒保留段不嵌', async () => {
+    const scope = { agentName: null, userId: null };
+    const base = emptyMemory();
+    await getMemoryStorage().save(
+      {
+        ...base,
+        user: {
+          workContext: { summary: '后端工程师', updatedAt: '' },
+          personalContext: { summary: '喜欢徒步', updatedAt: '' },
+          topOfMind: { summary: '最近在筹备婚礼', updatedAt: '' },
+        },
+        history: {
+          recentMonths: { summary: '最近在做量子计算研究', updatedAt: '', embedding: vec(9) },
+          earlierContext: { summary: '早年从事烘焙行业', updatedAt: '' },
+          longTermBackground: { summary: '', updatedAt: '' },
+        },
+      },
+      scope,
+    );
+
+    const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(5)));
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    await backfillMemoryEmbeddings(scope);
+
+    // 只嵌两个缺向量的打分槽位：topOfMind + earlierContext；
+    // recentMonths 已有向量不动，workContext/personalContext 恒保留段不嵌
+    expect(fake.calls.flat().sort()).toEqual(['早年从事烘焙行业', '最近在筹备婚礼']);
+    const reloaded = await getMemoryStorage().reload(scope);
+    expect(reloaded.user.topOfMind.embedding).toEqual(vec(5));
+    expect(reloaded.history.earlierContext.embedding).toEqual(vec(5));
+    expect(reloaded.history.recentMonths.embedding).toEqual(vec(9));
+    expect(reloaded.user.workContext.embedding).toBeUndefined();
+    expect(reloaded.user.personalContext.embedding).toBeUndefined();
+  });
+
+  it('嵌入期间 section summary 被 updater 改写 → 不合并旧向量', async () => {
+    const scope = { agentName: null, userId: null };
+    const base = emptyMemory();
+    await getMemoryStorage().save(
+      { ...base, user: { ...base.user, topOfMind: { summary: '旧的关注点', updatedAt: '' } } },
+      scope,
+    );
+
+    // 第一次 reload（发现缺失）后、embed 返回前改写 summary，模拟 updater 并发落盘
+    const fake = fakeEmbeddings(async (batch) => {
+      const storage = getMemoryStorage();
+      const latest = await storage.reload(scope);
+      latest.user.topOfMind = { summary: '被改写的新关注点', updatedAt: 'now' };
+      await storage.save(latest, scope);
+      return batch.map(() => vec(6));
+    });
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    await backfillMemoryEmbeddings(scope);
+
+    const reloaded = await getMemoryStorage().reload(scope);
+    expect(reloaded.user.topOfMind.summary).toBe('被改写的新关注点');
+    expect(reloaded.user.topOfMind.embedding).toBeUndefined(); // 旧向量作废，等下轮重嵌
   });
 });
 

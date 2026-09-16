@@ -34,7 +34,7 @@ export type { MemoryStorage } from './storage';
 export { FileMemoryStorage, getMemoryStorage, resetMemoryStorage } from './storage';
 
 export {
-  backfillFactEmbeddings,
+  backfillMemoryEmbeddings,
   cosineSimilarity,
   EMBEDDING_BATCH_LIMIT,
   embedQuery,
@@ -42,12 +42,14 @@ export {
   getMemoryEmbeddingsFactory,
   isCompatibleVector,
   resetMemoryEmbeddingsFactory,
+  SCORED_SECTION_SLOTS,
   setMemoryEmbeddingsFactory,
   type MemoryEmbeddingsFactory,
 } from './embeddings';
 
 export {
   countTokens,
+  estimateTokensHeuristic,
   formatConversationForUpdate,
   formatMemoryForInjection,
   MEMORY_UPDATE_PROMPT,
@@ -57,15 +59,17 @@ export {
 
 export {
   factScoreParts,
+  hybridScoreParts,
   overlapRatio,
   previewFactScores,
-  retrievalThresholds,
   retrieveMemory,
   scoreFact,
+  scoreSection,
   tokenize,
   type FactScoreDetail,
   type FactScoreParts,
   type RetrievalOptions,
+  type ScoreContext,
 } from './retrieval';
 
 export {
@@ -100,15 +104,10 @@ export {
 } from './queue';
 
 import { getMemoryConfig as _gmc } from './config';
-import { backfillFactEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
+import { backfillMemoryEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
-import {
-  previewFactScores,
-  retrieveMemory,
-  retrievalThresholds,
-  type FactScoreDetail,
-} from './retrieval';
+import { previewFactScores, retrieveMemory, tokenize, type FactScoreDetail } from './retrieval';
 import type { MemoryData } from './types';
 
 export interface BuildMemoryContextOptions {
@@ -120,8 +119,10 @@ export interface BuildMemoryContextOptions {
    * - 'retrieve'：按 query 检索相关 facts / section，用更小预算注入。
    */
   mode?: 'inject' | 'retrieve';
-  /** retrieve 模式的检索 query（通常为最近一条用户输入）。 */
+  /** retrieve 模式的语义 query（当前轮用户输入；resume 无本轮文本时由历史顶替）。 */
   query?: string;
+  /** 近 N 轮人类输入（旧→新）；仅参与词面 query 拼接，不参与向量化。 */
+  recentQueries?: string[];
 }
 
 interface RetrieveForInjectionOutcome {
@@ -130,6 +131,8 @@ interface RetrieveForInjectionOutcome {
   picked: MemoryData | null;
   /** 真正会拼进 system prompt 的整段文本；空串 = 不注入。 */
   injectedText: string;
+  /** 词面与语义双空（本轮无文本且无历史）——调用方据此回落全量注入。 */
+  noQuery: boolean;
 }
 
 /**
@@ -138,9 +141,21 @@ interface RetrieveForInjectionOutcome {
  */
 async function retrieveForInjection(
   data: MemoryData,
-  opts: { agentName: string | null; userId: string | null; query: string },
+  opts: {
+    agentName: string | null;
+    userId: string | null;
+    query: string;
+    recentQueries?: string[];
+  },
 ): Promise<RetrieveForInjectionOutcome> {
   const config = _gmc();
+  // 词面 query = 近 N 轮拼接（去重：resume 时语义 query 即最近一轮，不重复计入）；
+  // 语义 query 只取当前轮——拼串会稀释句向量语义，语义门槛标定基于单句。
+  const lexicalQuery = [...(opts.recentQueries ?? []), opts.query]
+    .map((s) => (s ?? '').trim())
+    .filter((s, i, arr) => Boolean(s) && arr.indexOf(s) === i)
+    .join('\n');
+
   // 语义检索：query 一次性向量化（无 Key / 失败 → null，回落纯词面）；
   // 顺手 fire-and-forget 回填缺失向量的旧数据（内部 in-flight 去重，不阻塞本次检索）。
   let queryEmbedding: number[] | null = null;
@@ -151,16 +166,23 @@ async function retrieveForInjection(
     }
   }
 
-  const picked = retrieveMemory(data, opts.query, {
+  const noQuery = tokenize(lexicalQuery).length === 0 && queryEmbedding == null;
+
+  const picked = retrieveMemory(data, lexicalQuery, {
     topK: config.retrieveTopK,
     queryEmbedding,
     hybridWeight: config.embeddingHybridWeight,
+    minScore: config.retrieveMinScore,
+    semanticMatchThreshold: config.semanticMatchThreshold,
   });
-  const pickedText = picked ? _fmt(picked, config.retrieveMaxTokens) : '';
+  const pickedText = picked
+    ? _fmt(picked, config.retrieveMaxTokens, { preserveFactOrder: true })
+    : '';
   return {
     queryEmbedding,
     picked,
     injectedText: pickedText.trim() ? `<memory mode="retrieve">\n${pickedText}\n</memory>\n` : '',
+    noQuery,
   };
 }
 
@@ -175,8 +197,10 @@ export interface MemoryRetrievalPreview {
     embeddingBackfillOnLoad: boolean;
     retrieveTopK: number;
     retrieveMaxTokens: number;
+    retrieveMinScore: number;
+    semanticMatchThreshold: number;
   };
-  /** 不可配置的两个门槛常量。 */
+  /** 两个打分门槛的生效值（取自 MemoryConfig，便于解读打分明细）。 */
   thresholds: { semanticMatch: number; minScore: number };
   /** query 是否成功向量化（false = 无 Key / API 失败，本次为纯词面检索）。 */
   embedded: boolean;
@@ -190,8 +214,8 @@ export interface MemoryRetrievalPreview {
 /**
  * 预览检索效果：走与真实注入完全相同的代码路径，返回逐条打分明细 + 最终注入文本。
  *
- * 用途：`memoryMode: 'retrieve'` 目前无前端开关，本入口让「哪些 fact 被选中、
- * 词面/余弦各占多少、为什么没选中」可直接观察（见 /api/memory/retrieve）。
+ * 让「哪些 fact 被选中、词面/余弦各占多少、为什么没选中」可直接观察
+ * （见 /api/memory/retrieve）。
  */
 export async function previewMemoryRetrieval(opts: {
   agentName?: string | null;
@@ -218,14 +242,22 @@ export async function previewMemoryRetrieval(opts: {
       embeddingBackfillOnLoad: config.embeddingBackfillOnLoad,
       retrieveTopK: config.retrieveTopK,
       retrieveMaxTokens: config.retrieveMaxTokens,
+      retrieveMinScore: config.retrieveMinScore,
+      semanticMatchThreshold: config.semanticMatchThreshold,
     },
-    thresholds: retrievalThresholds(),
+    thresholds: {
+      semanticMatch: config.semanticMatchThreshold,
+      minScore: config.retrieveMinScore,
+    },
     embedded: outcome.queryEmbedding != null,
     queryEmbeddingDim: outcome.queryEmbedding?.length ?? null,
+    // 与此处 retrieveForInjection 传参保持同一组 config 派生参数：预览与真实注入同源
     facts: previewFactScores(data, opts.query, {
       topK: config.retrieveTopK,
       queryEmbedding: outcome.queryEmbedding,
       hybridWeight: config.embeddingHybridWeight,
+      minScore: config.retrieveMinScore,
+      semanticMatchThreshold: config.semanticMatchThreshold,
     }),
     injectedText: outcome.injectedText,
   };
@@ -248,13 +280,20 @@ export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): 
     });
 
     // retrieve 模式：先按 query 收敛出相关子集，再用更小的预算格式化。
-    // 检索无命中（或 query 为空）时不注入，避免无关记忆干扰模型。
+    // query 有信号但全部落空 → 不注入，避免无关记忆干扰模型。
     if (opts.mode === 'retrieve') {
       const outcome = await retrieveForInjection(data, {
         agentName: opts.agentName ?? null,
         userId: opts.userId ?? null,
         query: opts.query ?? '',
+        recentQueries: opts.recentQueries,
       });
+      // 词面与语义双空（本轮无文本且 checkpoint 无历史，如首轮 resume）→ 无可检索的
+      // 信号，退而为全量注入，而不是让本轮彻底失去记忆
+      if (outcome.noQuery) {
+        const text = _fmt(data, config.maxInjectionTokens);
+        return text.trim() ? `<memory>\n${text}\n</memory>\n` : '';
+      }
       return outcome.injectedText;
     }
 

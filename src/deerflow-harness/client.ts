@@ -16,9 +16,11 @@ import {
   type ClientAgentEventStream,
   type ClientAgentEvent,
 } from './runtime/sse';
+import { buildThreadConfig } from './runtime/checkpointer';
 import { getContext } from './runtime/context';
 import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './mcp';
 import { getEnabledSkillsSignature } from './skills';
+import { extractMessageContentText } from '@/utils/common';
 import {
   buildHumanMessageContent,
   extractContentTextBlocks,
@@ -104,6 +106,89 @@ function extractInputText(input: { messages: HumanMessage[] } | Command): string
       .join('\n');
   }
   return undefined;
+}
+
+/**
+ * 近 N 轮人类输入条数。省略式指称（「它呢？」）通常指向最近 1-2 轮，
+ * 3 覆盖工具密集交换中夹着短确认轮的场景；再大会把已切换话题的实体词拖回词面 query。
+ */
+const RECENT_QUERY_TURNS = 3;
+
+/** uploads 块带入文件名与解析正文，进检索 query 只会稀释词面重叠率。 */
+const UPLOAD_BLOCK_RE = /<uploaded_files>[\s\S]*?<\/uploaded_files>\n*/gi;
+
+/** 读 checkpoint 历史失败的告警（只报一次，避免每轮刷屏）。 */
+let warnedRecentQueryFailure = false;
+
+/**
+ * 倒序提取最近 limit 条 human 文本，按时间序（旧→新）返回。
+ * 角色判定用 `_getType()`（对齐 memory/prompt.ts 的口径），文本抽取复用
+ * extractMessageContentText（多模态 content 只取 text 块）。
+ */
+export function collectRecentHumanTexts(messages: unknown[], limit: number): string[] {
+  if (!Array.isArray(messages) || limit <= 0) return [];
+  const out: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
+    const message = messages[i] as { _getType?: () => string; type?: unknown; content?: unknown };
+    const role = typeof message?._getType === 'function' ? message._getType() : message?.type;
+    if (role !== 'human') continue;
+    const text = extractMessageContentText(message?.content).replace(UPLOAD_BLOCK_RE, '').trim();
+    if (text) out.push(text);
+  }
+  return out.reverse();
+}
+
+/**
+ * 组装检索用的两个 query：
+ * - 词面 = 近 N 轮拼接（省略式提问「它呢？」靠上一轮的实体词命中；拼接是锐化而非稀释
+ *   ——overlap 的分母是 query token 数，只有共享实体的 fact 拿到分子增量）；
+ * - 语义 = 当前轮（拼串会稀释句向量语义，语义门槛标定基于单句）。
+ * 当前轮缺失时（resume 的 Command 无文本）语义回落最近一轮历史。
+ */
+export function buildRetrievalQueries(
+  current: string | undefined,
+  recent: string[],
+): { lexicalQuery: string; semanticQuery: string } {
+  const currentText = (current ?? '').trim();
+  const history = recent.map((s) => (s ?? '').trim()).filter(Boolean);
+  const lexicalQuery = [...history.filter((s) => s !== currentText), currentText]
+    .filter(Boolean)
+    .join('\n');
+  const semanticQuery = currentText || history[history.length - 1] || '';
+  return { lexicalQuery, semanticQuery };
+}
+
+/**
+ * 经 checkpointer 读最近 limit 条 human 文本。
+ * saver 缺失 / 无 checkpoint / 读取异常一律静默回落空数组——记忆检索失败不影响主流程。
+ *
+ * 时序约束：prompt 构建发生在 agent.stream 之前，checkpoint 此刻不含本轮消息，
+ * 因此「本轮 query 取 input、历史 query 取 checkpoint」天然不重复。
+ */
+export async function readRecentHumanTexts(
+  saver: BaseCheckpointSaver | undefined,
+  threadId: string,
+  limit: number,
+): Promise<string[]> {
+  const getTuple: unknown = saver?.getTuple;
+  if (typeof getTuple !== 'function') return [];
+  try {
+    const tuple = (await (getTuple as (config: unknown) => Promise<unknown>).call(
+      saver,
+      buildThreadConfig(threadId),
+    )) as { checkpoint?: { channel_values?: Record<string, unknown> } } | undefined;
+    const messages = tuple?.checkpoint?.channel_values?.messages;
+    return Array.isArray(messages) ? collectRecentHumanTexts(messages, limit) : [];
+  } catch (e) {
+    if (!warnedRecentQueryFailure) {
+      warnedRecentQueryFailure = true;
+      console.warn(
+        '[DeerFlowClient] readRecentHumanTexts failed, memory query falls back to the current turn:',
+        e,
+      );
+    }
+    return [];
+  }
 }
 
 /**
@@ -273,6 +358,7 @@ export class DeerFlowClient {
     opts: RuntimeRunOptions,
     mcpTools: StructuredToolInterface[],
     memoryQuery?: string,
+    memoryRecentQueries?: string[],
   ): Promise<string> {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
@@ -288,6 +374,7 @@ export class DeerFlowClient {
         mcpToolsSection: buildMcpToolsSection(mcpTools),
         memoryMode: opts.memoryMode,
         memoryQuery,
+        memoryRecentQueries,
       });
     } catch (e) {
       console.warn(
@@ -465,9 +552,21 @@ export class DeerFlowClient {
     // 保证「模型在提示里看到的 MCP 工具」与「实际可调用的工具」严格一致。
     // mcpEnabled=false 时本轮不加载任何 MCP 工具（既不绑定也不写进提示），用于收紧工具集。
     const mcpTools = runOpts.mcpEnabled ? await loadMcpTools() : [];
-    // 检索模式的 query 取本轮用户输入（resume 的 Command 输入无文本 → 回落全量注入）
+    // 检索 query：词面含近 N 轮（省略式提问能命中上一轮实体词），语义只取本轮。
+    // 历史取自 checkpoint；resume（Command 无本轮文本）由最近一条 human 顶替语义 query。
+    // 仅 retrieve 模式读 checkpoint，inject 模式不多一次存储往返。
     const memoryQuery = extractInputText(input);
-    const systemPrompt = await this.resolveSystemPrompt(runOpts, mcpTools, memoryQuery);
+    const recentQueries =
+      runOpts.memoryEnabled && runOpts.memoryMode === 'retrieve'
+        ? await readRecentHumanTexts(this.checkpointer, effectiveThreadId, RECENT_QUERY_TURNS)
+        : [];
+    const { semanticQuery } = buildRetrievalQueries(memoryQuery, recentQueries);
+    const systemPrompt = await this.resolveSystemPrompt(
+      runOpts,
+      mcpTools,
+      semanticQuery,
+      recentQueries,
+    );
     const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
 
     // 3. lifecycle start

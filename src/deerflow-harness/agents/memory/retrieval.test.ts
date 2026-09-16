@@ -52,6 +52,12 @@ describe('tokenize', () => {
     expect(tokens).toContain('计算');
   });
 
+  it('CJK 范围与 token 计数器一致（Extension A 字符也产出单字）', () => {
+    // U+3400（Extension A）：预算按 1 token 计，词面匹配必须能命中同一字符
+    const tokens = tokenize('㐀');
+    expect(tokens).toEqual(['㐀']);
+  });
+
   it('空串返回空数组', () => {
     expect(tokenize('')).toEqual([]);
   });
@@ -76,7 +82,7 @@ describe('overlapRatio / scoreFact', () => {
   });
 
   it('置信度越高得分越高（同文本）', () => {
-    const query = new Set(tokenize('量子计算'));
+    const query = { queryTokens: new Set(tokenize('量子计算')) };
     const high = scoreFact(fact('量子计算', 1.0), query);
     const low = scoreFact(fact('量子计算', 0.5), query);
     expect(high).toBeGreaterThan(low);
@@ -196,15 +202,17 @@ describe('retrieveMemory 混合打分（queryEmbedding）', () => {
   it('无向量的 fact 在向量供给时与纯词面行为一致（不被惩罚）', () => {
     const f = fact('量子计算研究', 0.9);
     const tokens = new Set(tokenize('量子计算'));
-    const withVec = scoreFact(f, tokens, QUERY_VEC);
-    const withoutVec = scoreFact(f, tokens);
+    const withVec = scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC });
+    const withoutVec = scoreFact(f, { queryTokens: tokens });
     expect(withVec).toBe(withoutVec);
   });
 
   it('维度不匹配的向量被忽略（回落词面）', () => {
     const f = fact('量子计算研究', 0.9, 'f', [1, 0, 0]); // 3 维 vs query 4 维
     const tokens = new Set(tokenize('量子计算'));
-    expect(scoreFact(f, tokens, QUERY_VEC)).toBe(scoreFact(f, tokens));
+    expect(scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC })).toBe(
+      scoreFact(f, { queryTokens: tokens }),
+    );
   });
 
   it('query 无有效 token 但有向量时不早退', () => {
@@ -243,9 +251,113 @@ describe('retrieveMemory 混合打分（queryEmbedding）', () => {
 
   it('置信度加权仍作用在最外层（同向量同文本）', () => {
     const tokens = new Set(tokenize('量子计算'));
-    const high = scoreFact(fact('量子计算', 1.0, 'h', QUERY_VEC), tokens, QUERY_VEC);
-    const low = scoreFact(fact('量子计算', 0.5, 'l', QUERY_VEC), tokens, QUERY_VEC);
+    const high = scoreFact(fact('量子计算', 1.0, 'h', QUERY_VEC), {
+      queryTokens: tokens,
+      queryEmbedding: QUERY_VEC,
+    });
+    const low = scoreFact(fact('量子计算', 0.5, 'l', QUERY_VEC), {
+      queryTokens: tokens,
+      queryEmbedding: QUERY_VEC,
+    });
     expect(high).toBeGreaterThan(low);
+  });
+});
+
+describe('section 混合打分（queryEmbedding）', () => {
+  const QUERY_VEC = [1, 0, 0, 0];
+  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+
+  it('history 段同义改写可凭语义命中（词面零重叠时选中有向量的那段）', () => {
+    const withVec = memory([], {
+      history: {
+        recentMonths: {
+          summary: '最近在做量子计算相关的研究项目',
+          updatedAt: '',
+          embedding: unit(0.65),
+        },
+        earlierContext: { summary: '早年从事烘焙行业', updatedAt: '' },
+        longTermBackground: { summary: '长期关注开源社区', updatedAt: '' },
+      },
+    });
+    // query 与三段 summary 均无词面重叠，仅 recentMonths 有过门槛的向量
+    const picked = retrieveMemory(withVec, '帮我写一个快速排序', { queryEmbedding: QUERY_VEC });
+    expect(picked).not.toBeNull();
+    expect(picked!.history.recentMonths.summary).toContain('量子计算');
+    expect(picked!.history.earlierContext.summary).toBe('');
+    expect(picked!.history.longTermBackground.summary).toBe('');
+
+    // 无向量时同 query 三段全零 → history 整体不注入（回归对照）
+    expect(retrieveMemory(withVec, '帮我写一个快速排序')).toBeNull();
+  });
+
+  it('topOfMind 词面不达标但语义过门槛时被保留', () => {
+    const data = memory([], {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '最近在准备婚礼', updatedAt: '', embedding: unit(0.65) },
+      },
+    });
+    const picked = retrieveMemory(data, '怎么调试 Kubernetes 网络', { queryEmbedding: QUERY_VEC });
+    expect(picked).not.toBeNull();
+    expect(picked!.user.topOfMind.summary).toContain('婚礼');
+
+    // 无向量时词面 0 分 → topOfMind 被丢弃且整体无命中
+    expect(retrieveMemory(data, '怎么调试 Kubernetes 网络')).toBeNull();
+  });
+
+  it('维度不匹配的 section 向量被忽略（回落词面）', () => {
+    const data = memory([], {
+      history: {
+        recentMonths: {
+          summary: '最近在做量子计算相关的研究项目',
+          updatedAt: '',
+          embedding: [1, 0, 0],
+        },
+        earlierContext: { summary: '', updatedAt: '' },
+        longTermBackground: { summary: '', updatedAt: '' },
+      },
+    });
+    // 3 维向量 vs 4 维 query 向量：语义退出、词面零重叠 → history 不注入
+    expect(retrieveMemory(data, '帮我写一个快速排序', { queryEmbedding: QUERY_VEC })).toBeNull();
+  });
+});
+
+describe('语义门槛可配（semanticMatchThreshold）', () => {
+  const QUERY_VEC = [1, 0, 0, 0];
+  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+
+  it('门槛调低后原被挡下的基线量级（0.55）参与混合并入选', () => {
+    const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.55))]);
+    // 默认 0.6：挡下（与上方「地板取 0.6」用例同源）
+    expect(retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+    // 门槛 0.5：0.55 过线，按 0.7×0.55 参与混合
+    const picked = retrieveMemory(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      semanticMatchThreshold: 0.5,
+    });
+    expect(picked!.facts.map((f) => f.id)).toEqual(['f']);
+  });
+
+  it('门槛调高后真相关量级（0.65）也被挡下', () => {
+    const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
+    expect(
+      retrieveMemory(data, '随便聊聊', {
+        queryEmbedding: QUERY_VEC,
+        semanticMatchThreshold: 0.7,
+      }),
+    ).toBeNull();
+  });
+
+  it('预览明细的 semanticUsed 反映生效门槛', () => {
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.55))]);
+    const [detail] = previewFactScores(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      semanticMatchThreshold: 0.5,
+    });
+    expect(detail.cosine).toBeCloseTo(0.55, 10);
+    expect(detail.semanticUsed).toBe(true);
+    expect(detail.base).toBeCloseTo(0.7 * 0.55, 10);
   });
 });
 
@@ -257,7 +369,10 @@ describe('previewFactScores（检索预览）', () => {
     const f = fact('量子计算进展', 0.8, 'a', unit(0.7));
     const tokens = new Set(tokenize('量子计算'));
     const [detail] = previewFactScores(memory([f]), '量子计算', { queryEmbedding: QUERY_VEC });
-    expect(detail.score).toBeCloseTo(scoreFact(f, tokens, QUERY_VEC), 10);
+    expect(detail.score).toBeCloseTo(
+      scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC }),
+      10,
+    );
     expect(detail.lexical).toBeCloseTo(overlapRatio(f.content, tokens), 10);
     expect(detail.cosine).toBeCloseTo(0.7, 10);
     expect(detail.semanticUsed).toBe(true);

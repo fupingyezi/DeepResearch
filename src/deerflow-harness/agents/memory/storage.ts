@@ -19,7 +19,7 @@ import {
   userAgentMemoryFile,
   userMemoryFile,
 } from './paths';
-import { createEmptyMemory, MemoryData, utcNowIsoZ, validateAgentName } from './types';
+import { createEmptyMemory, MemoryData, SectionData, utcNowIsoZ, validateAgentName } from './types';
 
 export interface MemoryStorage {
   load(opts?: { agentName?: string | null; userId?: string | null }): Promise<MemoryData>;
@@ -209,12 +209,24 @@ function sanitizeLoadedFact(f: any): any {
   return f;
 }
 
-function mergeSection(s: any, dft: { summary: string; updatedAt: string }) {
+/**
+ * section 合并：保留 summary/updatedAt 与合法的 embedding 向量。
+ * 向量口径与 sanitizeLoadedFact 一致——非数组 / 含非有限数剥除；维度不符的
+ * 合法向量保留，由检索 / 回填按 config 维度判定失效并重算。
+ */
+function mergeSection(s: any, dft: SectionData): SectionData {
   if (!s || typeof s !== 'object') return { ...dft };
-  return {
+  const out: SectionData = {
     summary: typeof s.summary === 'string' ? s.summary : dft.summary,
     updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : dft.updatedAt,
   };
+  if (
+    Array.isArray(s.embedding) &&
+    s.embedding.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
+  ) {
+    out.embedding = s.embedding as number[];
+  }
+  return out;
 }
 
 let _instance: MemoryStorage | null = null;

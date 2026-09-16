@@ -123,6 +123,7 @@ export {
   resetMemoryStorage,
   // prompt utilities
   countTokens,
+  estimateTokensHeuristic,
   formatConversationForUpdate,
   formatMemoryForInjection,
   MEMORY_UPDATE_PROMPT,
@@ -154,7 +155,7 @@ export {
   type AddArgs as MemoryQueueAddArgs,
   type ConversationContext as MemoryConversationContext,
   // embeddings（语义检索）
-  backfillFactEmbeddings,
+  backfillMemoryEmbeddings,
   cosineSimilarity,
   EMBEDDING_BATCH_LIMIT,
   embedQuery,
@@ -171,7 +172,6 @@ export {
   type MemoryRetrievalPreview,
   // retrieval 明细（预览/调试）
   previewFactScores,
-  retrievalThresholds,
   type FactScoreDetail,
 } from './agents/memory';
 

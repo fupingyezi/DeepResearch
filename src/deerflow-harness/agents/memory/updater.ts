@@ -16,10 +16,17 @@ import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import { getMemoryConfig } from './config';
-import { embedQuery, embedTexts, isCompatibleVector } from './embeddings';
+import { embedQuery, embedTexts, isCompatibleVector, SCORED_SECTION_SLOTS } from './embeddings';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
-import { createEmptyMemory, Fact, FactCategory, MemoryData, utcNowIsoZ } from './types';
+import {
+  createEmptyMemory,
+  Fact,
+  FactCategory,
+  MemoryData,
+  SectionData,
+  utcNowIsoZ,
+} from './types';
 import { casefold, extractMessageContentText } from '@/utils/common';
 
 // Model factory injection
@@ -104,14 +111,58 @@ async function embedMissingFacts(data: MemoryData): Promise<void> {
 }
 
 /**
- * 构造 LLM 更新 prompt 前剥离 fact 的 embedding 向量：
+ * 为参与打分的 sections（SCORED_SECTION_SLOTS）补齐缺失 / 维度失效的向量。
+ * 与 embedMissingFacts 同纪律：整槽替换（不 mutate 元素本身，data 是 updater 私有
+ * 深拷贝，槽位容器可直接写）、失败保持无向量交由检索侧回填重试。
+ */
+async function embedMissingSections(data: MemoryData): Promise<void> {
+  const config = getMemoryConfig();
+  if (!config.embeddingEnabled) return;
+  const slots: Array<['user' | 'history', string]> = [];
+  for (const [group, key] of SCORED_SECTION_SLOTS) {
+    const container = data[group] as unknown as Record<string, SectionData>;
+    const section = container[key];
+    if (section?.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions)) {
+      slots.push([group, key]);
+    }
+  }
+  if (slots.length === 0) return;
+  const vectors = await embedTexts(
+    slots.map(
+      ([group, key]) => (data[group] as unknown as Record<string, SectionData>)[key].summary,
+    ),
+  );
+  slots.forEach(([group, key], k) => {
+    if (vectors[k] != null) {
+      const container = data[group] as unknown as Record<string, SectionData>;
+      container[key] = { ...container[key], embedding: vectors[k]! };
+    }
+  });
+}
+
+/**
+ * 构造 LLM 更新 prompt 前剥离 facts 与 sections 的 embedding 向量：
  * 100 条 facts × 1024 维浮点会把 prompt 撑到 MB 级，直接不可用。
  */
 function sanitizeMemoryForPrompt(memory: MemoryData): MemoryData {
-  if (!memory.facts?.length) return memory;
+  const stripSection = (sec: SectionData): SectionData => {
+    if (sec.embedding == null) return sec;
+    const { embedding: _embedding, ...rest } = sec;
+    return rest;
+  };
   return {
     ...memory,
-    facts: memory.facts.map((f) => {
+    user: {
+      workContext: stripSection(memory.user.workContext),
+      personalContext: stripSection(memory.user.personalContext),
+      topOfMind: stripSection(memory.user.topOfMind),
+    },
+    history: {
+      recentMonths: stripSection(memory.history.recentMonths),
+      earlierContext: stripSection(memory.history.earlierContext),
+      longTermBackground: stripSection(memory.history.longTermBackground),
+    },
+    facts: (memory.facts ?? []).map((f) => {
       if (f.embedding == null) return f;
       const { embedding: _embedding, ...rest } = f;
       return rest;
@@ -224,11 +275,15 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
   for (const sec of ['user', 'history'] as const) {
     // UserSection / HistorySection 的字段是字面量 key 而非索引签名，TS 不允许
     // 直接断言为 Record<string, SectionData>，需要先经 unknown 中转。
-    const section = out[sec] as unknown as Record<string, { summary: string; updatedAt: string }>;
+    const section = out[sec] as unknown as Record<string, SectionData>;
     for (const k of Object.keys(section)) {
       const v = section[k];
       if (v && typeof v.summary === 'string') {
-        v.summary = v.summary.replace(UPLOAD_SENTENCE_RE, '').replace(/  +/g, ' ').trim();
+        const next = v.summary.replace(UPLOAD_SENTENCE_RE, '').replace(/  +/g, ' ').trim();
+        if (next !== v.summary) {
+          v.summary = next;
+          delete v.embedding; // 文本变了，旧向量失效，由 embedMissingSections / 回填重嵌
+        }
       }
     }
   }
@@ -254,20 +309,23 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
   const now = utcNowIsoZ();
   const out: MemoryData = JSON.parse(JSON.stringify(current));
 
-  // user sections
+  // user sections：summary 未变（trim 后相等）保留原槽——连带旧向量与 updatedAt，
+  // 避免无谓重嵌；重写则整槽替换，旧向量随新对象自然丢弃，由 embedMissingSections 重嵌
   const userUpdates = update?.user ?? {};
   for (const key of ['workContext', 'personalContext', 'topOfMind'] as const) {
     const sec = userUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
+      if (sec.summary.trim() === out.user[key].summary?.trim()) continue;
       out.user[key] = { summary: sec.summary, updatedAt: now };
     }
   }
 
-  // history sections
+  // history sections（同 user sections 的未变保留策略）
   const histUpdates = update?.history ?? {};
   for (const key of ['recentMonths', 'earlierContext', 'longTermBackground'] as const) {
     const sec = histUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
+      if (sec.summary.trim() === out.history[key].summary?.trim()) continue;
       out.history[key] = { summary: sec.summary, updatedAt: now };
     }
   }
@@ -516,7 +574,9 @@ export class MemoryUpdater {
 
       let updated = applyUpdates(current, parsed, opts.threadId ?? null);
       updated = stripUploadMentions(updated);
-      // 新增 / 保留的 facts 批量补齐向量后落盘（失败照常 save，等检索侧回填）
+      // 新增 / 保留的 facts 与 sections 批量补齐向量后落盘（失败照常 save，等检索侧回填）。
+      // 必须在 stripUploadMentions 之后：strip 会改写 section summary，先嵌会产生立刻失效的向量
+      await embedMissingSections(updated);
       await embedMissingFacts(updated);
 
       const saved = await getMemoryStorage().save(updated, { agentName, userId });

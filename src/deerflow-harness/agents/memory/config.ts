@@ -33,6 +33,18 @@ export interface MemoryConfig {
   retrieveTopK: number;
   /** 检索模式注入 token 预算，100..4000。 */
   retrieveMaxTokens: number;
+  /**
+   * 检索条目的最低得分，0..1。
+   * 仅剔除零分噪声；真正决定「留几条」的是 topK 与语义门槛。
+   */
+  retrieveMinScore: number;
+  /**
+   * 语义分量参与混合的余弦下限，0..1。
+   * 标定依据见 retrieval.ts SEMANTIC_MATCH_THRESHOLD 注释：embedding-3 中文短文本
+   * 无关基线 0.44~0.55、真相关 0.64~0.69，默认 0.6 落在两簇空隙。
+   * 换 embedding 模型 / 语言后基线可能偏移，可经此调整。
+   */
+  semanticMatchThreshold: number;
   /** 是否启用 embedding 语义检索（工厂缺失 / 失败自动回落 lexical）。 */
   embeddingEnabled: boolean;
   /** 向量维度，256..2048（智谱 embedding-3 可配）。 */
@@ -55,6 +67,8 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   maxInjectionTokens: 2000,
   retrieveTopK: 8,
   retrieveMaxTokens: 800,
+  retrieveMinScore: 0.05,
+  semanticMatchThreshold: 0.6,
   embeddingEnabled: true,
   embeddingDimensions: 1024,
   embeddingHybridWeight: 0.7,
@@ -106,8 +120,18 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   if (typeof m.retrieveTopK === 'number') out.retrieveTopK = m.retrieveTopK;
   if (typeof m.retrieve_max_tokens === 'number') out.retrieveMaxTokens = m.retrieve_max_tokens;
   if (typeof m.retrieveMaxTokens === 'number') out.retrieveMaxTokens = m.retrieveMaxTokens;
+  if (typeof m.retrieve_min_score === 'number') out.retrieveMinScore = m.retrieve_min_score;
+  if (typeof m.retrieveMinScore === 'number') out.retrieveMinScore = m.retrieveMinScore;
+  if (typeof m.semantic_match_threshold === 'number') {
+    out.semanticMatchThreshold = m.semantic_match_threshold;
+  }
+  if (typeof m.semanticMatchThreshold === 'number') {
+    out.semanticMatchThreshold = m.semanticMatchThreshold;
+  }
   out.retrieveTopK = clamp(out.retrieveTopK, 1, 50);
   out.retrieveMaxTokens = clamp(out.retrieveMaxTokens, 100, 4000);
+  out.retrieveMinScore = clamp(out.retrieveMinScore, 0, 1);
+  out.semanticMatchThreshold = clamp(out.semanticMatchThreshold, 0, 1);
 
   if (typeof m.embedding_enabled === 'boolean') out.embeddingEnabled = m.embedding_enabled;
   if (typeof m.embeddingEnabled === 'boolean') out.embeddingEnabled = m.embeddingEnabled;
