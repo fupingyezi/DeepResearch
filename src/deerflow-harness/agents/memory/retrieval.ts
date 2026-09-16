@@ -20,7 +20,7 @@ import type { Fact, FactCategory, MemoryData, SectionData } from './types';
 export interface RetrievalOptions {
   /** 最多保留的 fact 条数（默认 8）。 */
   topK?: number;
-  /** 保留 section 的最低得分（默认 0.05）。 */
+  /** facts 与 sections 入选的最低得分（默认 0.05；facts 严格大于，sections 大于等于）。 */
   minScore?: number;
   /** query 的语义向量（buildMemoryContext 一次性向量化；null/缺省 = 纯词面）。 */
   queryEmbedding?: number[] | null;
@@ -136,8 +136,10 @@ export function tokenize(text: string): string[] {
     if (word.length >= 2 && !STOP_WORDS.has(word)) tokens.push(word);
   }
 
-  // CJK：单字 + 相邻二元组
-  for (const match of lower.matchAll(/[一-鿿]+/g)) {
+  // CJK：单字 + 相邻二元组。
+  // 范围与 prompt.ts 的 CJK_CHAR_RE 保持一致（Extension A + 基本区 + 兼容区），
+  // 否则这些字符在 token 预算里按 1 token 计、在词面匹配里却完全不参与。
+  for (const match of lower.matchAll(/[㐀-䶿一-鿿豈-﫿]+/g)) {
     const run = match[0];
     for (let i = 0; i < run.length; i++) {
       const ch = run[i];

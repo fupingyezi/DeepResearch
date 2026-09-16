@@ -127,7 +127,10 @@ import type { MemoryData, Fact } from './types';
 
 export type TokenCounter = (text: string) => number;
 
-/** CJK 判定范围：U+3400-4DBF（Extension A）、U+4E00-9FFF（基本区）、U+F900-FAFF（兼容区）。 */
+/**
+ * CJK 判定范围：U+3400-4DBF（Extension A）、U+4E00-9FFF（基本区）、U+F900-FAFF（兼容区）。
+ * 与 retrieval.ts tokenize 的范围一致：token 预算与词面匹配对同一批字符生效。
+ */
 const CJK_CHAR_RE = /[㐀-䶿一-鿿豈-﫿]/g;
 
 /**

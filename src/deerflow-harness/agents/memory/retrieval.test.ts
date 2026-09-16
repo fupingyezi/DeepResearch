@@ -52,6 +52,12 @@ describe('tokenize', () => {
     expect(tokens).toContain('计算');
   });
 
+  it('CJK 范围与 token 计数器一致（Extension A 字符也产出单字）', () => {
+    // U+3400（Extension A）：预算按 1 token 计，词面匹配必须能命中同一字符
+    const tokens = tokenize('㐀');
+    expect(tokens).toEqual(['㐀']);
+  });
+
   it('空串返回空数组', () => {
     expect(tokenize('')).toEqual([]);
   });
