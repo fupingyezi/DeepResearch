@@ -56,7 +56,7 @@ pnpm format:check
 docker-compose up -d
 ```
 
-**单元测试（vitest）：**`pnpm test` 运行 `src/**/*.test.ts`，测试文件与被测文件同目录。
+**单元测试（vitest）：**`pnpm test` 运行 `src/**/__tests__/**/*.test.ts`——测试文件与被测代码同域但收在所在目录的 `__tests__/` 子目录里（`include` 白名单只在 `__tests__` 下，平层的 `.test.ts` 不会被跑）。
 
 **提交校验（husky，需先 `pnpm install` 激活）：**
 
