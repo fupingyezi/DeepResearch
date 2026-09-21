@@ -7,37 +7,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { RunStatus } from '@/deerflow-harness';
+import { toHttpError } from '@/server/http';
+import { parseJsonBody } from '@/server/validation';
+import { submitRunSchema } from '@/server/validation/schemas';
 import { getRunStore, getThreadService } from '@/server/wiring';
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
 
 export async function POST(request: NextRequest, ctx: { params: { threadId: string } }) {
-  try {
-    const body = (await request.json().catch(() => ({}))) as {
-      input?: string;
-      metadata?: Record<string, any>;
-    };
-    if (!body.input || typeof body.input !== 'string') {
-      return NextResponse.json({ error: 'missing input' }, { status: 400 });
-    }
+  const parsed = await parseJsonBody(request, submitRunSchema);
+  if (!parsed.ok) return parsed.response;
 
+  try {
     const service = await getThreadService();
     const { run_id } = await service.submitRun({
       thread_id: ctx.params.threadId,
       user_id: pickUserId(request),
-      input: body.input,
-      metadata: body.metadata,
+      input: parsed.data.input,
+      metadata: parsed.data.metadata,
     });
     return NextResponse.json({ run_id }, { status: 202 });
   } catch (e) {
-    const code = (e as Error & { code?: string })?.code;
-    const status = code === 'NOT_FOUND' ? 404 : 500;
     console.error('[POST /api/threads/:id/runs] error:', e);
-    return NextResponse.json(
-      { error: 'failed to submit run', message: (e as Error)?.message },
-      { status },
-    );
+    return toHttpError(e, 'failed to submit run');
   }
 }
 
@@ -57,9 +50,6 @@ export async function GET(request: NextRequest, ctx: { params: { threadId: strin
     return NextResponse.json({ data }, { status: 200 });
   } catch (e) {
     console.error('[GET /api/threads/:id/runs] error:', e);
-    return NextResponse.json(
-      { error: 'failed to list runs', message: (e as Error)?.message },
-      { status: 500 },
-    );
+    return toHttpError(e, 'failed to list runs');
   }
 }

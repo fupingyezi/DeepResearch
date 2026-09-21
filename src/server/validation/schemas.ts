@@ -135,3 +135,19 @@ export const createSkillSchema = z.object({
 export const enhancePromptSchema = z.object({
   input: z.string().trim().min(1).max(8000),
 });
+
+// ---- threads（x-user-id 机制不变：鉴权头原样透传） ----
+
+/** threads：创建线程。全部字段可选（缺省时 ThreadService 自动生成 thread_id）。 */
+export const createThreadSchema = z.object({
+  thread_id: z.string().optional(),
+  assistant_id: z.string().optional(),
+  display_name: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** threads：提交 run（input 必填非空；metadata 透传给 ThreadService）。 */
+export const submitRunSchema = z.object({
+  input: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
