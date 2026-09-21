@@ -93,3 +93,16 @@ export const setMemoryModeSchema = z.object({
 export const retrievePreviewSchema = z.object({
   q: z.string().trim().min(1),
 });
+
+// ---- model-keys ----
+
+/** model-keys：保存 / 覆盖某 provider 的 Key（provider 白名单在 service 层）。 */
+export const putModelKeySchema = z.object({
+  provider: z.string().trim().min(1),
+  apiKey: z.string().trim().min(1),
+});
+
+/** model-keys：设置当前选用模型预设（预设存在性在 service 层校验）。 */
+export const patchSelectedModelSchema = z.object({
+  selectedModel: z.string().trim().min(1),
+});
