@@ -106,3 +106,25 @@ export const putModelKeySchema = z.object({
 export const patchSelectedModelSchema = z.object({
   selectedModel: z.string().trim().min(1),
 });
+
+// ---- mcp / skills（extensions） ----
+
+/**
+ * mcp：新增/更新 server。config 的详细形状由 harness 的
+ * mcpServerConfigSchema 在 service 层校验（单一出处），这里只要求是个对象。
+ */
+export const upsertMcpServerSchema = z.object({
+  name: z.string().trim().min(1),
+  config: z.record(z.string(), z.unknown()),
+});
+
+/** mcp/skills：切换启用状态。 */
+export const patchEnabledSchema = z.object({
+  enabled: z.boolean(),
+});
+
+/** skills：新建自定义 skill（frontmatter 等校验在 harness loader）。 */
+export const createSkillSchema = z.object({
+  name: z.string().trim().min(1),
+  content: z.string().min(1),
+});
