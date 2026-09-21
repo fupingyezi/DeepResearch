@@ -2,7 +2,7 @@
  * 视觉子系统：线程图片字节访问注入 + 多模态消息构造
  *
  * 依赖方向约束：harness 层不反向依赖 app 层（MinIO 客户端在 src/lib/storage），
- * 因此图片字节获取器由 app 层（threads/_service.ts）通过 setThreadImageFetcher
+ * 因此图片字节获取器由 app 层（src/server/wiring.ts）通过 setThreadImageFetcher
  * 注入，模式对齐 setMemoryModelFactory / setTitleModelFactory。
  *
  * 传输用 base64 data URL：内网部署下 MinIO presigned URL 对模型服务商不可达，

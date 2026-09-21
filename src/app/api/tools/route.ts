@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { askClarificationTool, searchWebTool, taskTool } from '@/deerflow-harness/tools';
-import { getCurrentUser } from '../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 type ToolCategory = 'builtin' | 'agent';
 

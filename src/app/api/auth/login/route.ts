@@ -13,7 +13,7 @@ import {
   createAccessToken,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie } from '../_helpers';
+import { jsonError, setSessionCookie } from '@/server/http';
 
 interface LoginBody {
   email?: unknown;

@@ -17,7 +17,7 @@ import {
   setSelectedModel,
 } from '@deerflow-harness/auth';
 import { MODEL_PRESETS, type ModelPresetName } from '@/config/models';
-import { getCurrentUser } from '../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

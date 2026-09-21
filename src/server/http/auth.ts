@@ -8,7 +8,7 @@
  * token_version 校验：JWT 内的 ver 必须与 DB 中用户当前 tokenVersion 一致，
  * 改密码后旧 token（ver 落后）即失效。
  *
- * （自 src/app/api/auth/_helpers.ts 迁入；jsonError 归并到同目录 errors.ts）
+ * jsonError 在同目录 errors.ts，经 index barrel 统一导出。
  */
 
 import { NextRequest, NextResponse } from 'next/server';

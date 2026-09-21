@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { deleteMemoryFact, updateMemoryFact, type FactCategory } from '@/deerflow-harness';
-import { getCurrentUser } from '../../../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 const VALID_CATEGORIES = new Set<FactCategory>([
   'preference',

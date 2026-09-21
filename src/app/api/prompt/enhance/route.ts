@@ -11,8 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
 import { getPromptEnhanceModel } from '@/deerflow-harness';
-import { getCurrentUser } from '../../auth/_helpers';
-import { ensureTitleModelFactory } from '../../threads/_service';
+import { getCurrentUser } from '@/server/http';
+import { ensureTitleModelFactory } from '@/server/wiring';
 
 const MAX_INPUT_CHARS = 8000;
 

@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { AuthErrorCode, toUserResponse } from '@deerflow-harness/auth';
-import { getCurrentUser, jsonError } from '../_helpers';
+import { getCurrentUser, jsonError } from '@/server/http';
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser(request);

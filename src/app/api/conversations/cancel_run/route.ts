@@ -13,8 +13,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { query } from '@/lib';
 import { ThreadServiceError } from '@/deerflow-harness';
-import { getCurrentUser } from '../../auth/_helpers';
-import { getThreadService } from '../../threads/_service';
+import { getCurrentUser } from '@/server/http';
+import { getThreadService } from '@/server/wiring';
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request);

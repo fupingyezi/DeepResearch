@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getExtensionsConfigStore, mcpServerConfigSchema } from '@/deerflow-harness';
 import { resetMcpClient } from '@/deerflow-harness';
-import { getCurrentUser } from '../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 export const runtime = 'nodejs';
 

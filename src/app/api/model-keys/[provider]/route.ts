@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { deleteModelKey } from '@deerflow-harness/auth';
 import { MODEL_PRESETS } from '@/config/models';
-import { getCurrentUser } from '../../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

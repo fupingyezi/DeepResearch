@@ -14,7 +14,7 @@ import {
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
-import { jsonError, setSessionCookie } from '../_helpers';
+import { jsonError, setSessionCookie } from '@/server/http';
 
 interface RegisterBody {
   email?: unknown;

@@ -17,8 +17,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { previewMemoryRetrieval } from '@/deerflow-harness';
-import { ensureMemoryEmbeddingsFactory } from '../../threads/_service';
-import { getCurrentUser } from '../../auth/_helpers';
+import { ensureMemoryEmbeddingsFactory } from '@/server/wiring';
+import { getCurrentUser } from '@/server/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

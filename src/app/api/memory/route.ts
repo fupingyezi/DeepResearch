@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { clearMemoryData, getMemoryData } from '@/deerflow-harness';
-import { getCurrentUser } from '../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 /** 读取当前用户的记忆（结构化 summary + facts）。 */
 export async function GET(request: NextRequest) {

@@ -7,8 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { RunStatus } from '@/deerflow-harness';
-import { PgRunStore } from '@/deerflow-harness';
-import { getThreadService } from '../../_service';
+import { getRunStore, getThreadService } from '@/server/wiring';
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
@@ -50,8 +49,7 @@ export async function GET(request: NextRequest, ctx: { params: { threadId: strin
     const status = (url.searchParams.get('status') ?? undefined) as RunStatus | undefined;
 
     // 复用同一个 PgRunStore；轻量直读，避免再 await service 装配开销
-    const runs = new PgRunStore();
-    const data = await runs.listByThread(ctx.params.threadId, {
+    const data = await getRunStore().listByThread(ctx.params.threadId, {
       limit: Number.isFinite(limit) ? limit : 50,
       offset: Number.isFinite(offset) ? offset : 0,
       status,

@@ -36,8 +36,9 @@ import {
   type ThreadImageRef,
 } from '@/deerflow-harness';
 import type { MessagePart, ChatMessageType } from '@/types';
-import { getThreadService, resolveUserModelConfig } from '../../threads/_service';
-import { getCurrentUser } from '../../auth/_helpers';
+import { getThreadService } from '@/server/wiring';
+import { resolveUserModelConfig } from '@/server/services/model-config-service';
+import { getCurrentUser } from '@/server/http';
 import {
   ChatSessionAccessError,
   ensureChatSessionRecord,

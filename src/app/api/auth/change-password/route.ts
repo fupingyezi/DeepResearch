@@ -12,7 +12,7 @@ import {
   createAccessToken,
   validateStrongPassword,
 } from '@deerflow-harness/auth';
-import { getCurrentUser, jsonError, setSessionCookie } from '../_helpers';
+import { getCurrentUser, jsonError, setSessionCookie } from '@/server/http';
 
 interface ChangePasswordBody {
   current_password?: unknown;

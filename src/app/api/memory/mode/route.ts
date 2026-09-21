@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
-import { getCurrentUser } from '../../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

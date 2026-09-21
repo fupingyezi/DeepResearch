@@ -15,7 +15,7 @@ import {
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie } from '../_helpers';
+import { jsonError, setSessionCookie } from '@/server/http';
 
 export async function POST() {
   const demo = getDemoAccount();

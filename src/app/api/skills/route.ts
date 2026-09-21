@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createCustomSkill, loadSkills } from '@/deerflow-harness';
-import { getCurrentUser } from '../auth/_helpers';
+import { getCurrentUser } from '@/server/http';
 
 // stdio MCP / 文件系统访问需 Node.js runtime
 export const runtime = 'nodejs';
