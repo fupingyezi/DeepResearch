@@ -33,7 +33,7 @@ describe('assembleFromFeatures —— 防递归（task 工具可见性）', () =
 });
 
 describe('assembleFromFeatures —— 服务级开关装配一致性', () => {
-  // 与 src/app/api/threads/_service.ts 的 sharedClientOptions 对应：
+  // 与 src/server/wiring.ts 的 sharedClientOptions 对应：
   // 任一开关在装配层被静默丢弃（历史上 guardrail/summarization/todo 都发生过），
   // 该用例即失败，避免「文档说装了、代码没装」再次出现。
   it('服务级默认的 7 个可选开关全部落到链上', () => {

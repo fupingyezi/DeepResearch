@@ -7,7 +7,7 @@
  * - prepare：preflight 全序列（顺序即不变量，见方法注释），返回「精确错误形状」
  *   或 PreparedChat —— SSE 路由的前置失败是 JSON，错误体逐条保持历史形状
  * - submit：submitRun / resume（fire-and-forget）
- * - streamEvents：wrapWithPersistence 生成器 —— **必须整体传给
+ * - streamEvents：流式事件生成器 —— **必须整体传给
  *   createSseStream(request, events)**，abort 的 break 触发 generator.return()
  *   才执行 finally 落库
  */

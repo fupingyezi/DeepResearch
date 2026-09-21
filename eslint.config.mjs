@@ -19,6 +19,28 @@ const eslintConfig = defineConfig([
       '@next/next/no-img-element': 'warn',
     },
   },
+  {
+    // 分层依赖方向（见 CLAUDE.md「后端分层规范」）：
+    // harness / utils / types 是共享层，禁止反向依赖 app 侧（@/server、@/app）
+    files: [
+      'src/deerflow-harness/**/*.{ts,tsx}',
+      'src/utils/**/*.{ts,tsx}',
+      'src/types/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/server/*', '@/app/*'],
+              message: '共享层（harness/utils/types）不允许依赖 @/server 或 @/app',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettier,
   // Override default ignores of eslint-config-next.
   globalIgnores([
