@@ -13,12 +13,8 @@ import {
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { getCurrentUser, jsonError, setSessionCookie } from '@/server/http';
-
-interface ChangePasswordBody {
-  current_password?: unknown;
-  new_password?: unknown;
-  new_email?: unknown;
-}
+import { parseJsonBody } from '@/server/validation';
+import { changePasswordSchema } from '@/server/validation/schemas';
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -26,14 +22,14 @@ export async function POST(request: NextRequest) {
     return jsonError(AuthErrorCode.UNAUTHENTICATED, 'Not authenticated', 401);
   }
 
-  const body = (await request.json().catch(() => ({}))) as ChangePasswordBody;
-  const currentPassword = typeof body.current_password === 'string' ? body.current_password : '';
-  const newPassword = typeof body.new_password === 'string' ? body.new_password : '';
-  const newEmail = typeof body.new_email === 'string' ? body.new_email : undefined;
+  const parsed = await parseJsonBody(request, changePasswordSchema);
+  if (!parsed.ok) return parsed.response;
 
-  if (!currentPassword || !newPassword) {
-    return jsonError(AuthErrorCode.INVALID_INPUT, 'Current and new password are required', 400);
-  }
+  const {
+    current_password: currentPassword,
+    new_password: newPassword,
+    new_email: newEmail,
+  } = parsed.data;
 
   const weak = validateStrongPassword(newPassword);
   if (weak) {

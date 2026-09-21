@@ -151,3 +151,22 @@ export const submitRunSchema = z.object({
   input: z.string().min(1),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
+
+// ---- auth ----
+
+/**
+ * 登录 / 注册 / 首启初始化共用的凭证 body。
+ * 只要求非空字符串，**不**加 .email()——邮箱格式错误现在走 401 而不是 400，
+ * 收紧会改变现状行为。
+ */
+export const credentialsSchema = z.object({
+  email: z.string().min(1),
+  password: z.string().min(1),
+});
+
+/** 修改密码：current_password / new_password 必填，new_email 可选。 */
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(1),
+  new_email: z.string().optional(),
+});
