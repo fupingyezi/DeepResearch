@@ -62,3 +62,34 @@ export const chatStreamBodySchema = z.object({
 });
 
 export type ChatStreamBody = z.infer<typeof chatStreamBodySchema>;
+
+// ---- memory ----
+
+/**
+ * facts：新建 fact。
+ * content 必填非空；category / confidence 只约束类型，合法值与默认值
+ * （'context' / 0.6）由 service 层施加——现状行为是非法值静默回落默认，
+ * 这里保持（状态码零变化）。
+ */
+export const createMemoryFactSchema = z.object({
+  content: z.string().trim().min(1),
+  category: z.string().optional(),
+  confidence: z.number().optional(),
+});
+
+/** facts：更新 fact。全部可选；content 出现时必须非空（现状：空 content → 400）。 */
+export const updateMemoryFactSchema = z.object({
+  content: z.string().trim().min(1).optional(),
+  category: z.string().optional(),
+  confidence: z.number().optional(),
+});
+
+/** mode：记忆注入模式（严格字面量，拼错即 400 而非静默回落）。 */
+export const setMemoryModeSchema = z.object({
+  mode: z.enum(['inject', 'retrieve']),
+});
+
+/** retrieve：检索预览 query（?q=）。 */
+export const retrievePreviewSchema = z.object({
+  q: z.string().trim().min(1),
+});

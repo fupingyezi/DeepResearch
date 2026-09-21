@@ -12,14 +12,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
-import { getCurrentUser } from '@/server/http';
+import { getCurrentUser, toHttpError } from '@/server/http';
+import { getMemoryService } from '@/server/services/memory-service';
+import { parseJsonBody } from '@/server/validation';
+import { setMemoryModeSchema } from '@/server/validation/schemas';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-/** 服务级默认：与 client.ts 的 baseOptions.memoryMode 保持一致。 */
-const DEFAULT_MODE: MemoryInjectionMode = 'inject';
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -28,17 +27,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stored = await getMemoryMode(user.id);
-    return NextResponse.json(
-      {
-        message: 'Get memory mode success!',
-        data: { mode: stored ?? DEFAULT_MODE, isDefault: stored === null },
-      },
-      { status: 200 },
-    );
+    const data = await getMemoryService().getMode(user.id);
+    return NextResponse.json({ message: 'Get memory mode success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory/mode] get error:', error);
-    return NextResponse.json({ message: 'Get memory mode failed!' }, { status: 500 });
+    return toHttpError(error, 'Get memory mode failed');
   }
 }
 
@@ -48,29 +41,17 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  let mode: unknown;
-  try {
-    ({ mode } = (await request.json()) as { mode?: unknown });
-  } catch {
-    return NextResponse.json({ message: 'Invalid JSON body' }, { status: 400 });
-  }
-
-  // 严格字面量校验：拼错时明确报错，而不是静默回落默认值改变记忆行为
-  if (mode !== 'inject' && mode !== 'retrieve') {
-    return NextResponse.json(
-      { message: 'Invalid mode', error: "mode must be 'inject' or 'retrieve'" },
-      { status: 400 },
-    );
-  }
+  const parsed = await parseJsonBody(request, setMemoryModeSchema);
+  if (!parsed.ok) return parsed.response;
 
   try {
-    await setMemoryMode(user.id, mode);
+    await getMemoryService().setMode(user.id, parsed.data.mode);
     return NextResponse.json(
-      { message: 'Set memory mode success!', data: { mode } },
+      { message: 'Set memory mode success!', data: { mode: parsed.data.mode } },
       { status: 200 },
     );
   } catch (error) {
     console.error('[memory/mode] set error:', error);
-    return NextResponse.json({ message: 'Set memory mode failed!' }, { status: 500 });
+    return toHttpError(error, 'Set memory mode failed');
   }
 }
