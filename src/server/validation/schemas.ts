@@ -128,3 +128,10 @@ export const createSkillSchema = z.object({
   name: z.string().trim().min(1),
   content: z.string().min(1),
 });
+
+// ---- prompt/enhance ----
+
+/** prompt/enhance：输入非空且 ≤ 8000 字符（与现状一致）。 */
+export const enhancePromptSchema = z.object({
+  input: z.string().trim().min(1).max(8000),
+});
