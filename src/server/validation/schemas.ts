@@ -13,3 +13,14 @@ import { z } from 'zod';
 
 /** UUID 字符串：sessionId / fileId / 路径参数共用的基础 schema。 */
 export const uuidSchema = z.string().uuid();
+
+/** conversations 域：rename / delete / cancel 共用的 sessionId-only body。 */
+export const sessionIdBodySchema = z.object({
+  sessionId: z.string().min(1),
+});
+
+/** conversations 域：重命名会话。 */
+export const updateSessionBodySchema = z.object({
+  sessionId: z.string().min(1),
+  title: z.string().min(1),
+});

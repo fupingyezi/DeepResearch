@@ -8,8 +8,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { loadSessionHistory } from '../_service';
-import { getCurrentUser } from '@/server/http';
+import { getCurrentUser, toHttpError } from '@/server/http';
+import { getConversationService } from '@/server/services/conversation-service';
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = await loadSessionHistory(sessionId, user.id);
+    const data = await getConversationService().loadSessionHistory(sessionId, user.id);
     return NextResponse.json(
       {
         message: 'Get history success!',
@@ -33,12 +33,6 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     console.error('[GET /api/conversations/history] failed:', error);
-    return NextResponse.json(
-      {
-        message: 'Get history failed!',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    );
+    return toHttpError(error, 'Get history failed!');
   }
 }
