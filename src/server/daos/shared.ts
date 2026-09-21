@@ -9,8 +9,8 @@
 import { getClient } from '@/lib/db';
 
 /**
- * 与旧 conversations/_service.ts 的 ClientLike 同形：pg 的 PoolClient 可结构化匹配，
- * 事务内各 store 方法经它共享同一条连接。
+ * 与 pg 的 PoolClient 结构匹配（只要求 query 签名），事务内各 store 方法经它共享
+ * 同一条连接。
  */
 export type SqlExecutor = {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;

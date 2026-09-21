@@ -29,3 +29,36 @@ export const updateSessionBodySchema = z.object({
 export const fileIdBodySchema = z.object({
   fileId: z.string().min(1),
 });
+
+// ---- v3/chat ----
+
+export const chatContentBlockSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string() }),
+  z.object({ type: z.literal('file'), fileId: z.string().min(1) }),
+  z.object({ type: z.literal('image'), fileId: z.string().min(1) }),
+]);
+
+export type ChatContentBlock = z.infer<typeof chatContentBlockSchema>;
+
+/**
+ * v3/chat 请求体。
+ *
+ * - configuration 不用 .strict()：历史协议允许任意额外键，这里只约束已知字段形状
+ * - contents 至少要有一个非空 text block（无 text 的纯文件请求模型无从作答）
+ */
+export const chatStreamBodySchema = z.object({
+  sessionId: uuidSchema.optional(),
+  configuration: z.record(z.string(), z.unknown()).nullable().optional(),
+  message: z.object({
+    contents: z
+      .array(chatContentBlockSchema)
+      .min(1)
+      .refine((contents) => contents.some((b) => b.type === 'text' && b.text.trim().length > 0), {
+        message: 'message.contents must contain at least one non-empty text block',
+      }),
+  }),
+  stream: z.boolean().optional(),
+  operation: z.enum(['resume', 'recall', 'reEditCall']).optional(),
+});
+
+export type ChatStreamBody = z.infer<typeof chatStreamBodySchema>;
