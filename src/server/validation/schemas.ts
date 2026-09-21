@@ -24,3 +24,8 @@ export const updateSessionBodySchema = z.object({
   sessionId: z.string().min(1),
   title: z.string().min(1),
 });
+
+/** files 域：删除文件。 */
+export const fileIdBodySchema = z.object({
+  fileId: z.string().min(1),
+});
