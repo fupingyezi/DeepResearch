@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getSandboxSnapshot } from '@/deerflow-harness';
+import { getSandboxStatsSnapshot } from '@/server/services/sandbox-service';
 
 export const runtime = 'nodejs';
 
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const includeStats = new URL(request.url).searchParams.get('stats') !== '0';
-    const snapshot = await getSandboxSnapshot(includeStats);
+    const snapshot = await getSandboxStatsSnapshot(includeStats);
     return NextResponse.json(snapshot, { status: 200 });
   } catch (e) {
     console.error('[GET /api/sandbox/stats] error:', e);
