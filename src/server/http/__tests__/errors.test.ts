@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { AppError, ERROR_STATUS, resolveHttpError, toHttpError } from '@/server/http/errors';
+import {
+  AppError,
+  ERROR_STATUS,
+  preflightError,
+  resolveHttpError,
+  toHttpError,
+} from '@/server/http/errors';
 
 function errorWithCode(code: string, message = 'boom'): Error {
   const e = new Error(message) as Error & { code: string };
@@ -56,5 +62,35 @@ describe('ERROR_STATUS 表', () => {
     // ThreadServiceError 的 NOT_FOUND / 归属校验的 FORBIDDEN 是 route 层最依赖的两条
     expect(ERROR_STATUS.NOT_FOUND).toBe(404);
     expect(ERROR_STATUS.FORBIDDEN).toBe(403);
+  });
+});
+
+describe('preflightError（service 预检元组 → 统一错误体）', () => {
+  async function bodyOf(response: Response): Promise<Record<string, unknown>> {
+    return (await response.json()) as Record<string, unknown>;
+  }
+
+  it("body.error 大写命中表 → 作 code（'no_api_key' → NO_API_KEY），中文 message 不丢", async () => {
+    const response = preflightError(400, { error: 'no_api_key', message: '尚未配置 API Key' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ code: 'NO_API_KEY', message: '尚未配置 API Key' });
+  });
+
+  it('错误码不在表 → 按状态回落，message 优先 body.message', async () => {
+    const response = preflightError(403, { error: 'forbidden' });
+    expect(response.status).toBe(403);
+    expect(await bodyOf(response)).toEqual({ code: 'FORBIDDEN', message: 'forbidden' });
+  });
+
+  it('500 元组无 message → INTERNAL + error 原文', async () => {
+    const response = preflightError(500, { error: 'failed to submit run' });
+    expect(response.status).toBe(500);
+    expect(await bodyOf(response)).toEqual({ code: 'INTERNAL', message: 'failed to submit run' });
+  });
+
+  it('未知状态码 → INTERNAL 兜底（不外泄其他 code）', async () => {
+    const response = preflightError(418, { error: 'teapot' });
+    expect(response.status).toBe(418);
+    expect(await bodyOf(response)).toEqual({ code: 'INTERNAL', message: 'teapot' });
   });
 });

@@ -4,10 +4,10 @@
 
 import { NextResponse } from 'next/server';
 
-import { clearSessionCookie } from '@/server/http';
+import { clearSessionCookie, withApiHandler } from '@/server/http';
 
-export async function POST() {
+export const POST = withApiHandler({ auth: 'none' }, async () => {
   const response = NextResponse.json({ message: 'Successfully logged out' });
   clearSessionCookie(response);
   return response;
-}
+});

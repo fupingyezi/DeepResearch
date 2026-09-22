@@ -10,48 +10,30 @@
  * 落库而非仅存本地，理由与 selected_model 一致：换浏览器/设备后行为一致。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { getCurrentUser, toHttpError } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 import { getMemoryService } from '@/server/services/memory-service';
-import { parseJsonBody } from '@/server/validation';
 import { setMemoryModeSchema } from '@/server/validation/schemas';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
-  try {
-    const data = await getMemoryService().getMode(user.id);
+export const GET = withApiHandler(
+  { fallbackMessage: 'Get memory mode failed' },
+  async ({ user }) => {
+    const data = await getMemoryService().getMode(user!.id);
     return NextResponse.json({ message: 'Get memory mode success!', data }, { status: 200 });
-  } catch (error) {
-    console.error('[memory/mode] get error:', error);
-    return toHttpError(error, 'Get memory mode failed');
-  }
-}
+  },
+);
 
-export async function PUT(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
-  const parsed = await parseJsonBody(request, setMemoryModeSchema);
-  if (!parsed.ok) return parsed.response;
-
-  try {
-    await getMemoryService().setMode(user.id, parsed.data.mode);
+export const PUT = withApiHandler(
+  { body: setMemoryModeSchema, fallbackMessage: 'Set memory mode failed' },
+  async ({ user, body }) => {
+    await getMemoryService().setMode(user!.id, body.mode);
     return NextResponse.json(
-      { message: 'Set memory mode success!', data: { mode: parsed.data.mode } },
+      { message: 'Set memory mode success!', data: { mode: body.mode } },
       { status: 200 },
     );
-  } catch (error) {
-    console.error('[memory/mode] set error:', error);
-    return toHttpError(error, 'Set memory mode failed');
-  }
-}
+  },
+);

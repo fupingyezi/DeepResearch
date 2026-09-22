@@ -5,7 +5,7 @@
  * 创建后把存量无归属会话回填给该 admin（provider.initializeAdmin 内完成）。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 import {
   AuthErrorCode,
@@ -16,15 +16,11 @@ import {
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
-import { jsonError, setSessionCookie } from '@/server/http';
-import { parseJsonBody } from '@/server/validation';
+import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { credentialsSchema } from '@/server/validation/schemas';
 
-export async function POST(request: NextRequest) {
-  const parsed = await parseJsonBody(request, credentialsSchema);
-  if (!parsed.ok) return parsed.response;
-
-  const { email, password } = parsed.data;
+export const POST = withApiHandler({ auth: 'none', body: credentialsSchema }, async ({ body }) => {
+  const { email, password } = body;
 
   const weak = validateStrongPassword(password);
   if (weak) {
@@ -47,4 +43,4 @@ export async function POST(request: NextRequest) {
     }
     throw e;
   }
-}
+});

@@ -14,30 +14,19 @@
  * 注：本接口只读不写；但会触发旧数据向量回填（fire-and-forget，与线上行为一致）。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { getCurrentUser, toHttpError } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 import { getMemoryService } from '@/server/services/memory-service';
-import { parseSearchParams } from '@/server/validation';
 import { retrievePreviewSchema } from '@/server/validation/schemas';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
-  const parsed = parseSearchParams(request.nextUrl.searchParams, retrievePreviewSchema);
-  if (!parsed.ok) return parsed.response;
-
-  try {
-    const data = await getMemoryService().previewRetrieval(user.id, parsed.data.q);
+export const GET = withApiHandler(
+  { query: retrievePreviewSchema, fallbackMessage: 'Retrieve preview failed' },
+  async ({ user, query }) => {
+    const data = await getMemoryService().previewRetrieval(user!.id, query.q);
     return NextResponse.json({ message: 'Retrieve preview success!', data }, { status: 200 });
-  } catch (error) {
-    console.error('[memory/retrieve] preview error:', error);
-    return toHttpError(error, 'Retrieve preview failed');
-  }
-}
+  },
+);

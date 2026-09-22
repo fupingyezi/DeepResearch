@@ -15,9 +15,9 @@ import {
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie } from '@/server/http';
+import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 
-export async function POST() {
+export const POST = withApiHandler({ auth: 'none' }, async () => {
   const demo = getDemoAccount();
   if (!demo) {
     return jsonError(AuthErrorCode.INVALID_INPUT, 'Demo login is not enabled', 404);
@@ -36,4 +36,4 @@ export async function POST() {
   const response = NextResponse.json(toUserResponse(user));
   setSessionCookie(response, token);
   return response;
-}
+});

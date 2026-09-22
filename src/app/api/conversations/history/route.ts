@@ -6,24 +6,16 @@
  * Response: { message: string; data: ChatMessageType[] }
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { getCurrentUser, toHttpError } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 import { getConversationService } from '@/server/services/conversation-service';
+import { historyQuerySchema } from '@/server/validation/schemas';
 
-export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
-  const sessionId = request.nextUrl.searchParams.get('sessionId');
-  if (!sessionId) {
-    return NextResponse.json({ message: 'sessionId is required' }, { status: 400 });
-  }
-
-  try {
-    const data = await getConversationService().loadSessionHistory(sessionId, user.id);
+export const GET = withApiHandler(
+  { query: historyQuerySchema, fallbackMessage: 'Get history failed!' },
+  async ({ user, query }) => {
+    const data = await getConversationService().loadSessionHistory(query.sessionId, user!.id);
     return NextResponse.json(
       {
         message: 'Get history success!',
@@ -31,8 +23,5 @@ export async function GET(request: NextRequest) {
       },
       { status: 200 },
     );
-  } catch (error) {
-    console.error('[GET /api/conversations/history] failed:', error);
-    return toHttpError(error, 'Get history failed!');
-  }
-}
+  },
+);

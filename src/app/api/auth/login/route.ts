@@ -5,7 +5,7 @@
  * 失败：401 INVALID_CREDENTIALS。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 import {
   AuthErrorCode,
@@ -13,15 +13,11 @@ import {
   createAccessToken,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie } from '@/server/http';
-import { parseJsonBody } from '@/server/validation';
+import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { credentialsSchema } from '@/server/validation/schemas';
 
-export async function POST(request: NextRequest) {
-  const parsed = await parseJsonBody(request, credentialsSchema);
-  if (!parsed.ok) return parsed.response;
-
-  const user = await authenticate(parsed.data.email, parsed.data.password);
+export const POST = withApiHandler({ auth: 'none', body: credentialsSchema }, async ({ body }) => {
+  const user = await authenticate(body.email, body.password);
   if (!user) {
     return jsonError(AuthErrorCode.INVALID_CREDENTIALS, 'Incorrect email or password', 401);
   }
@@ -30,4 +26,4 @@ export async function POST(request: NextRequest) {
   const response = NextResponse.json(toUserResponse(user));
   setSessionCookie(response, token);
   return response;
-}
+});

@@ -1,25 +1,30 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 
 import { ensureBucket } from '@/lib';
-import { toHttpError } from '@/server/http';
+import { jsonError, withApiHandler } from '@/server/http';
 import { getFileService } from '@/server/services/file-service';
+import type { ParseResult } from '@/server/validation';
 
-export async function POST(request: NextRequest) {
-  try {
-    await ensureBucket();
+/**
+ * multipart 自定义解析：ensureBucket 必须最先执行（现状顺序：ensureBucket →
+ * formData → 校验 → upload，倒置会让桶不存在时先读 body 抛 500）。
+ */
+async function parseUploadBody(
+  request: NextRequest,
+): Promise<ParseResult<{ file: File; fileId: string }>> {
+  await ensureBucket();
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const fileId = formData.get('fileId') as string;
+  const formData = await request.formData();
+  const file = formData.get('file') as File | null;
+  const fileId = formData.get('fileId') as string;
 
-    if (!file || !fileId) {
-      return NextResponse.json({ error: 'Missing file or fileId' }, { status: 400 });
-    }
-
-    const result = await getFileService().uploadFile(file, fileId);
-    return NextResponse.json(result, { status: 200 });
-  } catch (error) {
-    console.error('[POST /api/files/upload] error:', error);
-    return toHttpError(error);
+  if (!file || !fileId) {
+    return { ok: false, response: jsonError('INVALID_INPUT', 'Missing file or fileId', 400) };
   }
+  return { ok: true, data: { file, fileId } };
 }
+
+export const POST = withApiHandler({ auth: 'none', body: parseUploadBody }, async ({ body }) => {
+  const result = await getFileService().uploadFile(body.file, body.fileId);
+  return NextResponse.json(result, { status: 200 });
+});

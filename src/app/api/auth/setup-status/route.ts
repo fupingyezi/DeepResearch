@@ -8,15 +8,16 @@
 import { NextResponse } from 'next/server';
 
 import { adminExists, getDemoAccount } from '@deerflow-harness/auth';
+import { withApiHandler } from '@/server/http';
 
 // 每次实时查询 admin 是否存在，禁止静态预渲染缓存
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export const GET = withApiHandler({ auth: 'none' }, async () => {
   const exists = await adminExists();
   const demo = getDemoAccount();
   return NextResponse.json({
     needs_setup: !exists,
     demo_login: { enabled: demo !== null, email: demo?.email ?? null },
   });
-}
+});

@@ -62,6 +62,8 @@ export const ERROR_STATUS: Record<string, number> = {
   // prompt enhance
   MODEL_UNAVAILABLE: 503,
   EMPTY_RESULT: 502,
+  // 占位路由（auth/oauth）
+  NOT_IMPLEMENTED: 501,
 };
 
 export interface HttpErrorResolution {
@@ -92,7 +94,6 @@ export function resolveHttpError(
       status: ERROR_STATUS[err.code],
     };
   }
-  console.error('[http] unhandled error:', e);
   return { code: 'INTERNAL', message: fallbackMessage, status: 500 };
 }
 
@@ -105,4 +106,35 @@ export function toHttpError(e: unknown, fallbackMessage?: string): NextResponse 
 /** 结构化错误响应 { code, message }。 */
 export function jsonError(code: string, message: string, status: number): NextResponse {
   return NextResponse.json({ code, message }, { status });
+}
+
+/** 状态码 → 兜底错误码（preflightError 用；不在 ERROR_STATUS 里的状态一律 INTERNAL）。 */
+const STATUS_FALLBACK_CODE: Record<number, string> = {
+  400: 'INVALID_INPUT',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  500: 'INTERNAL',
+  502: 'EMPTY_RESULT',
+  503: 'MODEL_UNAVAILABLE',
+};
+
+/**
+ * service 预检元组 {ok:false, status, body} → 统一 {code,message} 响应（chat-service 零改动）。
+ * body.error 大写后命中 ERROR_STATUS 则作 code（'no_api_key' → NO_API_KEY），否则按状态码回落；
+ * message 优先取 body.message（no_api_key / no_model_selected 的用户可见中文不能丢），
+ * 其次取 body.error 原文。
+ */
+export function preflightError(status: number, body: Record<string, unknown>): NextResponse {
+  const errorKey = typeof body.error === 'string' ? body.error.toUpperCase() : undefined;
+  const code =
+    errorKey && ERROR_STATUS[errorKey] !== undefined
+      ? errorKey
+      : (STATUS_FALLBACK_CODE[status] ?? 'INTERNAL');
+  const message =
+    typeof body.message === 'string'
+      ? body.message
+      : typeof body.error === 'string'
+        ? body.error
+        : 'Request failed';
+  return jsonError(code, message, status);
 }

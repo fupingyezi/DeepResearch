@@ -170,3 +170,35 @@ export const changePasswordSchema = z.object({
   new_password: z.string().min(1),
   new_email: z.string().optional(),
 });
+
+// ---- 查询参数（统一请求管线 query 槽） ----
+
+/** 重复 query key 折叠为首值：对齐 searchParams.get 语义，防数组把合法请求打成 400。 */
+const firstValue = (v: unknown): unknown => (Array.isArray(v) ? v[0] : v);
+
+/**
+ * threads / runs 分页查询。严格复刻现状 `Number(searchParams.get(...))` 语义：
+ * 缺省 → limit 50 / offset 0；NaN / Infinity → 回落默认；空串 → 0；负数透传。
+ * 非法值一律回落而非 400（现状如此，收紧会改状态码）。
+ */
+export const listQuerySchema = z.object({
+  limit: z.preprocess(firstValue, z.coerce.number().finite().catch(50)),
+  offset: z.preprocess(firstValue, z.coerce.number().finite().catch(0)),
+  status: z.preprocess(firstValue, z.string().optional()),
+  // ↑ 不能 z.enum(ThreadStatus/RunStatus)：未知值现状走 DB 过滤返回 200 空列表，收紧会 400。
+});
+
+/** conversations/history：sessionId 必填非空。不用 uuidSchema——非 UUID 现状返回 200 空结果。 */
+export const historyQuerySchema = z.object({
+  sessionId: z.string().min(1),
+});
+
+/** threads/[threadId] GET：include=checkpoint 才取 checkpoint，其余值/缺失一律不取。 */
+export const getThreadQuerySchema = z.object({
+  include: z.enum(['checkpoint']).optional().catch(undefined),
+});
+
+/** sandbox/stats：stats 字符串透传（handler 判 stats !== '0'，缺省即 true）。 */
+export const sandboxStatsQuerySchema = z.object({
+  stats: z.preprocess(firstValue, z.string().optional()),
+});

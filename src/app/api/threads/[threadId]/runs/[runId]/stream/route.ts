@@ -5,19 +5,15 @@
  * 与 v2 路由响应同形（text/event-stream，data: <json>\n\n）。
  */
 
-import { NextRequest } from 'next/server';
-
 import { createSseStream } from '@/deerflow-harness';
+import { withApiHandler } from '@/server/http';
 import { getThreadService } from '@/server/wiring';
 
-export async function GET(
-  request: NextRequest,
-  ctx: { params: { threadId: string; runId: string } },
-) {
+export const GET = withApiHandler({ auth: 'none' }, async ({ params, request }) => {
   const service = await getThreadService();
   const eventStream = service.subscribe({
-    thread_id: ctx.params.threadId,
-    run_id: ctx.params.runId,
+    thread_id: params.threadId,
+    run_id: params.runId,
   });
 
   // service.subscribe 返回 AsyncIterable<ClientAgentEvent>，createSseStream 期望的是
@@ -36,4 +32,4 @@ export async function GET(
       Connection: 'keep-alive',
     },
   });
-}
+});
