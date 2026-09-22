@@ -313,7 +313,7 @@ describe('限流与参数', () => {
   });
 
   it('params 透传（动态路由）', async () => {
-    const wrapped = withApiHandler<{ id: string }>({ auth: 'none' }, async (ctx) => {
+    const wrapped = withApiHandler({ auth: 'none' }, async (ctx) => {
       expect(ctx.params.id).toBe('abc');
       return NextResponse.json({});
     });

@@ -49,31 +49,31 @@ export interface ApiHandlerOptions<TBody = undefined, TQuery = undefined> {
   rateLimit?: RateLimitHook;
 }
 
-export interface ApiContext<TBody, TQuery, TParams extends Record<string, string>> {
+export interface ApiContext<TBody, TQuery> {
   user: UserRecord | null; // auth 'cookie' 通过时必非空
   userId?: string; // userIdHeader 命中时
   body: TBody;
   query: TQuery;
-  params: TParams;
+  params: Record<string, string>; // 动态路由段（无动态段时为 {}）
   request: NextRequest; // 供 SSE 组装 createSseStream(request, ...)
 }
 
-export type ApiRouteHandler<TBody, TQuery, TParams extends Record<string, string>> = (
-  ctx: ApiContext<TBody, TQuery, TParams>,
+export type ApiRouteHandler<TBody, TQuery> = (
+  ctx: ApiContext<TBody, TQuery>,
 ) => Response | Promise<Response>;
 
 /**
  * 包一层统一管线。返回 Next.js route handler 形状
  * `(request, { params }) => Promise<Response>`，路由层直接 `export const GET = withApiHandler(...)`。
+ *
+ * TBody / TQuery 由 options.body / options.query 的 schema 推断；不要显式传
+ * 类型参数——部分显式类型参数会让未指定的项退回默认值 undefined 而非推断
+ * （TS 不支持按名传泛型）。
  */
-export function withApiHandler<
-  TParams extends Record<string, string> = Record<string, string>,
-  TBody = undefined,
-  TQuery = undefined,
->(
+export function withApiHandler<TBody = undefined, TQuery = undefined>(
   options: ApiHandlerOptions<TBody, TQuery>,
-  handler: ApiRouteHandler<TBody, TQuery, TParams>,
-): (request: NextRequest, routeCtx?: { params: TParams }) => Promise<Response> {
+  handler: ApiRouteHandler<TBody, TQuery>,
+): (request: NextRequest, routeCtx?: { params?: Record<string, string> }) => Promise<Response> {
   const auth = options.auth ?? 'cookie';
   const rateLimit = options.rateLimit ?? noopRateLimit;
 
@@ -140,12 +140,12 @@ export function withApiHandler<
       }
 
       // 7) handler
-      const ctx: ApiContext<TBody, TQuery, TParams> = {
+      const ctx: ApiContext<TBody, TQuery> = {
         user,
         userId: headerUserId,
         body,
         query,
-        params: (routeCtx?.params ?? {}) as TParams,
+        params: routeCtx?.params ?? {},
         request,
       };
       const response = await handler(ctx);

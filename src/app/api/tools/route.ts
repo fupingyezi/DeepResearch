@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 import { askClarificationTool, searchWebTool, taskTool } from '@/deerflow-harness/tools';
-import { getCurrentUser } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 
 type ToolCategory = 'builtin' | 'agent';
 
@@ -27,12 +27,7 @@ const TOOL_META: Array<{
   { tool: askClarificationTool, displayName: '澄清提问', category: 'agent' },
 ];
 
-export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
+export const GET = withApiHandler({}, async () => {
   const data: ToolInfo[] = TOOL_META.map(({ tool, displayName, category }) => ({
     name: tool.name ?? 'unknown',
     displayName,
@@ -42,4 +37,4 @@ export async function GET(request: NextRequest) {
   }));
 
   return NextResponse.json({ message: 'Get tools success!', data }, { status: 200 });
-}
+});

@@ -9,28 +9,17 @@
  * 因为停止按钮只关心「停住」这个结果，不该因为无事可停而报错。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { getCurrentUser, toHttpError } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 import { getConversationService } from '@/server/services/conversation-service';
-import { parseJsonBody } from '@/server/validation';
 import { sessionIdBodySchema } from '@/server/validation/schemas';
 
-export async function POST(request: NextRequest) {
-  const user = await getCurrentUser(request);
-  if (!user) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-  }
-
-  const parsed = await parseJsonBody(request, sessionIdBodySchema);
-  if (!parsed.ok) return parsed.response;
-
-  try {
-    const { cancelled } = await getConversationService().cancelRun(parsed.data.sessionId, user.id);
+export const POST = withApiHandler(
+  { body: sessionIdBodySchema, fallbackMessage: 'failed to cancel run' },
+  async ({ user, body }) => {
+    const { cancelled } = await getConversationService().cancelRun(body.sessionId, user!.id);
 
     return NextResponse.json({ success: true, cancelled }, { status: 200 });
-  } catch (error) {
-    console.error('[POST /api/conversations/cancel_run] error:', error);
-    return toHttpError(error, 'failed to cancel run');
-  }
-}
+  },
+);
