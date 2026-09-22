@@ -192,7 +192,7 @@ DEERFLOW_GUARDRAIL_BLOCK=none             # none（默认，仅告警）| inject
                           │ HTTP + SSE
           ┌───────────────┴────────────────┐
           │     API Routes（controller）    │
-          │  鉴权 → zod 校验 → 调 service   │
+          │  withApiHandler 管线 → service  │
           │  POST /api/v3/chat             │  ← 主入口（sessionId 走 body）
           │  POST/GET /api/threads/...     │
           │  POST /api/files/upload        │
@@ -985,10 +985,17 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - 宽松 schema 是刻意的：收紧校验会改变状态码（如 memory 的非法 category 静默回落默认值、
   auth 邮箱不做格式校验走 401）——领域规则在 service 内兜底，不在 schema 里加码
 
-**薄路由模板**：鉴权 → `parseJsonBody(request, schema)` → 调 `getXService()` → `toHttpError(e)`。
-SSE 两路由（v3/chat、threads streams）是特例：前置失败 JSON、成功路径
-`new Response(createSseStream(request, events))`。`runtime='nodejs'` / `force-dynamic` export
-留在各自 route.ts 原地。
+**薄路由模板（统一请求管线 `withApiHandler`）**：全部 34 个路由经
+`src/server/http/api-handler.ts` 的 `withApiHandler(options, handler)` 包裹，横切关注点收敛为
+一条管线：try/catch 全包裹 → auth（缺省 `'cookie'`=getCurrentUser，`'none'` / 自定义 resolver；
+null → 401）→ guard（sandbox token 等非用户主体门禁）→ userIdHeader（threads 的 x-user-id →
+`ctx.userId`）→ rateLimit（占位 no-op）→ body/query zod 解析 → `handler(ctx)`。每条返回路径
+（401/400/限流短路/正常返回）各记一条 `[http]` 完成日志；catch 先 `logHttpError` 再
+`toHttpError(e, fallbackMessage)`。handler 返回值**原样透传**——SSE 两路由（v3/chat、threads
+streams）直接 `new Response(createSseStream(...))`，v3/chat 的 service 预检元组经
+`preflightError` 统一。约定：wrapper 是 body 唯一读取方（handler 内不得再调
+`request.json()/formData()`）；错误响应统一 `{code,message}`，成功 envelope 逐路由冻结。
+`runtime='nodejs'` / `force-dynamic` export 留在各自 route.ts 原地。
 
 ---
 
@@ -1109,8 +1116,11 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 | 文件                                                                             | 职责                                                                                                              |
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `src/server/wiring.ts`                                                           | ThreadService 进程单例工厂（globalThis + ensure\* 工厂）                                                          |
-| `src/server/http/errors.ts`                                                      | AppError / ERROR_STATUS / toHttpError（错误映射边界）                                                             |
+| `src/server/http/api-handler.ts`                                                 | 统一请求管线 withApiHandler（auth / guard / 日志 / 限流占位 / 解析）                                              |
+| `src/server/http/errors.ts`                                                      | AppError / ERROR_STATUS / toHttpError / preflightError（错误映射边界）                                            |
 | `src/server/http/auth.ts`                                                        | 会话 cookie 读写（getCurrentUser / setSessionCookie）                                                             |
+| `src/server/http/logger.ts`                                                      | HTTP 访问日志（`[http]` 完成行 / error 级，纯 console）                                                           |
+| `src/server/http/rate-limit.ts`                                                  | 限流占位钩子（no-op 默认，Redis 就绪待实现）                                                                      |
 | `src/server/validation/schemas.ts`                                               | 全部路由 body/query 的 zod schema（v4，`error.issues`）                                                           |
 | `src/server/daos/`（chat-session / chat-message / file-metadata / file-content） | app 侧四张表的单表 SQL（SqlExecutor + withTransaction）                                                           |
 | `src/server/services/`                                                           | 领域编排（chat / conversation / file / memory / model-key / extension / prompt-enhance / sandbox / model-config） |
