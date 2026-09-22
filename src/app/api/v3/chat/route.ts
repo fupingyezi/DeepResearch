@@ -23,51 +23,36 @@
  * Response：
  *   text/event-stream，载荷为 ClientAgentEvent。
  *
- * 薄路由：鉴权 → zod 校验 → chat-service（prepare 全序列 / submit / streamEvents）。
- * SSE 前置失败为 JSON（错误体形状由 chat-service 逐条保持），成功路径
+ * 薄路由：管线（鉴权 / zod 校验）→ chat-service（prepare 全序列 / submit / streamEvents）。
+ * SSE 前置失败为 JSON（预检元组经 preflightError 统一为 {code,message}），成功路径
  * `new Response(createSseStream(request, events))`，X-Run-Id / X-Thread-Id 在此组装。
  */
 
-import { NextRequest } from 'next/server';
-
 import { createSseStream } from '@/deerflow-harness';
-import { getCurrentUser } from '@/server/http';
+import { preflightError, withApiHandler } from '@/server/http';
 import { getChatService } from '@/server/services/chat-service';
-import { parseJsonBody } from '@/server/validation';
 import { chatStreamBodySchema } from '@/server/validation/schemas';
 
-function jsonResponse(status: number, body: Record<string, unknown>): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+export const POST = withApiHandler(
+  { body: chatStreamBodySchema },
+  async ({ user, body, request }) => {
+    const svc = getChatService();
 
-export async function POST(request: NextRequest) {
-  const currentUser = await getCurrentUser(request);
-  if (!currentUser) {
-    return jsonResponse(401, { error: 'Not authenticated' });
-  }
+    const prepared = await svc.prepare({ userId: user!.id, body });
+    if (!prepared.ok) return preflightError(prepared.status, prepared.body);
 
-  const parsed = await parseJsonBody(request, chatStreamBodySchema);
-  if (!parsed.ok) return parsed.response;
+    const submitted = await svc.submit(prepared.prepared);
+    if (!submitted.ok) return preflightError(submitted.status, submitted.body);
 
-  const svc = getChatService();
-
-  const prepared = await svc.prepare({ userId: currentUser.id, body: parsed.data });
-  if (!prepared.ok) return jsonResponse(prepared.status, prepared.body);
-
-  const submitted = await svc.submit(prepared.prepared);
-  if (!submitted.ok) return jsonResponse(submitted.status, submitted.body);
-
-  const stream = createSseStream(request, svc.streamEvents(prepared.prepared, submitted.runId));
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Run-Id': submitted.runId,
-      'X-Thread-Id': prepared.prepared.threadId,
-    },
-  });
-}
+    const stream = createSseStream(request, svc.streamEvents(prepared.prepared, submitted.runId));
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Run-Id': submitted.runId,
+        'X-Thread-Id': prepared.prepared.threadId,
+      },
+    });
+  },
+);

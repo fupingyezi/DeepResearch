@@ -13,32 +13,32 @@
  * - stats=0 跳过 docker stats 采样（更快，仅看登记态）。
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
+import { withApiHandler } from '@/server/http';
 import { getSandboxStatsSnapshot } from '@/server/services/sandbox-service';
+import { sandboxStatsQuerySchema } from '@/server/validation/schemas';
 
 export const runtime = 'nodejs';
 
-function isAuthorized(request: NextRequest): boolean {
+// 纯函数留在路由文件（guard 只判 token，不伪造 UserRecord）
+function isAuthorized(request: Request): boolean {
   const token = process.env.DEERFLOW_SANDBOX_STATS_TOKEN;
   // 未配置 token 时该接口禁用（fail-closed），避免运维数据默认暴露
   if (!token || token.trim().length === 0) return false;
   return request.headers.get('x-sandbox-stats-token') === token;
 }
 
-export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
-  try {
-    const includeStats = new URL(request.url).searchParams.get('stats') !== '0';
+export const GET = withApiHandler(
+  {
+    auth: 'none',
+    guard: isAuthorized,
+    query: sandboxStatsQuerySchema,
+    fallbackMessage: 'failed to read sandbox stats',
+  },
+  async ({ query }) => {
+    const includeStats = query.stats !== '0';
     const snapshot = await getSandboxStatsSnapshot(includeStats);
     return NextResponse.json(snapshot, { status: 200 });
-  } catch (e) {
-    console.error('[GET /api/sandbox/stats] error:', e);
-    return NextResponse.json(
-      { error: 'failed to read sandbox stats', message: (e as Error)?.message },
-      { status: 500 },
-    );
-  }
-}
+  },
+);
