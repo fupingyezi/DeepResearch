@@ -1,7 +1,7 @@
 /**
  * AssistantPartsCollector（后端专用薄壳）
  *
- * 在 `src/app/api/v3/chat/route.ts` 的 wrapWithPersistence 中使用：
+ * 在 `src/server/services/chat-service.ts` 的 streamEvents 中使用：
  *  - 流式过程中逐事件 onEvent，把 SSE 聚合成不可变 PartsState
  *  - 流结束时 finalize() 执行 task_summary / artifact 标记抽取，返回落库结构
  *

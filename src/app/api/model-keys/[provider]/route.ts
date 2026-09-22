@@ -6,16 +6,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { deleteModelKey } from '@deerflow-harness/auth';
-import { MODEL_PRESETS } from '@/config/models';
-import { getCurrentUser } from '../../auth/_helpers';
+import { getCurrentUser, toHttpError } from '@/server/http';
+import { getModelKeyService } from '@/server/services/model-key-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const VALID_PROVIDERS = new Set<string>(
-  Object.values(MODEL_PRESETS).map((preset) => preset.provider),
-);
 
 export async function DELETE(request: NextRequest, { params }: { params: { provider: string } }) {
   const user = await getCurrentUser(request);
@@ -23,16 +18,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { provi
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const provider = params.provider?.trim();
-  if (!provider || !VALID_PROVIDERS.has(provider)) {
-    return NextResponse.json({ message: 'Invalid or unsupported provider' }, { status: 400 });
-  }
-
   try {
-    await deleteModelKey(user.id, provider);
+    await getModelKeyService().deleteKey(user.id, params.provider);
     return NextResponse.json({ message: 'Delete model key success!' }, { status: 200 });
-  } catch {
-    console.error('[model-keys] delete error for provider:', provider);
-    return NextResponse.json({ message: 'Delete model key failed!' }, { status: 500 });
+  } catch (error) {
+    console.error('[model-keys] delete error for provider:', params.provider, error);
+    return toHttpError(error, 'Delete model key failed');
   }
 }

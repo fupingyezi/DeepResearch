@@ -16,9 +16,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { previewMemoryRetrieval } from '@/deerflow-harness';
-import { ensureMemoryEmbeddingsFactory } from '../../threads/_service';
-import { getCurrentUser } from '../../auth/_helpers';
+import { getCurrentUser, toHttpError } from '@/server/http';
+import { getMemoryService } from '@/server/services/memory-service';
+import { parseSearchParams } from '@/server/validation';
+import { retrievePreviewSchema } from '@/server/validation/schemas';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,30 +30,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const q = request.nextUrl.searchParams.get('q') ?? '';
-  if (!q.trim()) {
-    return NextResponse.json(
-      { message: 'Missing query', error: '请通过 ?q=<query> 提供检索 query' },
-      { status: 400 },
-    );
-  }
+  const parsed = parseSearchParams(request.nextUrl.searchParams, retrievePreviewSchema);
+  if (!parsed.ok) return parsed.response;
 
   try {
-    // 幂等注册智谱 embedding 工厂（threadService 未初始化时也要能向量化 query，
-    // 否则本接口退化为纯词面预览）。与 /api/prompt/enhance 的做法一致。
-    ensureMemoryEmbeddingsFactory();
-
-    // 与注入侧同作用域：lead 对话读写「跨 agent 全局 per-user」记忆（agentName=null）
-    const data = await previewMemoryRetrieval({ agentName: null, userId: user.id, query: q });
+    const data = await getMemoryService().previewRetrieval(user.id, parsed.data.q);
     return NextResponse.json({ message: 'Retrieve preview success!', data }, { status: 200 });
   } catch (error) {
     console.error('[memory/retrieve] preview error:', error);
-    return NextResponse.json(
-      {
-        message: 'Retrieve preview failed!',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    );
+    return toHttpError(error, 'Retrieve preview failed');
   }
 }

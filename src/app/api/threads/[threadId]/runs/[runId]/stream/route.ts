@@ -8,7 +8,7 @@
 import { NextRequest } from 'next/server';
 
 import { createSseStream } from '@/deerflow-harness';
-import { getThreadService } from '../../../../_service';
+import { getThreadService } from '@/server/wiring';
 
 export async function GET(
   request: NextRequest,

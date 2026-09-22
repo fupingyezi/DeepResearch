@@ -56,7 +56,7 @@ pnpm format:check
 docker-compose up -d
 ```
 
-**单元测试（vitest）：**`pnpm test` 运行 `src/**/*.test.ts`，测试文件与被测文件同目录。
+**单元测试（vitest）：**`pnpm test` 运行 `src/**/__tests__/**/*.test.ts`——测试文件与被测代码同域但收在所在目录的 `__tests__/` 子目录里（`include` 白名单只在 `__tests__` 下，平层的 `.test.ts` 不会被跑）。
 
 **提交校验（husky，需先 `pnpm install` 激活）：**
 
@@ -191,26 +191,32 @@ DEERFLOW_GUARDRAIL_BLOCK=none             # none（默认，仅告警）| inject
 └─────────────────────────┬────────────────────────────────┘
                           │ HTTP + SSE
           ┌───────────────┴────────────────┐
-          │        API Routes              │
+          │     API Routes（controller）    │
+          │  鉴权 → zod 校验 → 调 service   │
           │  POST /api/v3/chat             │  ← 主入口（sessionId 走 body）
           │  POST/GET /api/threads/...     │
           │  POST /api/files/upload        │
           └───────────────┬────────────────┘
                           │
-┌─────────────────────────▼──────────────────────────────┐
-│        ThreadService（src/app/api/threads/_service.ts）  │
-│  进程级单例，通过 getThreadService() 获取               │
-│  8 个操作：createThread / listThreads / getThread /     │
-│  deleteThread / submitRun / subscribe /                 │
-│  getCheckpoint / resume（Command 续跑人工中断）          │
-└────┬─────────────────┬──────────────────┬──────────────┘
-     │                 │                  │
-     ▼                 ▼                  ▼
-DeerFlowClient    Checkpointer       Stores
-(client.ts)       (LangGraph)     (PG / Redis)
-Agent 缓存         Postgres / 内存  ThreadMeta
-流式调用           保存对话状态      Runs
-                                   Checkpoint
+          ┌───────────────▼────────────────┐
+          │   Services（src/server/services）│
+          │  chat / conversation / file /    │
+          │  memory / model-key / extension …│
+          │  编排：事务、MinIO、错误映射      │
+          └───────┬───────────────┬────────┘
+                  │               │
+        ┌─────────▼─────┐   ┌─────▼────────────┐
+        │ DAOs（src/server/daos）│ │ ThreadService（wiring）│
+        │  chat_session /        │ │  进程级单例，8 个操作   │
+        │  chat_message /        │ │  createThread / submitRun│
+        │  file_metadata /       │ │  / subscribe / resume … │
+        │  file_content          │ └─────┬─────────────────┘
+        └─────────┬─────────────┘       │
+                  │               ┌─────▼──────┬────────────┐
+                  ▼               ▼            ▼            ▼
+               PostgreSQL   DeerFlowClient  Checkpointer  Stores
+               (裸 pg SQL)  (client.ts)     (LangGraph)  (PG / Redis)
+                            Agent 缓存      保存对话状态  ThreadMeta / Runs
      │
      ▼
 ┌──────────────────────────────────────────────┐
@@ -303,7 +309,7 @@ interface ChatStreamBody {
 ### 2. ThreadService
 
 **文件：** `src/deerflow-harness/runtime/service.ts`  
-**单例入口：** `src/app/api/threads/_service.ts` → `getThreadService()`
+**单例入口：** `src/server/wiring.ts` → `getThreadService()`
 
 ThreadService 是整个系统的门面，装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + StreamBridge + AsyncLocalStorage Context。
 
@@ -329,7 +335,7 @@ ThreadService 是整个系统的门面，装配 DeerFlowClient + Checkpointer + 
   DB CHECK 枚举，无 `cancelled` 值），**不能**记成 succeeded —— `DeerFlowClient` 会把 abort
   异常吞成正常 return，执行体必须显式判 `signal.aborted`（且此时不发 ERROR 帧，避免误报「运行出错」）
 
-- **单例在 dev 下必须挂 `globalThis`**（`_service.ts` 的 `__threadService`）：Next.js 按路由分别
+- **单例在 dev 下必须挂 `globalThis`**（`wiring.ts` 的 `__threadService`）：Next.js 按路由分别
   编译 + HMR 重新求值模块，纯模块级变量会分裂成多份实例，各路由看到各自的 `activeRuns` /
   StreamBridge，于是「取消 run」「按 run 订阅事件流」这类跨路由操作会**静默失效**（请求落在没有
   那个 run 的实例上）。与 `lib/db` 的 pg pool 同一套做法，生产单次打包无此问题
@@ -364,7 +370,7 @@ idle → running → idle（成功）
 `resolveRuntimeOptions(metadata)` 计算本轮 stream 的 `RuntimeRunOptions`：
 
 1. `metadata` 中显式传入的开关（最高优先；仅 `memoryEnabled` 走运行期覆盖）
-2. 构造时传入的 `baseOptions`（`_service.ts` 默认 `memoryEnabled: true`、`agentName: 'lead'`）
+2. 构造时传入的 `baseOptions`（`wiring.ts` 默认 `memoryEnabled: true`、`agentName: 'lead'`）
 
 > 仅 `memoryEnabled` 支持运行期覆盖，且必须严格 `typeof === 'boolean'` 才生效——
 > `metadata.memoryEnabled === undefined` 不会被解释为 false。`agentName` /
@@ -472,7 +478,7 @@ StreamBridge（单例 streamBridge）
 
 #### 中间件组装规则（`assembleFromFeatures`）
 
-按 `ORDERED_MIDDLEWARES` 位序装配（下表「服务级默认」指 `_service.ts` 的 sharedClientOptions）：
+按 `ORDERED_MIDDLEWARES` 位序装配（下表「服务级默认」指 `wiring.ts` 的 sharedClientOptions）：
 
 | 位序 | 中间件                           | 触发条件                                                                                                                                                                                                                                                                                                                                 |
 | ---- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -642,7 +648,7 @@ task_started / task_running / task_completed / task_failed / task_cancelled / ta
 **向量基础设施**（`memory/embeddings.ts`）：
 
 - 供应商智谱 `embedding-3`（OpenAI 兼容 `/embeddings`，`dimensions` 可配 256..2048，默认 1024），
-  工厂由 app 层 `_service.ts` 经 `setMemoryEmbeddingsFactory` 注入；**未注册 / 无 Key / API 失败
+  工厂由 app 层 `wiring.ts` 经 `setMemoryEmbeddingsFactory` 注入；**未注册 / 无 Key / API 失败
   一律静默降级回词面打分，绝不抛出**
 - **必须显式传 `encodingFormat: 'float'`**：OpenAI SDK 在调用方未指定时会把 `encoding_format`
   默认成 `'base64'` 并按 base64 解码响应（`toFloat32Array`），而智谱**忽略**该参数、仍返回 float
@@ -935,12 +941,63 @@ useAgentEvent() hook / useAgentEventListener()
 
 ---
 
+## 后端分层规范
+
+API 层按 controller / service / dao 三层分离，全部位于 `src/server/`（harness 保持不动）：
+
+| 层     | 位置                      | 职责                                              |
+| ------ | ------------------------- | ------------------------------------------------- |
+| 控制器 | `src/app/api/**/route.ts` | 薄路由：鉴权 → zod 解析 → 调 service → 映射响应   |
+| 服务   | `src/server/services/`    | 领域编排、业务规则、错误映射（AppError）；无 SQL  |
+| DAO    | `src/server/daos/`        | 单表 SQL（app 侧四张表）；沿用 harness Store 惯例 |
+
+**依赖方向**（eslint `no-restricted-imports` 已固化 harness 一侧）：
+
+```
+route.ts → @/server/http + @/server/validation + @/server/services（禁止 import @/server/daos）
+services → @/server/daos + @/lib + @/deerflow-harness + @/server/wiring
+daos    → @/lib/db + @/types + @/utils/common
+harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
+```
+
+**DAO 规则**：
+
+- 每个 store 方法带可选 `db?: SqlExecutor`：传了走事务连接，不传走 `@/lib/db` 的 `query`。
+  BEGIN/COMMIT/ROLLBACK 只出现在 `daos/shared.ts` 的 `withTransaction()`，DAO 自身不开事务
+- 零参构造、无状态（池在 lib/db 的 globalThis）、不设单例；service 工厂默认 `new PgXxxStore()`，
+  测试注入 fake
+- `chat-session/types.ts`、`file-metadata/types.ts` 头注释写明：harness 的 `title-middleware`
+  （写 chat_session.title）与 `thread-data-middleware`（读 file_metadata）绕过本 store 直接 SQL，
+  改表结构必须同步检查这两处
+- `waitRunError` 不建 DAO：复用 harness `PgRunStore.get()`，轮询循环在 chat-service
+
+**Service 规则**：`createXService(deps?)` 工厂 + 模块级懒单例 `getXService()`——无跨请求可变状态，
+模块级单例即可（见「关键设计模式 §1」）；**只有 wiring.ts 需要 globalThis**。wiring.ts 例外：
+它持有 activeRuns/StreamBridge 跨路由可变状态，HMR 分裂事故见 §2。
+
+**错误与响应**：
+
+- `toHttpError(e)`：AppError → 其 status；带 `code` 的 Error（ThreadServiceError /
+  ChatSessionAccessError 等）→ 查 `ERROR_STATUS` 表；zod → 400 `INVALID_INPUT`；未知 → 500
+  `{code:'INTERNAL'}`
+- **成功响应 envelope 逐路由冻结**（前端契约）：错误路径统一 `{code,message}`，成功 data 形状不动
+- zod v4 错误对象是 `error.issues`（非 v3 的 `errors`）
+- 宽松 schema 是刻意的：收紧校验会改变状态码（如 memory 的非法 category 静默回落默认值、
+  auth 邮箱不做格式校验走 401）——领域规则在 service 内兜底，不在 schema 里加码
+
+**薄路由模板**：鉴权 → `parseJsonBody(request, schema)` → 调 `getXService()` → `toHttpError(e)`。
+SSE 两路由（v3/chat、threads streams）是特例：前置失败 JSON、成功路径
+`new Response(createSseStream(request, events))`。`runtime='nodejs'` / `force-dynamic` export
+留在各自 route.ts 原地。
+
+---
+
 ## 关键设计模式
 
 ### 1. 进程级单例服务
 
 ```typescript
-// src/app/api/threads/_service.ts
+// src/server/wiring.ts
 let service: ThreadService | null = null;
 export async function getThreadService(): Promise<ThreadService> {
   if (service) return service;
@@ -951,6 +1008,10 @@ export async function getThreadService(): Promise<ThreadService> {
 ```
 
 Memory 的模型工厂也在此处注入：`setMemoryModelFactory(factory)`。
+
+App 侧 service（`src/server/services/`）用 `createXService(deps?)` 工厂 + 模块级懒单例
+`getXService()`——它们无跨请求可变状态，模块级单例即可；**只有 wiring.ts 需要 globalThis**
+（持有 activeRuns / StreamBridge 跨路由可变状态，见 §2）。
 
 ### 2. AsyncLocalStorage 上下文传播
 
@@ -1000,22 +1061,24 @@ MW_TRACE=1 pnpm dev
 ### 手动测试 API
 
 ```bash
-# 创建线程
+# 创建线程（x-user-id 可选）
 curl -X POST http://localhost:3000/api/threads \
   -H "Content-Type: application/json" \
   -d '{"display_name": "测试线程"}'
 
-# 发送消息（SSE 流）— 由 lead-agent 自主判断是否进入深度研究
-curl -X POST http://localhost:3000/api/v3/chat/thread-123 \
+# 发送消息（SSE 流）——需先登录并把会话 cookie 存下（curl -c cookies.txt）
+curl -X POST http://localhost:3000/api/v3/chat \
   -H "Content-Type: application/json" \
-  -d '{"input": "什么是 LangChain？"}' \
+  -b cookies.txt \
+  -d '{"message": {"contents": [{"type": "text", "text": "什么是 LangChain？"}]}, "stream": true}' \
   -H 'Accept: text/event-stream' \
   --no-buffer
 
-# 切换模型（其余字段同上）
-curl -X POST http://localhost:3000/api/v3/chat/thread-456 \
+# 指定会话 + 切换模型（configuration.model.value 取 MODEL_PRESETS 预设键）
+curl -X POST http://localhost:3000/api/v3/chat \
   -H "Content-Type: application/json" \
-  -d '{"input": "研究量子计算趋势", "metadata": {"modelKey": "deepseek-v4-pro"}}' \
+  -b cookies.txt \
+  -d '{"sessionId": "<uuid>", "configuration": {"model": {"value": "deepseek-v4-pro"}}, "message": {"contents": [{"type": "text", "text": "研究量子计算趋势"}]}}' \
   -H 'Accept: text/event-stream' \
   --no-buffer
 ```
@@ -1043,39 +1106,44 @@ psql $DATABASE_URL -c "SELECT id, thread_id, status, created_at FROM runs WHERE 
 
 ## 关键文件索引
 
-| 文件                                                             | 职责                                                        |
-| ---------------------------------------------------------------- | ----------------------------------------------------------- |
-| `src/app/api/threads/_service.ts`                                | ThreadService 进程单例工厂                                  |
-| `src/app/api/v3/chat/route.ts`                                   | 主聊天 API，三阶段管线（sessionId 走 body）                 |
-| `src/deerflow-harness/client.ts`                                 | DeerFlowClient，Agent 缓存 + 流式调用                       |
-| `src/deerflow-harness/runtime/service.ts`                        | ThreadService 接口定义与实现                                |
-| `src/deerflow-harness/agents/factory.ts`                         | createBaseAgent + assembleFromFeatures                      |
-| `src/deerflow-harness/agents/features.ts`                        | RuntimeFeatures + Next/Prev 装饰器                          |
-| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`    | StreamBridge + ThreadChannel（缓冲回放）                    |
-| `src/deerflow-harness/runtime/sse/client-event.ts`               | ClientAgentEvent 白名单协议（前后端共用）                   |
-| `src/deerflow-harness/runtime/sse/to-client-event.ts`            | 内部事件 → 客户端事件的过滤边界                             |
-| `src/deerflow-harness/types/agent-event.ts`                      | AgentEvent 内部事件枚举                                     |
-| `src/deerflow-harness/agents/memory/updater.ts`                  | MemoryUpdater（LLM 驱动记忆更新）                           |
-| `src/deerflow-harness/agents/memory/embeddings.ts`               | 记忆向量基础设施（智谱 embedding-3 工厂注入 + 回填）        |
-| `src/deerflow-harness/vision/image-fetcher.ts`                   | 图片字节注入 + 多模态 content 构造                          |
-| `src/deerflow-harness/vision/vision-middleware.ts`               | VisionMiddleware（历史图片压缩）                            |
-| `src/deerflow-harness/tools/builtins/view-image-tool.ts`         | view_image 工具（按文件名重看会话图片）                     |
-| `src/lib/file-parser.ts`                                         | 上传文件解析（PDF/DOCX/文本 + 图片 OCR）                    |
-| `src/deerflow-harness/subagents/executor.ts`                     | SubagentExecutor（子代理执行，超时+取消）                   |
-| `src/deerflow-harness/extensions/config-store.ts`                | extensions_config.json 文件存储（MCP/skill 统一配置）       |
-| `src/deerflow-harness/skills/loader.ts`                          | skill 加载器（扫描 SKILL.md + 合并启用状态）                |
-| `src/deerflow-harness/mcp/client.ts`                             | MCP 客户端封装（加载工具 + 失败容错 + 缓存）                |
-| `src/deerflow-harness/sandbox/provider-factory.ts`               | 沙箱后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker） |
-| `src/deerflow-harness/sandbox/docker/docker-sandbox-provider.ts` | Docker 后端（每线程加固容器 + 引用计数 + 空闲回收）         |
-| `src/deerflow-harness/sandbox/docker/docker-coordinator.ts`      | 跨进程沙箱协调（Redis 计数/登记/锁，可降级进程内）          |
-| `src/deerflow-harness/runtime/run-concurrency-gate.ts`           | run 级并发闸门（FIFO 信号量 + 跨进程占位）                  |
-| `src/deerflow-harness/runtime/context.ts`                        | AsyncLocalStorage 上下文传播                                |
-| `src/store/chat-session-store.ts`                                | 前端聊天会话状态（sessionRuntimes 分桶并行）                |
-| `src/utils/chat/stream-chat-handler.ts`                          | 前端 SSE 流处理                                             |
-| `.github/workflows/deploy.yml`                                   | CI/CD 流水线（质量门禁 + 自动部署）                         |
-| `scripts/deploy-remote.sh`                                       | 服务器端部署（build→起服务→健康检查→失败回滚）              |
-| `docker-compose.prod.yaml`                                       | 生产编排（app + PG/Redis/MinIO，凭证 env 插值）             |
-| `docs/deploy-runbook.md` / `docs/cicd-notes.md`                  | 部署操作手册 / 技术沉淀（踩坑实录）                         |
+| 文件                                                                             | 职责                                                                                                              |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/server/wiring.ts`                                                           | ThreadService 进程单例工厂（globalThis + ensure\* 工厂）                                                          |
+| `src/server/http/errors.ts`                                                      | AppError / ERROR_STATUS / toHttpError（错误映射边界）                                                             |
+| `src/server/http/auth.ts`                                                        | 会话 cookie 读写（getCurrentUser / setSessionCookie）                                                             |
+| `src/server/validation/schemas.ts`                                               | 全部路由 body/query 的 zod schema（v4，`error.issues`）                                                           |
+| `src/server/daos/`（chat-session / chat-message / file-metadata / file-content） | app 侧四张表的单表 SQL（SqlExecutor + withTransaction）                                                           |
+| `src/server/services/`                                                           | 领域编排（chat / conversation / file / memory / model-key / extension / prompt-enhance / sandbox / model-config） |
+| `src/app/api/v3/chat/route.ts`                                                   | 主聊天 API 薄路由（编排在 chat-service，sessionId 走 body）                                                       |
+| `src/deerflow-harness/client.ts`                                                 | DeerFlowClient，Agent 缓存 + 流式调用                                                                             |
+| `src/deerflow-harness/runtime/service.ts`                                        | ThreadService 接口定义与实现                                                                                      |
+| `src/deerflow-harness/agents/factory.ts`                                         | createBaseAgent + assembleFromFeatures                                                                            |
+| `src/deerflow-harness/agents/features.ts`                                        | RuntimeFeatures + Next/Prev 装饰器                                                                                |
+| `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`                    | StreamBridge + ThreadChannel（缓冲回放）                                                                          |
+| `src/deerflow-harness/runtime/sse/client-event.ts`                               | ClientAgentEvent 白名单协议（前后端共用）                                                                         |
+| `src/deerflow-harness/runtime/sse/to-client-event.ts`                            | 内部事件 → 客户端事件的过滤边界                                                                                   |
+| `src/deerflow-harness/types/agent-event.ts`                                      | AgentEvent 内部事件枚举                                                                                           |
+| `src/deerflow-harness/agents/memory/updater.ts`                                  | MemoryUpdater（LLM 驱动记忆更新）                                                                                 |
+| `src/deerflow-harness/agents/memory/embeddings.ts`                               | 记忆向量基础设施（智谱 embedding-3 工厂注入 + 回填）                                                              |
+| `src/deerflow-harness/vision/image-fetcher.ts`                                   | 图片字节注入 + 多模态 content 构造                                                                                |
+| `src/deerflow-harness/vision/vision-middleware.ts`                               | VisionMiddleware（历史图片压缩）                                                                                  |
+| `src/deerflow-harness/tools/builtins/view-image-tool.ts`                         | view_image 工具（按文件名重看会话图片）                                                                           |
+| `src/lib/file-parser.ts`                                                         | 上传文件解析（PDF/DOCX/文本 + 图片 OCR）                                                                          |
+| `src/deerflow-harness/subagents/executor.ts`                                     | SubagentExecutor（子代理执行，超时+取消）                                                                         |
+| `src/deerflow-harness/extensions/config-store.ts`                                | extensions_config.json 文件存储（MCP/skill 统一配置）                                                             |
+| `src/deerflow-harness/skills/loader.ts`                                          | skill 加载器（扫描 SKILL.md + 合并启用状态）                                                                      |
+| `src/deerflow-harness/mcp/client.ts`                                             | MCP 客户端封装（加载工具 + 失败容错 + 缓存）                                                                      |
+| `src/deerflow-harness/sandbox/provider-factory.ts`                               | 沙箱后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker）                                                       |
+| `src/deerflow-harness/sandbox/docker/docker-sandbox-provider.ts`                 | Docker 后端（每线程加固容器 + 引用计数 + 空闲回收）                                                               |
+| `src/deerflow-harness/sandbox/docker/docker-coordinator.ts`                      | 跨进程沙箱协调（Redis 计数/登记/锁，可降级进程内）                                                                |
+| `src/deerflow-harness/runtime/run-concurrency-gate.ts`                           | run 级并发闸门（FIFO 信号量 + 跨进程占位）                                                                        |
+| `src/deerflow-harness/runtime/context.ts`                                        | AsyncLocalStorage 上下文传播                                                                                      |
+| `src/store/chat-session-store.ts`                                                | 前端聊天会话状态（sessionRuntimes 分桶并行）                                                                      |
+| `src/utils/chat/stream-chat-handler.ts`                                          | 前端 SSE 流处理                                                                                                   |
+| `.github/workflows/deploy.yml`                                                   | CI/CD 流水线（质量门禁 + 自动部署）                                                                               |
+| `scripts/deploy-remote.sh`                                                       | 服务器端部署（build→起服务→健康检查→失败回滚）                                                                    |
+| `docker-compose.prod.yaml`                                                       | 生产编排（app + PG/Redis/MinIO，凭证 env 插值）                                                                   |
+| `docs/deploy-runbook.md` / `docs/cicd-notes.md`                                  | 部署操作手册 / 技术沉淀（踩坑实录）                                                                               |
 
 ---
 

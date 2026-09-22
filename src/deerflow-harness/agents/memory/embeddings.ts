@@ -2,7 +2,7 @@
  * Memory embeddings（智谱 embedding-3 语义检索基础设施）
  *
  * 设计要点：
- * - 工厂注入：app 层（threads/_service.ts）注册具体的 Embeddings 构造器，
+ * - 工厂注入：app 层（src/server/wiring.ts）注册具体的 Embeddings 构造器，
  *   未注册 / 构造失败 / API 失败时所有出口静默降级（返回 null / 稀疏数组），
  *   **绝不抛出** —— 对应决策「无向量 / 无 Key / API 失败自动回落关键词检索」。
  * - 智谱 embedding-3 单请求最多 64 条文本：embedTexts 手动按批切片，

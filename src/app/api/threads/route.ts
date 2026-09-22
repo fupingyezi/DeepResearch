@@ -9,35 +9,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { ThreadStatus } from '@/deerflow-harness';
-import { getThreadService } from './_service';
+import { toHttpError } from '@/server/http';
+import { parseJsonBody } from '@/server/validation';
+import { createThreadSchema } from '@/server/validation/schemas';
+import { getThreadService } from '@/server/wiring';
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = (await request.json().catch(() => ({}))) as {
-      thread_id?: string;
-      assistant_id?: string;
-      display_name?: string;
-      metadata?: Record<string, any>;
-    };
+  const parsed = await parseJsonBody(request, createThreadSchema);
+  if (!parsed.ok) return parsed.response;
 
+  try {
     const service = await getThreadService();
     const { thread_id } = await service.createThread({
-      thread_id: body.thread_id,
+      thread_id: parsed.data.thread_id,
       user_id: pickUserId(request),
-      assistant_id: body.assistant_id,
-      display_name: body.display_name,
-      metadata: body.metadata,
+      assistant_id: parsed.data.assistant_id,
+      display_name: parsed.data.display_name,
+      metadata: parsed.data.metadata,
     });
     return NextResponse.json({ thread_id }, { status: 201 });
   } catch (e) {
     console.error('[POST /api/threads] error:', e);
-    return NextResponse.json(
-      { error: 'failed to create thread', message: (e as Error)?.message },
-      { status: 500 },
-    );
+    return toHttpError(e, 'failed to create thread');
   }
 }
 
@@ -58,9 +54,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: list }, { status: 200 });
   } catch (e) {
     console.error('[GET /api/threads] error:', e);
-    return NextResponse.json(
-      { error: 'failed to list threads', message: (e as Error)?.message },
-      { status: 500 },
-    );
+    return toHttpError(e, 'failed to list threads');
   }
 }

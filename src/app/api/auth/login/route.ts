@@ -13,23 +13,15 @@ import {
   createAccessToken,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie } from '../_helpers';
-
-interface LoginBody {
-  email?: unknown;
-  password?: unknown;
-}
+import { jsonError, setSessionCookie } from '@/server/http';
+import { parseJsonBody } from '@/server/validation';
+import { credentialsSchema } from '@/server/validation/schemas';
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as LoginBody;
-  const email = typeof body.email === 'string' ? body.email : '';
-  const password = typeof body.password === 'string' ? body.password : '';
+  const parsed = await parseJsonBody(request, credentialsSchema);
+  if (!parsed.ok) return parsed.response;
 
-  if (!email || !password) {
-    return jsonError(AuthErrorCode.INVALID_INPUT, 'Email and password are required', 400);
-  }
-
-  const user = await authenticate(email, password);
+  const user = await authenticate(parsed.data.email, parsed.data.password);
   if (!user) {
     return jsonError(AuthErrorCode.INVALID_CREDENTIALS, 'Incorrect email or password', 401);
   }

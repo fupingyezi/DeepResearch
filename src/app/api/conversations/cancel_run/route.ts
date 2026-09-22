@@ -11,10 +11,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { query } from '@/lib';
-import { ThreadServiceError } from '@/deerflow-harness';
-import { getCurrentUser } from '../../auth/_helpers';
-import { getThreadService } from '../../threads/_service';
+import { getCurrentUser, toHttpError } from '@/server/http';
+import { getConversationService } from '@/server/services/conversation-service';
+import { parseJsonBody } from '@/server/validation';
+import { sessionIdBodySchema } from '@/server/validation/schemas';
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -22,41 +22,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
+  const parsed = await parseJsonBody(request, sessionIdBodySchema);
+  if (!parsed.ok) return parsed.response;
+
   try {
-    const { sessionId } = await request.json();
-
-    if (!sessionId) {
-      return NextResponse.json({ error: 'Missing required field: sessionId' }, { status: 400 });
-    }
-
-    // 归属校验：chat_session 是 app 侧的真相源，只允许取消自己的会话
-    const owned = await query(
-      `select 1 from chat_session where id = $1 and user_id = $2 limit 1;`,
-      [sessionId, user.id],
-    );
-    if (owned.rows.length === 0) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
-    }
-
-    const threadService = await getThreadService();
-    const { cancelled } = await threadService.cancelRun({
-      thread_id: sessionId,
-      user_id: user.id,
-    });
+    const { cancelled } = await getConversationService().cancelRun(parsed.data.sessionId, user.id);
 
     return NextResponse.json({ success: true, cancelled }, { status: 200 });
   } catch (error) {
-    // thread 记录缺失（会话有、harness 侧没有）→ 没什么可停，照常返回
-    if (error instanceof ThreadServiceError && error.code === 'NOT_FOUND') {
-      return NextResponse.json({ success: true, cancelled: 0 }, { status: 200 });
-    }
     console.error('[POST /api/conversations/cancel_run] error:', error);
-    return NextResponse.json(
-      {
-        error: 'failed to cancel run',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    );
+    return toHttpError(error, 'failed to cancel run');
   }
 }

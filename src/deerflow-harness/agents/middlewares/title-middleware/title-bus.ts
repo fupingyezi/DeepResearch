@@ -1,7 +1,7 @@
 /**
  * title-bus
  *
- * TitleMiddleware 与 SSE 输出层（route.ts wrapWithPersistence）之间的
+ * TitleMiddleware 与 SSE 输出层（chat-service 的 streamEvents）之间的
  * 单向桥接：middleware 在 `afterAgent` 异步生成并落库标题后，把更新结果
  * 推入本 bus；输出层在 yield END 事件之前 `consume`，把结果挂到 END
  * payload 的 `titleUpdate` 字段，前端据此即时刷新 sider 列表标题。

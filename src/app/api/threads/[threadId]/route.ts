@@ -6,7 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getThreadService } from '../_service';
+import { toHttpError } from '@/server/http';
+import { getThreadService } from '@/server/wiring';
 
 const pickUserId = (req: NextRequest): string | undefined =>
   req.headers.get('x-user-id') ?? undefined;
@@ -26,10 +27,7 @@ export async function GET(request: NextRequest, ctx: { params: { threadId: strin
     return NextResponse.json(result, { status: 200 });
   } catch (e) {
     console.error('[GET /api/threads/:id] error:', e);
-    return NextResponse.json(
-      { error: 'failed to get thread', message: (e as Error)?.message },
-      { status: 500 },
-    );
+    return toHttpError(e, 'failed to get thread');
   }
 }
 
@@ -43,9 +41,6 @@ export async function DELETE(request: NextRequest, ctx: { params: { threadId: st
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (e) {
     console.error('[DELETE /api/threads/:id] error:', e);
-    return NextResponse.json(
-      { error: 'failed to delete thread', message: (e as Error)?.message },
-      { status: 500 },
-    );
+    return toHttpError(e, 'failed to delete thread');
   }
 }

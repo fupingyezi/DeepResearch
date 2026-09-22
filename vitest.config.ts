@@ -10,7 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    // 只跑 src 下的单测；benchmarks / e2e 不纳入 pnpm test
-    include: ['src/**/*.test.ts'],
+    // 测试文件约定在 src 各目录的 __tests__/ 子目录（与被测代码同域、不同层）
+    include: ['src/**/__tests__/**/*.test.ts'],
   },
 });

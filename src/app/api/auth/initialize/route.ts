@@ -16,21 +16,15 @@ import {
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
-import { jsonError, setSessionCookie } from '../_helpers';
-
-interface InitializeBody {
-  email?: unknown;
-  password?: unknown;
-}
+import { jsonError, setSessionCookie } from '@/server/http';
+import { parseJsonBody } from '@/server/validation';
+import { credentialsSchema } from '@/server/validation/schemas';
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as InitializeBody;
-  const email = typeof body.email === 'string' ? body.email : '';
-  const password = typeof body.password === 'string' ? body.password : '';
+  const parsed = await parseJsonBody(request, credentialsSchema);
+  if (!parsed.ok) return parsed.response;
 
-  if (!email || !password) {
-    return jsonError(AuthErrorCode.INVALID_INPUT, 'Email and password are required', 400);
-  }
+  const { email, password } = parsed.data;
 
   const weak = validateStrongPassword(password);
   if (weak) {

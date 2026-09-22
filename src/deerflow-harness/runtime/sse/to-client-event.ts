@@ -33,7 +33,7 @@ export function toClientAgentEvent(event: AgentEvent): ClientAgentEvent | null {
   switch (event.eventType) {
     case AgentEventType.LIFECYCLE: {
       // LIFECYCLE{stage:'start'} 在边界 drop：对外的权威 START 由路由层
-      // （/api/v3/chat 的 wrapWithPersistence）统一下发。
+      // （chat-service 的 streamEvents）统一下发。
       if (event.payload.stage === 'start') {
         return null;
       }
