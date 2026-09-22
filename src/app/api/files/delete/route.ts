@@ -1,23 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { toHttpError } from '@/server/http';
+import { withApiHandler } from '@/server/http';
 import { getFileService } from '@/server/services/file-service';
-import { parseJsonBody } from '@/server/validation';
 import { fileIdBodySchema } from '@/server/validation/schemas';
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const parsed = await parseJsonBody(request, fileIdBodySchema);
-    if (!parsed.ok) return parsed.response;
+export const DELETE = withApiHandler({ auth: 'none', body: fileIdBodySchema }, async ({ body }) => {
+  await getFileService().deleteUploadedFile(body.fileId);
 
-    await getFileService().deleteUploadedFile(parsed.data.fileId);
-
-    return NextResponse.json({
-      success: true,
-      message: 'File deleted successfully',
-    });
-  } catch (error) {
-    console.error('Delete error:', error);
-    return toHttpError(error);
-  }
-}
+  return NextResponse.json({
+    success: true,
+    message: 'File deleted successfully',
+  });
+});
