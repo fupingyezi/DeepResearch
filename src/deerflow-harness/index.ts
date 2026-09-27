@@ -17,7 +17,9 @@ export {
   getSubagentConfig,
   getAvailableSubagentNames,
   generalPurposeConfig,
+  setParentHistoryProvider,
   type SubagentConfig,
+  type ParentHistoryProvider,
 } from './subagents';
 export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider } from './types';
 

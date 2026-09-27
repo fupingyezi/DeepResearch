@@ -7,14 +7,15 @@
 ## ✨ 主要特性
 
 - 🤖 **单一 lead-agent，自主决策**：lead-agent 内置 `task("general-purpose", ...)` 能力，由模型自行判断是否拆解任务并调度 subagent 并行检索/汇总，无需前端切换"普通 / 联网 / 深度研究"模式。
-- 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离。
-- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按 `agentName + userId` 分文件持久化到 `.memory/`；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为词面重叠率与 embedding 余弦的混合打分（智谱 `embedding-3`），并按阈值取舍；无 Key 时静默降级为纯词面检索。
+- 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离；模型 API Key 由各用户在「设置-模型管理」自行配置，加密存库（`MODEL_KEY_ENC_SECRET`），主聊天链路不读服务端环境变量里的模型 Key。
+- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（`DEERFLOW_DATA_DIR` 可覆盖根目录）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为词面重叠率与 embedding 余弦的混合打分（智谱 `embedding-3`），并按阈值取舍；无 Key 时静默降级为纯词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
+- 🔎 **子 agent 继承父线程上下文**：subagent 每次执行前，从父线程 checkpoint **只读**取历史并剪枝为纯文本背景块（4k 字符预算、剥离 base64 与上传文件正文、跳过纯工具调用消息），作为 SystemMessage 前置——与「子图状态不落 checkpoint」的决定正交，读取失败静默降级不阻断 task。
 - 🧹 **删除即清干净**：删除对话会连带清掉聊天记录、MinIO 文件对象与 agent 侧全部数据（`threads_meta` / runs / LangGraph checkpoint / 沙箱容器）；若该对话此刻还在跑，先取消它的 run 再清理，不留孤儿数据。
-- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、ViewImage、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
+- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、Vision、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 🖼️ **图片多模态**：图片上传时先做 OCR（智谱 `layout_parsing` 版面解析，失败降级到视觉模型读图）写入解析文本；模型支持视觉时按 `image_url` data URL 直接把原图发给模型，历史轮次的图片自动压成文本占位（`VisionMiddleware`），模型还可用 `view_image` 工具按文件名重新查看本会话的图片。
@@ -27,23 +28,23 @@
 
 ## 🛠️ 技术栈
 
-| 层级        | 技术                                                                                        |
-| ----------- | ------------------------------------------------------------------------------------------- |
-| 前端        | Next.js 14（App Router + Turbopack）、React 18、TypeScript、Ant Design 5、Zustand           |
-| 样式        | Tailwind CSS v4（`@theme inline` token）、`@tailwindcss/typography`                         |
-| Markdown    | react-markdown + remark-gfm/math + rehype-katex + react-syntax-highlighter                  |
-| 图标        | Ant Design Icons（主）+ Lucide React                                                        |
-| Agent / AI  | LangChain 1.x、LangGraph 1.x、`@langchain/langgraph-checkpoint-postgres`                    |
-| 模型        | `@langchain/openai`（OpenAI 兼容协议，支持 OpenAI / Qwen / Spark / DeepSeek / Moonshot 等） |
-| 视觉 / 向量 | 智谱 GLM（`glm-ocr` 版面解析 / 视觉模型看图 / `embedding-3` 记忆向量）                      |
-| 检索        | Tavily（`@tavily/core`）                                                                    |
-| MCP         | `@langchain/mcp-adapters`                                                                   |
-| 状态管理    | Zustand + Immer                                                                             |
-| 校验        | Zod                                                                                         |
-| 导出        | jsPDF + html2canvas                                                                         |
-| 存储        | PostgreSQL、Redis、MinIO                                                                    |
-| 鉴权        | JWT（jsonwebtoken）、bcryptjs                                                               |
-| 测试        | Vitest（`src/**/*.test.ts`，与被测文件同目录）                                              |
+| 层级        | 技术                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| 前端        | Next.js 14（App Router + Turbopack）、React 18、TypeScript、Ant Design 5、Zustand              |
+| 样式        | Tailwind CSS v4（`@theme inline` token）、`@tailwindcss/typography`                            |
+| Markdown    | react-markdown + remark-gfm/math + rehype-katex + react-syntax-highlighter                     |
+| 图标        | Ant Design Icons（主）+ Lucide React                                                           |
+| Agent / AI  | LangChain 1.x、LangGraph 1.x、`@langchain/langgraph-checkpoint-postgres`                       |
+| 模型        | `@langchain/openai`（OpenAI 兼容协议，支持 OpenAI / Qwen / DeepSeek / Moonshot / 智谱 GLM 等） |
+| 视觉 / 向量 | 智谱 GLM（`glm-ocr` 版面解析 / 视觉模型看图 / `embedding-3` 记忆向量）                         |
+| 检索        | Tavily（`@tavily/core`）                                                                       |
+| MCP         | `@langchain/mcp-adapters`                                                                      |
+| 状态管理    | Zustand + Immer                                                                                |
+| 校验        | Zod                                                                                            |
+| 导出        | jsPDF + html2canvas                                                                            |
+| 存储        | PostgreSQL、Redis、MinIO                                                                       |
+| 鉴权        | JWT（jsonwebtoken）、bcryptjs                                                                  |
+| 测试        | Vitest（`src/**/__tests__/**/*.test.ts`，收在各目录 `__tests__/` 子目录）                      |
 
 ## 📁 项目结构
 
@@ -95,7 +96,7 @@ src/
 │   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
 │   ├── skills/                         # Skill 加载器（frontmatter 解析 + prompt 注入）
-│   ├── subagents/                      # SubagentExecutor、注册表、schema、general-purpose 内置
+│   ├── subagents/                      # SubagentExecutor、注册表、schema、general-purpose 内置、父历史只读注入
 │   ├── vision/                         # 图片多模态
 │   │   ├── image-fetcher.ts            # ThreadImageRef + buildHumanMessageContent（image_url data URL）
 │   │   ├── vision-middleware.ts        # VisionMiddleware：历史图片压成文本占位（注入 view_image）
@@ -103,13 +104,14 @@ src/
 │   ├── runtime/                        # ThreadService、StreamBridge、SSE、Checkpointer
 │   │   ├── service.ts                  # ThreadService（fire-and-forget 提交 + 状态收敛）
 │   │   ├── run-concurrency-gate.ts     # run 级并发闸门（双层背压之一，FIFO 信号量 + 跨进程占位）
+│   │   ├── usage-accounting.ts         # LLM 用量记账（模型工厂挂接，ALS 累加器 + pricing）
 │   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（缓冲回放）
 │   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
 │   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
 │   │   └── context.ts                  # AsyncLocalStorage 上下文传播
 │   ├── persistence/                    # ThreadMetaStore + RunStore（PostgreSQL）
 │   ├── tools/builtins/                 # 内置工具（task、search_web、clarification、view_image）
-│   ├── models/                         # 模型预设（MODEL_PRESETS）
+│   ├── models/                         # createChatModel 模型工厂 + provider 推断 + LLM 用量记账挂接（MODEL_PRESETS 在 src/config/models.ts）
 │   ├── auth/                           # 认证模块
 │   ├── config/                         # 应用配置
 │   ├── sandbox/                        # 可插拔安全沙箱（路径校验、文件操作锁、异常隔离）
@@ -137,7 +139,7 @@ src/
 │   └── types/                          # AgentEvent 等共享类型
 │
 ├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
-│   ├── client/                         # sse-frame-parser、event-bus
+│   ├── client/                         # sse-frame-parser、event-bus、create-agent-event-stream
 │   ├── context/                        # AgentEventContext + hooks
 │   └── protocol/                       # ClientAgentEvent re-export（前后端共享协议）
 │
@@ -153,13 +155,15 @@ src/
 │   ├── db/                             # PostgreSQL 连接桩
 │   ├── cache/                          # Redis 客户端
 │   ├── storage/                        # MinIO 客户端
-│   └── file-parser.ts                  # PDF / Word 解析
+│   ├── crypto/                         # 模型 API Key 加密（model-key-crypto）
+│   └── file-parser.ts                  # PDF / Word / 图片 OCR 解析
 │
 ├── hooks/                              # 自定义 React hooks
 │   ├── use-auto-scroll-to-bottom.ts    # 自动滚动到底部
 │   ├── use-copy.ts                     # 一键复制
 │   ├── use-disclosure.ts               # 弹窗开关
 │   ├── use-file-upload.ts              # 文件上传 hook
+│   ├── use-model-config-status.ts      # 模型配置状态（是否已选模型 / 配置 Key）
 │   ├── use-outside-click.ts            # 点击外部关闭
 │   └── use-textarea-auto-height.ts     # 文本域自适应高度
 │
@@ -168,6 +172,7 @@ src/
 │   ├── chat/                           # 流处理、parts collector / reducer、最终消息提取、取消请求
 │   ├── common/                         # message-content 等通用工具
 │   ├── files/                          # 文件相关工具
+│   ├── prompt.ts                       # 提示词增强（/api/prompt/enhance 客户端）
 │   └── request/                        # API 请求封装
 ├── types/                              # 全局类型
 ├── config/models.ts                    # 模型配置
@@ -249,17 +254,13 @@ cp .env.example .env
 
 ```env
 # === 模型 API（OpenAI 兼容协议，任选其一或多个）===
+# 主聊天链路使用各用户在设置页配置的加密 Key；下列环境 Key 仅作副链路（标题/提示词增强/记忆更新）兜底
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_API_BASE=https://api.openai.com/v1
 
 # 阿里千问（DashScope）
 OPENAI_QWEN_API_KEY=your-qwen-api-key
 OPENAI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-OPENAI_MODEL_NAME=qwen3-235b-a22b   # 默认模型
-
-# 讯飞星火
-OPENAI_SPARK_API_KEY=your-spark-api-key
-OPENAI_SPARK_BASE_URL=https://spark-api-open.xf-yun.com/v1
 
 # DeepSeek
 DEEPSEEK_API_KEY=your-deepseek-api-key
@@ -272,7 +273,7 @@ MOONSHOT_BASE_URL=https://api.moonshot.cn/v1
 # === 检索 ===
 TAVILY_API_KEY=your-tavily-api-key
 
-# === 智谱（GLM 视觉模型 / OCR / 记忆 embedding 共用账号）===
+# === 智谱（GLM 对话预设 / 视觉模型 / OCR / 记忆 embedding 共用账号）===
 ZHIPU_API_KEY=your-zhipu-api-key
 # ZHIPU_BASE_URL=                        # 可选，默认 https://open.bigmodel.cn/api/paas/v4
 # ZHIPU_OCR_MODEL=                       # 可选，默认 glm-ocr
@@ -304,12 +305,15 @@ MINIO_BUCKET=chat-files
 AUTH_JWT_SECRET=please_change_this_to_a_long_random_secret
 AUTH_TOKEN_EXPIRY_DAYS=7
 
+# === 模型 Key 加密（用户在设置页保存的 API Key 用它加密落库）===
+MODEL_KEY_ENC_SECRET=                    # 生成：openssl rand -base64 32；一旦设置不可更改
+
 # === 体验账号一键登录（可选；不配则 /api/auth/demo-login 返回 404）===
 # AUTH_DEMO_EMAIL=
 # AUTH_DEMO_PASSWORD=
 ```
 
-> `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设位于 `src/deerflow-harness/models`，可在设置页选择或通过聊天请求体 `configuration.model.value` 切换。完整变量清单（模型 Key 加密、Docker / Remote 沙箱、护栏等）见 [`.env.example`](./.env.example)。
+> `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设（`MODEL_PRESETS`，默认 `deepseek-v4-flash`）位于 `src/config/models.ts`，可在设置页选择或通过聊天请求体 `configuration.model.value` 切换。完整变量清单（模型 Key 加密、Docker / Remote 沙箱、护栏等）见 [`.env.example`](./.env.example)。
 
 ### 启动基础设施
 
@@ -361,7 +365,7 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 | `/api/v3/chat`                                | POST          | ⭐ 主聊天入口，SSE 流。threadId 走请求体 `sessionId`                  |
 | `/api/threads`                                | POST/GET      | 创建线程；分页列出（`?limit=&offset=&status=`）                       |
 | `/api/threads/[threadId]`                     | GET/DELETE    | 获取详情（可附带 checkpoint）/ 删除                                   |
-| `/api/threads/[threadId]/runs`                | GET           | 列出线程下的 run                                                      |
+| `/api/threads/[threadId]/runs`                | POST/GET      | POST 提交 run（fire-and-forget，202 返回 `run_id`）/ 列出线程下的 run |
 | `/api/threads/[threadId]/runs/[runId]/stream` | GET           | SSE 流回放                                                            |
 | `/api/conversations/get_all_sessions`         | GET           | 当前用户的会话列表（按更新时间倒序）                                  |
 | `/api/conversations/history`                  | GET           | 某会话的历史消息（含附件元信息）                                      |
@@ -369,9 +373,9 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 | `/api/conversations/cancel_run`               | POST          | 取消该会话正在跑的 run（用户点「停止」），幂等                        |
 | `/api/files/upload`                           | POST          | multipart 上传，存 MinIO 并解析内容（图片走 OCR）                     |
 | `/api/files/delete`                           | DELETE        | 从 MinIO 删除                                                         |
-| `/api/memory`                                 | GET           | 查询记忆数据                                                          |
-| `/api/memory/facts`                           | GET/POST      | 记忆事实列表 / 新建                                                   |
-| `/api/memory/facts/[id]`                      | PATCH/DELETE  | 更新 / 删除记忆事实                                                   |
+| `/api/memory`                                 | GET/DELETE    | 查询记忆数据 / 清空全部记忆                                           |
+| `/api/memory/facts`                           | POST          | 新建记忆事实（来源标记 manual）                                       |
+| `/api/memory/facts/[id]`                      | PUT/DELETE    | 更新 / 删除记忆事实                                                   |
 | `/api/memory/mode`                            | GET/PUT       | 记忆注入模式（`inject` 全量注入 / `retrieve` 按需检索）               |
 | `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的词面 / 余弦 / 阈值 / 得分 / 最终注入文本        |
 | `/api/model-keys`                             | GET/PUT/PATCH | 已配置的模型 Key（仅掩码）/ 保存 Key（加密存储）+ 选择模型            |
@@ -436,7 +440,7 @@ ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ ├── DeerFlowClient（Agent 缓存 + LangGraph 流式调用 + MCP/Skill 工具加载）
    │ │      └── createBaseAgent + 中间件管线（13 层位序 + Qwen 恢复层，含 Sandbox 中间件 retain/markIdle）
    │ │             ├── 工具：task / search_web / clarification / sandbox(读写/搜索/bash) / ...
-   │ │             │         └── SubagentExecutor（thread 上下文透传，状态不落盘）
+   │ │             │         └── SubagentExecutor（thread 上下文透传 + 父历史只读注入，状态不落盘）
    │ │             └── SandboxProvider（local 宿主直连 / docker 每线程加固容器 + 容器级并发）
    │ ├── Checkpointer（PostgreSQL）
    │ └── Stores（threads / runs）
@@ -493,13 +497,15 @@ StreamBridge（进程内 EventEmitter 总线）
 
 系统内置用户注册/登录功能，使用 JWT 进行鉴权。首次部署时可通过 `/api/auth/initialize` 初始化管理员账户。支持 OAuth 第三方登录（按需配置 provider）。
 
+模型 API Key 按用户隔离：每个用户在「设置-模型管理」选择模型并填写该 provider 的 Key，经 `MODEL_KEY_ENC_SECRET` 加密后落库；主聊天链路按「当前用户」解析模型配置，服务端环境变量里的模型 Key 只供标题生成 / 提示词增强 / 记忆更新等副链路使用。
+
 ### 思考时间线
 
 每条 AI 回复内嵌折叠时间线：
 
 - 🟡 **思考**（reasoning）—— 模型规划文本
 - 🔵 **工具调用**（tool_call / tool_result）—— 入参 / 错误 / 结果，搜索结果列表化
-- 🟣 **任务进度**（task_progress）—— subagent 执行的 6 种状态：started / running / completed / failed / cancelled / timed_out
+- 🟣 **任务进度**（task_progress）—— subagent 执行状态：started / running / completed / failed / cancelled / timed_out，另以 tool_call / tool_result 透传 subagent 内部的工具调用
 
 JSON 与搜索结果带最大高度与细滚动条，不会撑破气泡。
 
@@ -512,7 +518,7 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 
 ### 长期记忆
 
-记忆按 `agentName + userId` 分文件存储到 `.memory/`，包含：
+记忆按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（根目录可由 `DEERFLOW_DATA_DIR` 覆盖），包含：
 
 - `user.workContext / personalContext / topOfMind`
 - `history.recentMonths / earlierContext / longTermBackground`
@@ -567,7 +573,7 @@ pnpm lint
 # 类型检查
 pnpm typecheck
 
-# 单元测试（vitest，跑 src/**/*.test.ts）
+# 单元测试（vitest，跑 src/**/__tests__/**/*.test.ts）
 pnpm test
 
 # 格式化
@@ -594,6 +600,8 @@ MEMORY_DEBUG=1 pnpm dev
 - `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认 2000；超限丢弃最旧非关键帧，`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
 - `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
+- `DEERFLOW_SANDBOX_DIR` —— 沙箱工作区根目录（默认 `{cwd}/.sandbox`；local 后端用）
+- `DEERFLOW_SKILLS_DIR` —— 技能目录（默认 `{cwd}/skills`）
 
 沙箱、护栏与多模态相关环境变量（详见 `.env.example`）：
 
@@ -618,11 +626,11 @@ MEMORY_DEBUG=1 pnpm dev
 
 ```bash
 # 研究 QA 评估：Agent 研究质量自动化打分
-npx tsx benchmarks/research-qa/run.ts
+pnpm bench:qa
 
 # LongMemEval 长期记忆基准（ICLR 2025）：两阶段（--ingest 预写记忆 → 评测）
-npx tsx benchmarks/longmem/run.ts --ingest
-npx tsx benchmarks/longmem/run.ts
+pnpm bench:longmem:ingest
+pnpm bench:longmem
 ```
 
 - **research-qa**：研究 QA 数据集 → Agent 包装器调用 → `evaluators.ts` 质量打分

@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
+
+import { readParentHistoryBlock } from './parent-history';
 
 import { createBaseAgent } from '../agents/factory';
 import { getExtraMiddlewares } from '../agents/extra-middlewares';
@@ -40,6 +42,9 @@ export const SUBAGENT_FEATURES: RuntimeFeatures = {
  *
  * 因此 `thread_id` 仍然透传（供工具层解析同一沙箱/线程上下文），但子图状态不
  * 落盘；子 agent 的唯一持久化产物是它在父图中留下的 task 工具结果（ToolMessage）。
+ *
+ * 子 agent 的父历史上下文由 parent-history.ts **只读**注入（execute() 输入构造时
+ * 读一次父 checkpoint，剪枝为 SystemMessage），同样不写任何状态。
  */
 export function buildSubagentStreamConfig(
   threadId: string | undefined,
@@ -433,11 +438,20 @@ export class SubagentExecutor {
       });
 
       // 5) 主循环：消费 LangGraph stream
-      const input = { messages: [new HumanMessage(prompt)] };
       // 若处于 thread 上下文中，把 thread_id 透传给子图，让父子共用同一 checkpoint thread。
       // ALS（getContext）在 LangGraph 流式执行进入 subagent 时若丢失，则
       // task-tool 从 runnable config 透传来的 parentThreadId 作兜底，
       const ctxThreadId = getContext()?.thread_id ?? this.parentThreadId;
+      // 只读拉取父线程历史（剪枝后文本块），作为背景上下文前置到子 agent 输入。
+      // 子 agent 是独立流，输入里只有任务 prompt，看不到父线程多轮上下文；
+      // 读取失败（provider 未注册 / 无 checkpoint）静默回落为无上下文，
+      // 不阻断 task 执行。只读不写，与「子图状态不落 checkpoint」的决定正交。
+      const parentContext = ctxThreadId ? await readParentHistoryBlock(ctxThreadId) : undefined;
+      const input = {
+        messages: parentContext
+          ? [new SystemMessage(parentContext), new HumanMessage(prompt)]
+          : [new HumanMessage(prompt)],
+      };
       const streamOpts: Record<string, any> = {
         signal: internalController.signal,
         // 增加 'updates' 用于补抓 ToolMessage（subagent 内部工具结果）
