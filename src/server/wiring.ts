@@ -10,6 +10,7 @@ import {
   DeerFlowClient,
   PgRunStore,
   PgThreadMetaStore,
+  buildThreadConfig,
   createChatModel,
   createThreadService,
   makeCheckpointer,
@@ -19,6 +20,7 @@ import {
   setMemoryConfig,
   setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
+  setParentHistoryProvider,
   setThreadImageFetcher,
   setTitleModelFactory,
   type ThreadService,
@@ -51,6 +53,7 @@ let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
 let embeddingsFactoryRegistered = false;
 let imageFetcherRegistered = false;
+let parentHistoryProviderRegistered = false;
 
 /**
  * 把 chat model 工厂注入给 memory 子系统（updater）。
@@ -185,6 +188,34 @@ export function ensureThreadImageFetcher(): void {
 }
 
 /**
+ * 把「父线程 checkpoint 读取器」注入给 subagent 子系统（父历史上下文注入）。
+ *
+ * 只读 getTuple（父线程 messages 通道），不写任何状态；剪枝在 harness 侧
+ * （subagents/parent-history.ts）完成。读取失败静默回落 undefined，
+ * 子 agent 不带父历史运行，不阻断 task。
+ */
+function ensureParentHistoryProvider(
+  checkpointer: Awaited<ReturnType<typeof makeCheckpointer>>['saver'],
+): void {
+  if (parentHistoryProviderRegistered) return;
+  parentHistoryProviderRegistered = true;
+  setParentHistoryProvider(async (threadId) => {
+    try {
+      const getTuple: unknown = checkpointer?.getTuple;
+      if (typeof getTuple !== 'function') return undefined;
+      const tuple = (await (getTuple as (config: unknown) => Promise<unknown>).call(
+        checkpointer,
+        buildThreadConfig(threadId),
+      )) as { checkpoint?: { channel_values?: Record<string, unknown> } } | undefined;
+      const messages = tuple?.checkpoint?.channel_values?.messages;
+      return Array.isArray(messages) ? messages : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/**
  * 默认 ModelConfig：走 resolveModelConfig() 的默认 preset；apiKey/baseUrl
  * 由 buildModelConfigFromPreset 按 provider 注入。
  */
@@ -199,6 +230,7 @@ async function build(): Promise<ThreadService> {
   ensureTitleModelFactory();
   ensureMemoryEmbeddingsFactory();
   ensureThreadImageFetcher();
+  ensureParentHistoryProvider(checkpointer);
 
   const defaultModelConfig = getDefaultModelConfig();
 

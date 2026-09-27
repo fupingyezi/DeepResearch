@@ -8,6 +8,15 @@ import './builtins';
 export { SubagentExecutor, SUBAGENT_FEATURES } from './executor';
 export type { SubagentExecutorOptions } from './executor';
 export {
+  buildParentContextBlock,
+  getParentHistoryProvider,
+  readParentHistoryBlock,
+  setParentHistoryProvider,
+  PARENT_CONTEXT_MAX_CHARS,
+  PARENT_CONTEXT_PER_MESSAGE_CHARS,
+} from './parent-history';
+export type { ParentHistoryProvider } from './parent-history';
+export {
   registerSubagent,
   getSubagentConfig,
   getAvailableSubagentNames,
