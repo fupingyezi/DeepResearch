@@ -11,7 +11,7 @@ import {
   useModelStore,
 } from '@/store';
 import { useModelConfigStatus } from '@/hooks';
-import { chatWithAgent } from '@/utils/chat';
+import { useAgentEvent } from '@/runtime/context';
 import type { ModelPresetName } from '@/config/models';
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {
@@ -36,6 +36,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
   const { model, setModel } = useModelStore();
   // 模型配置状态：决定是否可发送 + 引导文案；selectedModel 以服务端为准。
   const { hasUsableKey, selectedModel, loading } = useModelConfigStatus();
+  const { run } = useAgentEvent();
 
   // 把服务端落库的 selectedModel 同步到本地 store，保证发送时携带正确模型。
   useEffect(() => {
@@ -64,19 +65,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ emptyStateComponent, placeholde
         hasFiles?: boolean;
       },
     ) => {
-      const conversationStore = useConversationStore.getState();
-      await chatWithAgent({
+      await run({
         inputValue,
         model: (selectedModel as ModelPresetName) ?? model,
         uploadedFiles: opts?.hasFiles ? uploadedFiles : undefined,
         memoryMode,
-        ...conversationStore,
       });
       if (opts?.hasFiles) {
         clearUploadedFiles();
       }
     },
-    [uploadedFiles, clearUploadedFiles, model, selectedModel, memoryMode],
+    [run, uploadedFiles, clearUploadedFiles, model, selectedModel, memoryMode],
   );
 
   // 未配置任何可用 Key 时禁用输入并展示引导文案；加载中也先禁用，避免空跑请求。
