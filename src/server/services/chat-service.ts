@@ -496,8 +496,6 @@ export class ChatService {
       for await (const ev of subscription) {
         if (collector) collector.onEvent(ev);
         if (ev.eventType === ClientAgentEventType.END) {
-          // 过滤 StreamBridge 内部发出的 system END（仅用于唤醒挂起订阅者）
-          if (ev.agentId === 'system') continue;
           const titleUpdate = consumeTitleUpdate(prepared.threadId);
           if (titleUpdate) {
             yield createClientAgentEvent(ClientAgentEventType.END, ev.agentId, { titleUpdate });
