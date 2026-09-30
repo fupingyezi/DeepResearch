@@ -17,7 +17,12 @@
 import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { EventBus, createAgentEventStream, type AgentEventStreamOptions } from '../client';
+import {
+  EventBus,
+  createAgentEventStream,
+  type AgentEventStreamOptions,
+  type RoutedClientAgentEvent,
+} from '../client';
 
 export interface AgentEventContextValue {
   /** 事件总线，用于订阅 */
@@ -42,6 +47,7 @@ export function AgentEventProvider({ children }: AgentEventProviderProps) {
     busRef.current = new EventBus();
   }
   const abortRef = useRef<AbortController | null>(null);
+  const streamSeqRef = useRef(0);
   const [isRunning, setIsRunning] = useState(false);
 
   const abort = useCallback(() => {
@@ -73,8 +79,15 @@ export function AgentEventProvider({ children }: AgentEventProviderProps) {
         ...opts,
         signal: controller.signal,
       });
+      const streamId = ++streamSeqRef.current;
       for await (const event of stream) {
-        busRef.current?.emit(event);
+        // EventBus 载荷为 RoutedClientAgentEvent：routing 字段由泵补齐。
+        // 本 Provider 尚未按会话泵化，sessionId 以空串占位、streamId 单调递增防串。
+        busRef.current?.emit({
+          ...event,
+          sessionId: '',
+          streamId,
+        } satisfies RoutedClientAgentEvent);
       }
     } finally {
       // 仅在当前 controller 仍是最新时清理状态，避免覆盖后续 run 的状态
