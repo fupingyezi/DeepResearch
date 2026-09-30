@@ -18,11 +18,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 
-import type {
-  ClientAgentEvent,
-  TaskProgressPayload,
-} from '@deerflow-harness/runtime/sse/client-event';
-import { ClientAgentEventType as Et } from '@deerflow-harness/runtime/sse/client-event';
+import type { ClientAgentEvent, TaskProgressPayload } from '@/runtime/protocol/client-event';
+import { ClientAgentEventType as Et } from '@/runtime/protocol/client-event';
 import type { ChatMessageType, MessagePart, SubagentToolCall } from '@/types';
 import { extractFinalMessageParts } from '@/utils/chat/final-message-extract';
 import { parseJsonSafe, hasMeaningfulArgs } from '@/utils/common';

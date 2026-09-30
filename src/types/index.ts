@@ -41,9 +41,6 @@ import {
   isMemoryInjectionMode,
 } from './chat-info-define';
 
-//函数参数相关
-import type { chatWithAgentProps, reChatWithAgentProps } from './chat-utils-params';
-
 export {
   FileItemsProps,
   ChatLayoutProps,
@@ -84,5 +81,3 @@ export {
   isTaskSummaryPart,
   isMemoryInjectionMode,
 };
-
-export { chatWithAgentProps, reChatWithAgentProps };

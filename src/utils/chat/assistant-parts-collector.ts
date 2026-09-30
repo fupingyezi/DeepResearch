@@ -11,7 +11,7 @@
  * 同一条 assistant 消息，避免重新加载时停在「请求澄清」转圈、丢失最终结果。
  */
 
-import type { ClientAgentEvent } from '@deerflow-harness/runtime/sse/client-event';
+import type { ClientAgentEvent } from '@/runtime/protocol/client-event';
 import type { ChatMessageType, MessagePart } from '@/types';
 import {
   createPartsStateFromExisting,
