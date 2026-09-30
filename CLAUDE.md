@@ -100,7 +100,7 @@ Services（src/server/services，领域编排，无 SQL）
 DAOs（单表 SQL）      ThreadService（wiring 进程单例，9 操作）
    │                       ├─ DeerFlowClient（Agent 缓存 + LangGraph stream）
    ▼                       ├─ Checkpointer（PG）/ Stores（threads/runs）
-PostgreSQL                 └─ StreamBridge → ThreadChannel（缓冲回放）→ SSE → 前端
+PostgreSQL                 └─ StreamBridge → ThreadChannel（typed EventEmitter + 缓冲回放）→ SSE → 前端
 ```
 
 Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `createBaseAgent()`（中间件链按 `ORDERED_MIDDLEWARES` 位序装配）→ 工具（search_web / task / sandbox 读写执行 / view_image / …）→ `SandboxProvider`（local / docker / remote）。
@@ -216,7 +216,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 
 过滤边界在 `runtime/sse/to-client-event.ts`——白名单外的内部事件在此 drop，不泄露给前端。
 
-**StreamBridge**（`runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。ThreadChannel = buffer（历史）+ EventEmitter（实时）+ closed 标志；`subscribe()` 返回 AsyncIterable，`next()` 四步：回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件；`setMaxListeners(0)` 防多客户端订阅告警。终止：END → `close()`（后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。多实例部署时把 EventEmitter 换 Redis pub/sub 即可，接口稳定。
+**StreamBridge**（`runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。**ThreadChannel 是每 run 一个的 typed `EventEmitter<ChannelEventMap>`**——10 个 `ClientAgentEventType` 就是事件名（emit/on 传整个事件对象），另挂 `CLOSED_EVENT` Symbol 事件作内部唤醒信号：close() 时发出，把「唤醒」从「数据」剥离，不再合成 system END 帧（chat-service 里按 `agentId==='system'` 过滤的跨文件耦合随之删除）。`publish()` 是唯一写入口（类内 `emitEvent` 类型桥规避「联合事件名+联合值」的 TS 推断失败）；构造函数常驻 no-op `'error'` 监听——`error` 是白名单事件名却撞 EventEmitter 内建语义（无监听者 emit 会抛）。`subscribe()` 仍是 SSE 稳定契约（返回 AsyncIterable，多实例换 Redis 的换芯点不变）：手写四步 next()（回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件），buffer 快照与对全部事件名的监听注册在**同一同步块**内完成——事件要么在快照里（回放）要么进 pending（实时），不丢不重；跨类型全局序由单一 pending 队列保持。**不用 `events.on()` 重写 subscribe**：合并多事件名会丢跨类型时序，且 'error' 的终止语义与「ERROR 是流中间事件、END 才终止」相反。终止：END → `close()`（emit CLOSED_EVENT + removeAllListeners，后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。多实例部署时把底层 EventEmitter 换 Redis pub/sub 即可，接口稳定。
 
 ### 6. Agent 工厂与中间件管线
 
@@ -311,15 +311,15 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - `sessionRuntimes: Record<sessionId, { messages, status: 'idle'|'running'|'done'|'error', abortController, lastActiveAt }>`——每个对话一个独立运行桶（真并行的真相源）
 - 按 sessionId 的 action：setSessionMessages / setSessionStatus / setSessionAbortController / getSessionRuntime / `migrateSessionRuntime`（临时 id → 真实 id）/ abortSession
 - `currentMessages` / `isChating` 降级为「currentSessionId 桶的投影」，切对话时从桶恢复投影（含正在跑的消息与运行态），避免全局单例被切走的对话覆盖
-- `StreamChatHandler`（`src/utils/chat/stream-chat-handler.ts`）全程用 `this.sessionId` 作桶 key 写回；`applyStartEvent` 用 `migrateSessionRuntime` 衔接新建对话的临时 id 与后端真实 id；侧栏 `SessionStatusIndicator` 订阅 `sessionRuntimes[id]?.status` 显示运行态
+- 事件泵（`src/runtime/context/agent-event-context.tsx` 的 `AgentEventProvider`）每 session 一个 pump，emit 前给事件盖 `sessionId`+`streamId` 分拣戳；store 写入者 `SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者按初始 sid 路由写桶——START 用 `migrateSessionRuntime` 衔接新建对话的临时 id 与后端真实 id；侧栏 `SessionStatusIndicator` 订阅 `sessionRuntimes[id]?.status` 显示运行态
 
 **停止按钮的三条不变量**（改这块前先看，坑都踩过）：
 
 1. 提交处理必须把 `isChating` 分支放在 `if (disabled) return` **之前**——chat-window 传的是 `disabled={isChating || guardDisabled}`，聊天中 disabled 恒 true，顺序反了就是死按钮；按钮自身 `disabled={disabled && !isChating}`（聊天中必须可点）
-2. 停止要做两件事，且**先发取消请求、再 abort**：`cancelRunOnServer(sessionId)`（`POST /api/conversations/cancel_run`）+ `abortCurrentChat()`（本地 fetch + 收起运行态）。只 abort 本地的话服务端 run 会继续生成并把**完整回答**落库；store 的 abortCurrentChat 不能因为拿不到 abortController 而整个 no-op
+2. 停止要做两件事，且**先发取消请求、再 abort**：`cancelRunOnServer(sessionId)`（`POST /api/conversations/cancel_run`）+ `abortCurrentChat()`（本地 fetch + 收起运行态）。只 abort 本地的话服务端 run 会继续生成并把**完整回答**落库；store 的 abortCurrentChat 不能因为拿不到 abortController 而整个 no-op。**泵的 AbortController 由 `startSessionSink` 经 `setSessionAbortController` 注册进 sessionRuntimes 桶**——停止按钮 abort 的正是它，改泵接线时不能丢这步
 3. 取消后消息要收尾：新增 `cancelled` part（文案「用户已取消」/「已被新消息取代」）——前端在 abort 分支追加（否则模型还没吐 token 时 parts 为空，气泡永远转圈）；服务端在落库前用 `waitRunError(run_id)` 等 run 落到终态、判定取消后把同一条标记补进 parts 末尾（**落库 parts 才是刷新后的真相源**，前端加而服务端不加，刷新就丢）。服务端那条必须等：客户端先断流再（几乎同时）发 cancel，断流那一刻 run 还在 running。气泡转圈条件收紧为「parts 为空且 isChating 且是最后一条 assistant」
 
-**前端 SSE 处理链**：`fetch() POST /api/v3/chat` → `stream-chat-handler.ts` → `sse-frame-parser.ts`（逐行解析 data: JSON 帧）→ `event-bus.ts`（广播）→ `agent-event-context.tsx`（React Context）→ `useAgentEvent()` / `useAgentEventListener()` → 组件。
+**前端 SSE 处理链**：`useAgentEvent().run()` → `AgentEventProvider` 泵（`fetch() POST /api/v3/chat` → `create-agent-event-stream.ts` → `sse-frame-parser.ts` 逐行解析 data: JSON 帧 → `event-bus.ts` 广播；`RoutedClientAgentEvent = ClientAgentEvent & { sessionId, streamId }` 是前端本地分拣戳，不进线协议）→ `agent-event-sink.ts`（SessionStreamSink 通配订阅者：占位消息 / START id 迁移 / rAF 合帧 commit / 错误兜底）→ zustand 桶；组件侧 `useAgentEventListener()` 就近订阅 EventBus。`event-bus.ts` 基于官方 `events` 包（显式依赖 ^3.3.0，Next 14 客户端不能用 `node:` 前缀），补三样官方没有的语义：通配 `'*'` 订阅、handler 异常隔离（try/catch 包装）、`on` 返回 unsubscribe。
 
 ### 11. 关键设计模式
 
@@ -358,7 +358,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/runtime/run-concurrency-gate.ts`——run 级并发闸门（FIFO 信号量 + 跨进程占位）
 - `src/deerflow-harness/runtime/usage-accounting.ts`——LLM 用量记账（模型工厂挂接，ALS 累加器）
 - `src/deerflow-harness/agents/factory.ts` / `features.ts`——createBaseAgent + assembleFromFeatures / RuntimeFeatures + Next/Prev 装饰器
-- `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`——StreamBridge + ThreadChannel（缓冲回放）
+- `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`——StreamBridge + ThreadChannel（每 run 一个 typed EventEmitter + 缓冲回放）
 - `src/deerflow-harness/runtime/sse/client-event.ts` / `to-client-event.ts`——ClientAgentEvent 白名单协议 / 内→外过滤边界
 - `src/deerflow-harness/types/agent-event.ts`——AgentEvent 内部事件枚举
 - `src/deerflow-harness/subagents/executor.ts` / `parent-history.ts`——SubagentExecutor（超时+取消）/ 父历史只读注入
@@ -369,7 +369,8 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/extensions/config-store.ts` / `skills/loader.ts` / `mcp/client.ts`——扩展配置存储 / skill 加载器 / MCP 客户端
 - `src/deerflow-harness/sandbox/provider-factory.ts` + `docker/` + `remote/`——沙箱后端工厂 + Docker 后端 + Remote 后端
 - `src/store/chat-session-store.ts`——前端聊天会话状态（sessionRuntimes 分桶并行）
-- `src/utils/chat/stream-chat-handler.ts`——前端 SSE 流处理
+- `src/runtime/context/agent-event-context.tsx`——AgentEventProvider（每 session 泵 + sink 挂载）
+- `src/utils/chat/agent-event-sink.ts` / `chat-request-body.ts`——SessionStreamSink 注册表（事件→store）/ `/api/v3/chat` 请求体纯组装
 - `.github/workflows/deploy.yml` / `scripts/deploy-remote.sh`——CI/CD 流水线 / 服务器端部署
 - `docs/deploy-runbook.md` / `docs/cicd-notes.md` / `docs/sandbox-implementation.md`——部署操作手册 / 技术沉淀（踩坑实录）/ 沙箱完整设计
 
