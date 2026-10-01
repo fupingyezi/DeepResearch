@@ -23,7 +23,7 @@ import {
   type MessageTimelineProps,
   type TimelineStepPart,
 } from '@/types';
-import { chatWithAgent } from '@/utils/chat';
+import { useAgentEvent } from '@/runtime/context';
 import {
   handleDownloadPDF,
   handleDownloadDOC,
@@ -113,6 +113,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   const currentAbortController = useConversationStore((s) => s.currentAbortController);
   const abortCurrentChat = useConversationStore((s) => s.abortCurrentChat);
   const openArtifact = useArtifactPanelStore((s) => s.openArtifact);
+  const { run } = useAgentEvent();
 
   const [isShowOtherOperators, setIsShowOtherOperators] = useState<boolean>(false);
   const { copyToClipboard } = useCopy();
@@ -179,10 +180,10 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           return;
         }
         case 'recall': {
-          await chatWithAgent({
+          await run({
             operation: 'recall',
             inputValue: getDownloadSource(),
-            ...useConversationStore.getState(),
+            sessionId: String(message.sessionId ?? ''),
           });
           return;
         }
@@ -254,10 +255,10 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
       if (reEditValue.trim()) {
         setIsEditing(false);
-        await chatWithAgent({
+        await run({
           operation: 'reEditCall',
           inputValue: reEditValue,
-          ...useConversationStore.getState(),
+          sessionId: String(message.sessionId ?? ''),
         });
       }
     };

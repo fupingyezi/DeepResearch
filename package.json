@@ -38,6 +38,7 @@
     "bcryptjs": "^3.0.3",
     "copy-to-clipboard": "^3.3.3",
     "dotenv": "^17.2.3",
+    "events": "^3.3.0",
     "html2canvas": "^1.4.1",
     "immer": "^11.0.1",
     "jsonwebtoken": "^9.0.3",

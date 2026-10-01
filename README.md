@@ -11,7 +11,7 @@
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（`DEERFLOW_DATA_DIR` 可覆盖根目录）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为词面重叠率与 embedding 余弦的混合打分（智谱 `embedding-3`），并按阈值取舍；无 Key 时静默降级为纯词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
-- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 缓冲 + 晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
+- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 是每 run 一个的 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
 - 🔎 **子 agent 继承父线程上下文**：subagent 每次执行前，从父线程 checkpoint **只读**取历史并剪枝为纯文本背景块（4k 字符预算、剥离 base64 与上传文件正文、跳过纯工具调用消息），作为 SystemMessage 前置——与「子图状态不落 checkpoint」的决定正交，读取失败静默降级不阻断 task。
 - 🧹 **删除即清干净**：删除对话会连带清掉聊天记录、MinIO 文件对象与 agent 侧全部数据（`threads_meta` / runs / LangGraph checkpoint / 沙箱容器）；若该对话此刻还在跑，先取消它的 run 再清理，不留孤儿数据。
@@ -105,7 +105,7 @@ src/
 │   │   ├── service.ts                  # ThreadService（fire-and-forget 提交 + 状态收敛）
 │   │   ├── run-concurrency-gate.ts     # run 级并发闸门（双层背压之一，FIFO 信号量 + 跨进程占位）
 │   │   ├── usage-accounting.ts         # LLM 用量记账（模型工厂挂接，ALS 累加器 + pricing）
-│   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（缓冲回放）
+│   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（typed EventEmitter + 缓冲回放）
 │   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
 │   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
 │   │   └── context.ts                  # AsyncLocalStorage 上下文传播
@@ -140,7 +140,7 @@ src/
 │
 ├── runtime/                            # 前端运行时（SSE 解析、EventBus、Context）
 │   ├── client/                         # sse-frame-parser、event-bus、create-agent-event-stream
-│   ├── context/                        # AgentEventContext + hooks
+│   ├── context/                        # AgentEventProvider（每 session 泵）+ hooks
 │   └── protocol/                       # ClientAgentEvent re-export（前后端共享协议）
 │
 ├── store/                              # Zustand 切片
@@ -169,7 +169,7 @@ src/
 │
 ├── utils/
 │   ├── auth/                           # 认证相关工具
-│   ├── chat/                           # 流处理、parts collector / reducer、最终消息提取、取消请求
+│   ├── chat/                           # SessionStreamSink（事件→store）、parts collector / reducer、请求体组装、取消请求
 │   ├── common/                         # message-content 等通用工具
 │   ├── files/                          # 文件相关工具
 │   ├── prompt.ts                       # 提示词增强（/api/prompt/enhance 客户端）
@@ -425,6 +425,8 @@ interface ChatStreamBody {
 
 协议定义：`src/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/runtime/protocol/client-event.ts` re-export 复用。
 
+前端事件链：`AgentEventProvider` 每 session 一个泵（`fetch` SSE → `sse-frame-parser` 分帧 → EventBus 广播，emit 前盖 `sessionId`+`streamId` 前端本地分拣戳）；`SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者把事件聚合成 zustand 数据（占位消息 / START id 迁移 / rAF 合帧 / 错误兜底），EventBus 基于官方 `events` 包实现。
+
 ## 🧩 架构要点
 
 ```
@@ -446,8 +448,8 @@ ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ └── Stores（threads / runs）
         │
         ▼
-StreamBridge（进程内 EventEmitter 总线）
-        └── ThreadChannel（buffer + 晚订阅回放）→ SSE → 前端
+StreamBridge（进程内 typed EventEmitter 总线）
+        └── ThreadChannel（EventEmitter + buffer 晚订阅回放）→ SSE → 前端
 ```
 
 详细设计见 [`CLAUDE.md`](./CLAUDE.md)，包含：

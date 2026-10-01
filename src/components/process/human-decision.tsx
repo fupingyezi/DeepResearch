@@ -2,9 +2,10 @@
 
 import Image from 'next/image';
 
-import { chatWithAgent } from '@/utils/chat';
 import { useConversationStore } from '@/store';
 import { useState, useRef, type KeyboardEvent } from 'react';
+import { ClientAgentEventType } from '@/runtime/protocol';
+import { useAgentEvent, useAgentEventListener } from '@/runtime/context';
 
 /**
  * 中断决策（human-in-the-loop）交互组件。
@@ -14,7 +15,7 @@ import { useState, useRef, type KeyboardEvent } from 'react';
  * 支持 ask_clarification 等 HITL 工具的「开放式问答」场景：
  *   1. 显示 agent 抛出的 question 与可选的 details 补充说明
  *   2. 用户在输入框中填写回答后提交（支持回车键）
- *   3. 决策结果通过 chatWithAgent + operation='resume' 续接同一会话，
+ *   3. 决策结果通过 run({ operation: 'resume' }) 续接同一会话，
  *      后端 checkpointer 会自动取出上一轮 messages（含 plan/clarification）。
  */
 export const HumanDecision: React.FC<{
@@ -23,6 +24,14 @@ export const HumanDecision: React.FC<{
 }> = ({ question, details }) => {
   const [answer, setAnswer] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const { run } = useAgentEvent();
+  const currentSessionId = useConversationStore((s) => s.currentSessionId);
+
+  // 防御：resume 过程中若收到新一轮中断（组件未经卸载直接复用），恢复输入可用
+  useAgentEventListener(ClientAgentEventType.HUMAN_INTERRUPT, (event) => {
+    if (event.sessionId === String(currentSessionId)) setSubmitting(false);
+  });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** 输入法组合状态：防止 IME 编码期间回车误提交 */
@@ -40,11 +49,11 @@ export const HumanDecision: React.FC<{
     const text = answer.trim();
     if (!text || submitting) return;
     setSubmitting(true);
-    await chatWithAgent({
+    await run({
       inputValue: text,
       operation: 'resume',
       resumeDecision: text,
-      ...useConversationStore.getState(),
+      sessionId: String(currentSessionId || ''),
     });
     setSubmitting(false);
   };

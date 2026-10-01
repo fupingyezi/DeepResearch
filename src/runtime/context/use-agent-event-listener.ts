@@ -2,19 +2,20 @@
 
 import { useEffect, useRef } from 'react';
 
-import type { ClientAgentEvent, ClientAgentEventType } from '../protocol/client-event';
+import type { ClientAgentEventType } from '../protocol/client-event';
+import type { RoutedClientAgentEvent } from '../client';
 import { useAgentEvent } from './use-agent-event';
 
 /**
  * 通配订阅签名：handler 接收所有事件
  */
-type WildcardHandler = (event: ClientAgentEvent) => void;
+type WildcardHandler = (event: RoutedClientAgentEvent) => void;
 
 /**
  * 类型化订阅签名：handler 仅接收对应 eventType 的事件，payload 自动收窄
  */
 type TypedHandler<T extends ClientAgentEventType> = (
-  event: Extract<ClientAgentEvent, { eventType: T }>,
+  event: Extract<RoutedClientAgentEvent, { eventType: T }>,
 ) => void;
 
 /**
@@ -47,7 +48,7 @@ export function useAgentEventListener<T extends ClientAgentEventType>(
 
 export function useAgentEventListener(
   type: ClientAgentEventType | '*',
-  handler: (event: ClientAgentEvent) => void,
+  handler: (event: RoutedClientAgentEvent) => void,
 ): void {
   const { bus } = useAgentEvent();
   const handlerRef = useRef(handler);

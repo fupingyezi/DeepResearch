@@ -3,8 +3,8 @@ import { isMemoryInjectionMode, type MemoryInjectionMode } from '@/types';
 /**
  * 组装 `/api/v3/chat` 请求体的 `configuration` 段。
  *
- * 单独成模块（而非内联在 stream-chat-handler 内）的两个理由：
- * 1. handler 的 import 链会拉到 React 组件，node 环境的单测无法 transform JSX；
+ * 单独成模块的两个理由：
+ * 1. 调用方 import 链会拉到 React 组件，node 环境的单测无法 transform JSX；
  * 2. 这里是**用户可见开关的落点** —— 参数被静默丢弃时（历史上发生过多次：
  *    metadata 展开、字段名拼写、只接受字面量）功能会悄无声息地失效，
  *    需要能被单测直接钉住。

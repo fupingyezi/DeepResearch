@@ -12,8 +12,8 @@ import type { ChatUploadedFileRef, MessagePart } from '@/types';
  * 与后端 `contentsToUserParts` 的形状保持一致（同一套 MessagePart 契约），
  * 便于实时/历史两种路径渲染出同样的卡片。
  *
- * 单独成模块（而非留在 stream-chat-handler.ts 内）：那里 import 链会拉到 React
- * 组件，而 node 环境的单测无法 transform JSX（tsconfig 的 jsx: preserve）。
+ * 单独成模块：调用方 import 链会拉到 React 组件，而 node 环境的单测无法
+ * transform JSX（tsconfig 的 jsx: preserve）。
  */
 export function buildAttachmentParts(files?: ChatUploadedFileRef[]): MessagePart[] {
   if (!Array.isArray(files) || files.length === 0) return [];

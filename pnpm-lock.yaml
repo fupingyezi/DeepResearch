@@ -47,6 +47,9 @@ importers:
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
+      events:
+        specifier: ^3.3.0
+        version: 3.3.0
       html2canvas:
         specifier: ^1.4.1
         version: 1.4.1

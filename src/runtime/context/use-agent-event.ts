@@ -7,7 +7,8 @@ import { AgentEventContext, type AgentEventContextValue } from './agent-event-co
 /**
  * useAgentEvent
  *
- * 获取当前 AgentEventProvider 暴露的控制句柄（bus / run / abort / isRunning）。
+ * 获取当前 AgentEventProvider 暴露的控制句柄
+ * （bus / run / abort / runningSessionIds）。
  *
  * 必须在 `<AgentEventProvider>` 子树内调用，否则抛错。
  */
