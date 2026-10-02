@@ -101,11 +101,27 @@ jobs:
           # 服务器端 docker build：首次需拉基础镜像 + pnpm install + next build，
           # 可能 10 分钟+；后续 layer 缓存命中会明显变快。command_timeout 需放宽
           command_timeout: 40m
-          # 远程执行：解包源码 → docker build → 起服务 → 健康检查 → 失败自动回滚
+          # 远程执行：干净解包 → docker build → 起服务 → 健康检查 → 失败自动回滚
           script: |
             set -e
             cd "${{ secrets.DEPLOY_PATH }}"
-            tar -xzf source.tar.gz
+            # 解包到独立暂存目录再同步进工作目录：直接 tar -xzf 覆盖解压只加新文件、
+            # 不删旧文件 —— 上次部署遗留的「本次已删除」文件会混进 docker build 上下文，
+            # 报出源码里根本不存在的幽灵 typecheck 错误（见 docs/cicd-notes.md §12）。
+            # 白名单（.env.production / .previous-image）之外的遗留文件一律删除；
+            # 只依赖 coreutils（find/sed/sort/comm/cp），不引入 rsync 等新依赖。
+            STAGING="$(mktemp -d)"
+            tar -xzf source.tar.gz -C "$STAGING"
             rm -f source.tar.gz
+            (cd "$STAGING" && find . -type f | sed 's|^\./||' | sort -u) > "$STAGING.new"
+            find . -type f \
+              ! -path './.env.production' ! -path './.previous-image' \
+              | sed 's|^\./||' | sort -u > "$STAGING.cur"
+            comm -13 "$STAGING.new" "$STAGING.cur" | while IFS= read -r stale; do
+              echo "[deploy] 清理上次部署遗留文件: $stale"
+              rm -f -- "$stale"
+            done
+            cp -a "$STAGING"/. ./
+            rm -rf "$STAGING" "$STAGING.new" "$STAGING.cur"
             chmod +x scripts/*.sh
             bash scripts/deploy-remote.sh "${{ steps.meta.outputs.tag }}"

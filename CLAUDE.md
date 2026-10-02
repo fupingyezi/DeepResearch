@@ -46,6 +46,7 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 - **资源边界**：Dockerfile builder `NODE_OPTIONS=--max-old-space-size=2048`；deploy-remote.sh 构建前磁盘守卫（<3G 先清缓存）+ 成功后回收（构建缓存留 2G、镜像留最近 3 版）；compose 全部服务日志轮转 `max-size 10m / max-file 3`
 - **镜像不在 CI 构建、不走 registry**（跨境 scp 镜像 tar 与推 TCR 实测不可用）：服务器本地构建（国内源已配）；tag `deepresearch:<git sha 前 12 位>`，历史镜像服务器本地可手动回滚
 - 密钥分层：GitHub Secrets 只放 4 个 SSH 凭证；业务密钥只在服务器 `DEPLOY_PATH/.env.production`（compose 经 `--env-file` 插值，`:?` 强制非空）
+- **解包是干净同步（tar 覆盖解包只加不删，会残留已删除文件）**：CI 解包先对比新树与工作目录文件清单，删除白名单（`.env.production` / `.previous-image`）之外的遗留文件再覆盖——否则上次部署的死文件混进 docker build 上下文，报「模块无导出」这类幽灵 typecheck（见 `docs/cicd-notes.md` §12）
 
 文档分工：`docs/deployment.md`（设计）→ `docs/deploy-runbook.md`（操作）→ `docs/cicd-notes.md`（踩坑与排查）。
 

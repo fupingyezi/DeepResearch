@@ -252,5 +252,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
 
 - `docker-compose.prod.yaml` 与 `scripts/*` 每次部署会被 CI 覆盖为仓库最新版，
   不要直接在服务器上改这两个（要改就改仓库）
+- `DEPLOY_PATH` 下除 `.env.production` 与 `.previous-image` 外的文件都归 CI 解包管理：
+  每次部署会把工作目录里不属于新源码包的遗留文件删掉再同步，不要在这里放其他东西
 - 长期记忆 / 沙箱文件 / 自定义技能 / MCP 启用状态都在 named volume 里，
   重建容器不丢；但 `docker volume rm` 会丢
