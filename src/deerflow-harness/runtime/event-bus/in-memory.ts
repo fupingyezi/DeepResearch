@@ -85,6 +85,10 @@ export class InMemoryRunEventBus implements RunEventBus {
     return Promise.resolve();
   }
 
+  async ready(): Promise<void> {
+    // 无连接可建立
+  }
+
   isDistributed(): boolean {
     return false;
   }

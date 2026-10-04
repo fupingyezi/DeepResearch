@@ -196,7 +196,7 @@ export interface ThreadService {
    */
   beginShutdown(drainMs?: number): Promise<{ cancelled: number; pending: number }>;
   /** 健康视图：distributed = 跨进程登记表与事件总线均可用；draining = 停机流程已启动。 */
-  health(): { distributed: boolean; draining: boolean };
+  health(): Promise<{ distributed: boolean; draining: boolean }>;
   /** 启动对账：把「running 但 owner 已死」的 run 修正为 failed（语义见 zombie-reconciler）。 */
   reconcileZombieRuns(): Promise<{ reaped: number }>;
 }
@@ -722,10 +722,16 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     beginShutdown,
-    health: () => ({
-      distributed: runRegistry.isDistributed() && runEventBus.isDistributed(),
-      draining,
-    }),
+    health: async () => {
+      // 先确保实现就绪再判模式：懒建连下「尚未连接」与「连接失败已降级」都表现为
+      // connected=false，只有前者不该被报告为降级
+      await runRegistry.ready();
+      await runEventBus.ready();
+      return {
+        distributed: runRegistry.isDistributed() && runEventBus.isDistributed(),
+        draining,
+      };
+    },
     reconcileZombieRuns: () => reconcileZombieRuns({ runs, threads, registry: runRegistry }),
   };
 }

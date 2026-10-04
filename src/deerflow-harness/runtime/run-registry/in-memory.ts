@@ -59,6 +59,10 @@ export class InMemoryRunRegistry implements RunRegistry {
     this.cancelHandlers.push(handler);
   }
 
+  async ready(): Promise<void> {
+    // 无连接可建立
+  }
+
   isDistributed(): boolean {
     return false;
   }

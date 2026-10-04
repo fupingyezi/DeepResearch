@@ -45,6 +45,7 @@ function makeDeps(opts: ReconcileOpts) {
   const deps: ZombieReconcileDeps = {
     registry: {
       isDistributed: () => opts.distributed ?? true,
+      ready: async () => undefined,
       ownerOf: opts.ownerOf ?? (async () => null),
     },
     runs: {

@@ -40,6 +40,12 @@ export interface RunRegistry {
   requestCancel(runId: string, reason: string): Promise<number>;
   /** 注册本进程的取消请求处理器：返回 1 = 命中并 abort，0 = run 不在本进程。 */
   onCancelRequest(handler: (runId: string, reason: string) => number): void;
+  /**
+   * 确保实现就绪（幂等）：跨进程实现建立连接，失败按降级语义处置；进程内实现
+   * 立即返回。健康检查与僵尸回收先 await 本方法再判 isDistributed()，避免
+   * 「连接还没建立」被误报为「协调已降级」。
+   */
+  ready(): Promise<void>;
   isDistributed(): boolean;
 }
 
@@ -57,5 +63,7 @@ export interface RunEventBus {
   ): AsyncIterable<StampedClientAgentEvent>;
   /** run 终态且订阅全部结束后释放资源（进程内实现 = StreamBridge.drop）。 */
   release(threadId: string, runId: string): Promise<void>;
+  /** 语义同 RunRegistry.ready：确保实现就绪（幂等），失败走降级。 */
+  ready(): Promise<void>;
   isDistributed(): boolean;
 }

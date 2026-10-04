@@ -129,11 +129,11 @@ describe('优雅停机（beginShutdown）', () => {
       input: 'hi',
     });
 
-    expect(h.service.health()).toEqual({ distributed: false, draining: false });
+    expect(await h.service.health()).toEqual({ distributed: false, draining: false });
     const result = await h.service.beginShutdown(2000);
     expect(result).toEqual({ cancelled: 0, pending: 0 });
     expect(h.runRows.get(run_id)?.status).toBe('succeeded');
-    expect(h.service.health()).toEqual({ distributed: false, draining: true });
+    expect(await h.service.health()).toEqual({ distributed: false, draining: true });
   });
 
   it('等待窗口耗尽 → 取消在跑 run：落 failed（draining 文案）且 END 落流，pending=0', async () => {

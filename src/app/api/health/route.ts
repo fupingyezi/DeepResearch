@@ -23,7 +23,7 @@ export const GET = withApiHandler({ auth: 'none' }, async () => {
       { status: 503 },
     );
   }
-  const health = svc.health();
+  const health = await svc.health();
   if (health.draining) {
     return NextResponse.json(
       { status: 'degraded', distributed: health.distributed, draining: true },

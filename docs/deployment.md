@@ -179,6 +179,9 @@ bash scripts/rollback.sh
 
 ### 10.3 优雅停机
 
+前置：实例必须带 `NEXT_MANUAL_SIG_HANDLE=1` 运行（compose 模板已配）——Next
+自带的 SIGTERM 清理是 `server.close → exit(0)`，不关掉它，排水序列跑不到第一步。
+
 SIGTERM 触发的停机序列（`src/instrumentation.ts`）：
 
 1. 置 draining：`/api/health` 转 503，submitRun/resume 抛 `SERVER_DRAINING`

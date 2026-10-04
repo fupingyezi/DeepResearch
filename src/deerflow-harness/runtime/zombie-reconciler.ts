@@ -37,7 +37,7 @@ const SCAN_LIMIT = 500;
 export interface ZombieReconcileDeps {
   runs: Pick<RunStore, 'listByStatus' | 'listByThread' | 'setStatus'>;
   threads: Pick<ThreadMetaStore, 'updateStatus'>;
-  registry: Pick<RunRegistry, 'ownerOf' | 'isDistributed'>;
+  registry: Pick<RunRegistry, 'ownerOf' | 'isDistributed' | 'ready'>;
   /** 当前时间源：测试注入。 */
   now?: () => number;
   /** 判死最小年龄覆盖：测试注入极小值观察回收路径。 */
@@ -47,6 +47,7 @@ export interface ZombieReconcileDeps {
 export async function reconcileZombieRuns(deps: ZombieReconcileDeps): Promise<{ reaped: number }> {
   const now = deps.now ?? Date.now;
   const minAgeMs = deps.minAgeMs ?? ZOMBIE_MIN_AGE_MS;
+  await deps.registry.ready();
   if (!deps.registry.isDistributed()) return { reaped: 0 };
 
   const running = await deps.runs.listByStatus('running', { limit: SCAN_LIMIT });

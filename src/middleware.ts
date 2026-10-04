@@ -17,6 +17,8 @@ const PUBLIC_PAGES = ['/login', '/setup'];
 
 function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/api/auth/')) return true;
+  // LB 就绪探针无 cookie，必须公开可达；路由层自带 auth: 'none'，无鉴权风险
+  if (pathname === '/api/health') return true;
   if (PUBLIC_PAGES.includes(pathname)) return true;
   return false;
 }

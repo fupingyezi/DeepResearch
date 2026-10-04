@@ -269,6 +269,9 @@ curl -s http://127.0.0.1:3000/api/health
 
 ### 2. 滚动重启（发版 / 扩缩容）
 
+0. 前置：实例环境变量必须带 `NEXT_MANUAL_SIG_HANDLE=1`（compose 模板已配）——
+   否则 SIGTERM 被 Next 自带的清理直接 exit(0)，排水序列不会执行（日志里
+   看不到 `drain done`，在跑 run 会被硬杀、留给僵尸回收兜底）
 1. 起新实例，等 `/api/health` 200 且 `distributed=true`，加入 LB
 2. 对旧实例逐个执行：LB 摘除 → `docker stop`（发 SIGTERM，触发优雅排水，
    默认最多等 30s）→ 确认容器退出 → 下一个

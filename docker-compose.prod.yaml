@@ -36,6 +36,9 @@ services:
       DEERFLOW_DATA_DIR: /app/.memory
       # MCP/skill 启用状态默认写 {cwd}/extensions_config.json，同样指到卷内
       DEERFLOW_EXTENSIONS_CONFIG_PATH: /app/.data/extensions_config.json
+      # 关掉 Next 自带的信号清理（server.close → exit(0)）：否则 SIGTERM 一到
+      # 进程就被 Next 直接退出，instrumentation 的排水序列根本跑不完
+      NEXT_MANUAL_SIG_HANDLE: '1'
     ports:
       - '3000:3000'
     depends_on:

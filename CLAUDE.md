@@ -60,6 +60,7 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 - `DEERFLOW_SANDBOX_BACKEND`——local（默认，宿主直连）/ docker（每线程加固容器）/ remote（每线程 SSH）；`DEERFLOW_ALLOW_HOST_BASH` 只门控 local（docker/remote 是隔离边界）
 - `DEERFLOW_MAX_CONCURRENT_RUNS`（run 级闸门，默认 16）/ `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（容器级闸门，默认 32）
 - `DEERFLOW_GRACEFUL_DRAIN_MS`——优雅停机排水窗口（默认 30000）
+- `NEXT_MANUAL_SIG_HANDLE=1`——多进程部署必须置位：关掉 Next 自带 SIGTERM 清理（server.close → exit(0)），否则排水序列跑不到第一步
 - `DEERFLOW_VISION_MAX_IMAGE_MB`——单图上限（默认 5）；**前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它**，否则「发送成功但模型没看到图」静默降级
 - `DEERFLOW_GUARDRAIL_ENABLED` / `DEERFLOW_GUARDRAIL_BLOCK`——规则式护栏（默认开，仅告警）
 - `STREAM_BRIDGE_BUFFER_MAX` / `DEERFLOW_DATA_DIR` / `DEERFLOW_EXTENSIONS_CONFIG_PATH` / `DEERFLOW_SKILLS_DIR` / `DEERFLOW_SANDBOX_DIR`
@@ -195,7 +196,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
   - 取消经 `signal` 生效：`DeerFlowClient.stream(..., signal)` → LangGraph `config.signal` → 一路下发到 LLM 调用。被取消的 run 记 `failed` + `cancelled: <原因>` 文案（`RunStatus` 是 DB CHECK 枚举，无 `cancelled` 值），**不能**记成 succeeded——`DeerFlowClient` 会把 abort 异常吞成正常 return，执行体必须显式判 `signal.aborted`（且此时不发 ERROR 帧，避免误报「运行出错」）
 - **单例在 dev 下必须挂 `globalThis`**（`__threadService`）：Next.js 按路由分别编译 + HMR 重新求值模块，纯模块级变量会分裂成多份实例，跨路由的「取消 run」「按 run 订阅事件流」会**静默失效**。与 `lib/db` 的 pg pool 同一套做法，生产单次打包无此问题
 - **心跳是 owner 存活信号**（间隔 `HEARTBEAT_INTERVAL_MS` = 15s，`runtime/liveness.ts` 单一出处）：除 publish HEARTBEAT 帧外还 `runRegistry.touch(run_id)` 续租 Redis owner 键（TTL 3 个心跳窗口）——键存活 = owner 存活，僵尸回收据此判死。touch 失败只告警一次不降级：瞬时失败下个心跳自愈，而按失败降级登记表会永久破坏跨进程取消
-- **优雅停机 `beginShutdown(drainMs)`**（`DEERFLOW_GRACEFUL_DRAIN_MS`，默认 30s）：置 draining → `submitRun`/`resume` 抛 `SERVER_DRAINING`（503）→ 轮询 `activeRuns` 至空（≤drainMs，activeRuns 清空 ⟺ finally 已 publish END）→ 超时 abort 全部剩余 run（文案 `cancelled: server draining`）→ 再等 `RUN_CANCEL_GRACE_MS` 收尾 → 返回 `{cancelled, pending}`。幂等：重复调用复用同一 Promise。`health()` 暴露 `{distributed, draining}` 供 `/api/health` 与 LB 摘除
+- **优雅停机 `beginShutdown(drainMs)`**（`DEERFLOW_GRACEFUL_DRAIN_MS`，默认 30s）：置 draining → `submitRun`/`resume` 抛 `SERVER_DRAINING`（503）→ 轮询 `activeRuns` 至空（≤drainMs，activeRuns 清空 ⟺ finally 已 publish END）→ 超时 abort 全部剩余 run（文案 `cancelled: server draining`）→ 再等 `RUN_CANCEL_GRACE_MS` 收尾 → 返回 `{cancelled, pending}`。幂等：重复调用复用同一 Promise。`health()` 暴露 `{distributed, draining}` 供 `/api/health` 与 LB 摘除——异步：先 `await` 登记表与事件总线的 `ready()`（幂等建连，失败走降级）再判 `isDistributed()`，避免「尚未建连」被误报为「已降级」；`/api/health` 在 middleware 放行（LB 探针无 cookie）
 - **僵尸回收 `reconcileZombieRuns()`**（`runtime/zombie-reconciler.ts`）：`running` 且 `ownerOf` 为空且超一个心跳窗口的 run → `failed` + `cancelled: process died`。只有线程**最新** run 被回收才把 thread 置 `error`（抢占时旧 owner 崩溃不覆盖新 run 的 running）；单条失败不阻断整体对账；`isDistributed()` 为 false 时整体跳过（进程内登记表无跨进程死亡语义）。启动对账在 instrumentation 跑两轮（启动 + 60s，覆盖 owner 键尚未到期的窗口）
 
 **线程状态机：** `idle → running → idle（成功）/ error（失败）`

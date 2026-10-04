@@ -68,6 +68,11 @@ export class RedisEventBus implements RunEventBus {
     this.blockMs = options?.blockMs ?? 5000;
   }
 
+  async ready(): Promise<void> {
+    // 建连失败走降级语义（ensureClient 内部处置），isDistributed() 随后如实反映
+    await this.ensureClient();
+  }
+
   isDistributed(): boolean {
     return this.connected && !this.degraded;
   }
