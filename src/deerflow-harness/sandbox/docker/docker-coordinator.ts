@@ -23,6 +23,7 @@ type RedisClient = ReturnType<typeof createClient>;
 const KEY_PREFIX = 'deerflow:sandbox:';
 const CONTAINERS_COUNT_KEY = `${KEY_PREFIX}containers:count`;
 const RUNS_COUNT_KEY = `${KEY_PREFIX}runs:count`;
+const RUN_SLOT_KEY_PREFIX = `${KEY_PREFIX}run:slot:`;
 const THREAD_HASH_PREFIX = `${KEY_PREFIX}thread:`;
 const THREAD_INDEX_KEY = `${KEY_PREFIX}threads`;
 const ACQUIRE_LOCK_PREFIX = `${KEY_PREFIX}lock:acquire:`;
@@ -50,6 +51,37 @@ end
 return 0
 `;
 
+/**
+ * Lua：run 名额占位——计数未达上限则自增，并落 per-run 槽键。
+ * 槽键是「这条计数属于哪个 run」的凭据：kill -9 的 run 不会走到 finally 释放，
+ * 僵尸回收凭槽键把它的名额归还，全局计数不会随僵尸永久流失。
+ */
+const RESERVE_RUN_SCRIPT = `
+local current = tonumber(redis.call('GET', KEYS[2]) or '0')
+local limit = tonumber(ARGV[1])
+if current < limit then
+  redis.call('INCR', KEYS[2])
+  redis.call('SET', KEYS[1], '1')
+  return 1
+end
+return 0
+`;
+
+/**
+ * Lua：run 名额释放——先 DEL per-run 槽键，键确实存在（DEL=1）才扣计数。
+ * 正常收尾与僵尸回收共用这一条路径，槽键的一次性 DEL 保证计数恰好扣一次：
+ * finally 与回收器并发执行也最多有一方 DEL 成功，不会多扣。
+ */
+const RELEASE_RUN_SCRIPT = `
+if redis.call('DEL', KEYS[1]) == 1 then
+  local current = tonumber(redis.call('GET', KEYS[2]) or '0')
+  if current > 0 then
+    redis.call('DECR', KEYS[2])
+  end
+end
+return 0
+`;
+
 export interface ThreadRegistration {
   threadId: string;
   containerName: string;
@@ -73,9 +105,12 @@ export interface SandboxCoordinator {
   /** 原子占位一个容器名额；返回 false 表示已达 maxLive。 */
   tryReserveContainer(maxLive: number): Promise<boolean>;
   releaseContainer(): Promise<void>;
-  /** 原子占位一个 run 名额；返回 false 表示已达 maxRuns。 */
-  tryReserveRun(maxRuns: number): Promise<boolean>;
-  releaseRun(): Promise<void>;
+  /**
+   * 原子占位一个 run 名额；返回 false 表示已达 maxRuns。runId 是占位凭据：
+   * 释放与僵尸回收都凭它找到 per-run 槽键，计数才不会在 owner 崩溃后流失。
+   */
+  tryReserveRun(runId: string, maxRuns: number): Promise<boolean>;
+  releaseRun(runId: string): Promise<void>;
 
   /** 登记 thread→container 映射（refCount 从 0 起，由 retain/incRef 显式持有）。 */
   register(threadId: string, containerName: string): Promise<void>;
@@ -190,7 +225,7 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
     }
   }
 
-  async tryReserveRun(maxRuns: number): Promise<boolean> {
+  async tryReserveRun(runId: string, maxRuns: number): Promise<boolean> {
     const client = await this.ensureClient();
     if (!client) {
       if (this.local.runCount >= maxRuns) return false;
@@ -198,8 +233,8 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
       return true;
     }
     try {
-      const reserved = await client.eval(RESERVE_SCRIPT, {
-        keys: [RUNS_COUNT_KEY],
+      const reserved = await client.eval(RESERVE_RUN_SCRIPT, {
+        keys: [this.runSlotKeyOf(runId), RUNS_COUNT_KEY],
         arguments: [String(maxRuns)],
       });
       return Number(reserved) === 1;
@@ -212,20 +247,27 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
     }
   }
 
-  async releaseRun(): Promise<void> {
+  async releaseRun(runId: string): Promise<void> {
     const client = await this.ensureClient();
     if (!client) {
       this.local.runCount = Math.max(0, this.local.runCount - 1);
       return;
     }
     try {
-      await client.eval(RELEASE_SCRIPT, { keys: [RUNS_COUNT_KEY], arguments: [] });
+      await client.eval(RELEASE_RUN_SCRIPT, {
+        keys: [this.runSlotKeyOf(runId), RUNS_COUNT_KEY],
+        arguments: [],
+      });
     } catch (error) {
       this.degradeAnd(() => {
         this.local.runCount = Math.max(0, this.local.runCount - 1);
         return undefined;
       }, error);
     }
+  }
+
+  private runSlotKeyOf(runId: string): string {
+    return `${RUN_SLOT_KEY_PREFIX}${runId}`;
   }
 
   async register(threadId: string, containerName: string): Promise<void> {

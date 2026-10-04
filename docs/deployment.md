@@ -204,6 +204,8 @@ owner 进程被 kill -9（或整机断电）时，PG 里 `runs.status='running'`
 - 新进程启动时对账（`runtime/zombie-reconciler.ts`，启动 + 60s 两轮：覆盖
   owner 键尚未到期的窗口）：running 且 owner 为空的 run → `failed` +
   `cancelled: process died`，线程状态带出 running
+- 回收同时归还该 run 的全局并发名额（per-run 槽键释放）：kill -9 的 run 走不到
+  finally，名额不还则全局并发上限随僵尸流失，多次强杀后新 run 永久排队
 - 误判防护：低于一个心跳窗口的 run 视为刚启动跳过；线程状态只随**最新** run 走
   （抢占时旧 owner 崩溃不覆盖新 run 的 running）
 

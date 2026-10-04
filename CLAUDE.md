@@ -197,7 +197,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - **单例在 dev 下必须挂 `globalThis`**（`__threadService`）：Next.js 按路由分别编译 + HMR 重新求值模块，纯模块级变量会分裂成多份实例，跨路由的「取消 run」「按 run 订阅事件流」会**静默失效**。与 `lib/db` 的 pg pool 同一套做法，生产单次打包无此问题
 - **心跳是 owner 存活信号**（间隔 `HEARTBEAT_INTERVAL_MS` = 15s，`runtime/liveness.ts` 单一出处）：除 publish HEARTBEAT 帧外还 `runRegistry.touch(run_id)` 续租 Redis owner 键（TTL 3 个心跳窗口）——键存活 = owner 存活，僵尸回收据此判死。touch 失败只告警一次不降级：瞬时失败下个心跳自愈，而按失败降级登记表会永久破坏跨进程取消
 - **优雅停机 `beginShutdown(drainMs)`**（`DEERFLOW_GRACEFUL_DRAIN_MS`，默认 30s）：置 draining → `submitRun`/`resume` 抛 `SERVER_DRAINING`（503）→ 轮询 `activeRuns` 至空（≤drainMs，activeRuns 清空 ⟺ finally 已 publish END）→ 超时 abort 全部剩余 run（文案 `cancelled: server draining`）→ 再等 `RUN_CANCEL_GRACE_MS` 收尾 → 返回 `{cancelled, pending}`。幂等：重复调用复用同一 Promise。`health()` 暴露 `{distributed, draining}` 供 `/api/health` 与 LB 摘除——异步：先 `await` 登记表与事件总线的 `ready()`（幂等建连，失败走降级）再判 `isDistributed()`，避免「尚未建连」被误报为「已降级」；`/api/health` 在 middleware 放行（LB 探针无 cookie）
-- **僵尸回收 `reconcileZombieRuns()`**（`runtime/zombie-reconciler.ts`）：`running` 且 `ownerOf` 为空且超一个心跳窗口的 run → `failed` + `cancelled: process died`。只有线程**最新** run 被回收才把 thread 置 `error`（抢占时旧 owner 崩溃不覆盖新 run 的 running）；单条失败不阻断整体对账；`isDistributed()` 为 false 时整体跳过（进程内登记表无跨进程死亡语义）。启动对账在 instrumentation 跑两轮（启动 + 60s，覆盖 owner 键尚未到期的窗口）
+- **僵尸回收 `reconcileZombieRuns()`**（`runtime/zombie-reconciler.ts`）：`running` 且 `ownerOf` 为空且超一个心跳窗口的 run → `failed` + `cancelled: process died`。只有线程**最新** run 被回收才把 thread 置 `error`（抢占时旧 owner 崩溃不覆盖新 run 的 running）；单条失败不阻断整体对账；`isDistributed()` 为 false 时整体跳过（进程内登记表无跨进程死亡语义）。启动对账在 instrumentation 跑两轮（启动 + 60s，覆盖 owner 键尚未到期的窗口）。回收成功后经 `releaseRunSlot` 归还该 run 的全局并发名额（kill -9 走不到 finally 释放，不还则名额随僵尸永久流失）
 
 **线程状态机：** `idle → running → idle（成功）/ error（失败）`
 
@@ -289,6 +289,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - **docker 后端**：`sleep infinity` 加固容器（`--cap-drop ALL` + `no-new-privileges` + memory/cpus/pids 限额 + 非 root 降权）；卷挂 `{threadDir}/user-data → /mnt/user-data`（不暴露宿主真实路径，内部反向映射）；引用计数 + 空闲回收 + LRU + 容器消失时 reprovision 重建。`docker-cli.ts` 用 `execFile` + 参数数组（**禁 shell 拼接防注入**）
 - **remote 后端**：**缺 host 或私钥时构造即抛错**（避免静默降级宿主直连）；per-thread SSH 连接池（ssh2，幂等复用 + 引用计数 + 空闲回收 + keepalive + 进程内信号量）；全部 IO 经 SSH 往返——readFile base64 往返保编码、writeFile 走 stdin 超 `DEERFLOW_REMOTE_MAX_WRITE_BYTES` 拒绝、listDir/glob/grep 远端执行并把远程路径还原为 `/mnt/user-data`。**并发上限按进程独立计**，多进程部署实际连接数 = 上限 × 进程数
 - **双层背压**：run 级 `RunConcurrencyGate`（`runtime/run-concurrency-gate.ts`，进程 FIFO 信号量 + 跨进程 `runs:count` 占位；接在 service 执行体消费 stream 之前 acquire，超限先 publish `task_progress{status:'queued'}`——对话仍可先思考，finally 释放）+ 容器级 `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（活跃容器上限，配合空闲回收与启动 reconcile 清孤儿）
+- **run 名额凭据**：跨进程占位落 per-run 槽键（`deerflow:sandbox:run:slot:{runId}`，`tryReserveRun(runId, maxRuns)` 原子 INCR 计数 + SET 槽键）；释放 = DEL 槽键成功才 DECR 计数（Lua 原子）——正常 finally 与僵尸回收共用这条路径，槽键一次性 DEL 保证计数恰好扣一次（两方并发也不会多扣），kill -9 丢失的名额由僵尸回收归还
 - **引用计数不变量**：refCount = 正在使用容器的 run/agent 层数，由 sandbox-middleware 的 beforeAgent retain(+1) / afterAgent markIdle(-1) 严格成对；`acquire` 幂等命中只 touch 不 incRef（避免 subagent/工具惰性 acquire 泄漏）；`deleteThread` 联动 `releaseByThreadId` 销毁容器
 - **跨进程协调**（docker-coordinator）：Redis 原子计数（Lua RESERVE/RELEASE）、thread→container 登记 Hash、`SET NX PX` 分布式锁；**Redis 不可用自动降级进程内 Map**
 - 监控：`sandbox/sandbox-monitor.ts` + `GET /api/sandbox/stats`（`DEERFLOW_SANDBOX_STATS_TOKEN` 门控，`runtime='nodejs'`）
@@ -389,7 +390,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 
 ### 14. 已知限制
 
-1. 跨进程全局 run 上限与进程内同源：Redis `runs:count` 以 `DEERFLOW_MAX_CONCURRENT_RUNS` 为全局闸门，多进程总并发 ≈ 该值（不是 × 实例数），扩容需同步调大；僵尸回收死亡窗口为 3 个心跳（45s），kill -9 后线程在该窗口内仍显示 running（下轮对账修正）
+1. 跨进程全局 run 上限与进程内同源：Redis `runs:count` 以 `DEERFLOW_MAX_CONCURRENT_RUNS` 为全局闸门，多进程总并发 ≈ 该值（不是 × 实例数），扩容需同步调大；僵尸回收死亡窗口为 3 个心跳（45s），kill -9 后线程在该窗口内仍显示 running（下轮对账修正），其占用的全局名额同轮归还（槽键释放）
 2. ThreadChannel buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧非关键帧（`start`/`error`/`end`/`human_interrupt` 关键帧永不丢弃）
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
 4. 单元测试覆盖建设中（vitest 已接入，覆盖中间件装配、防递归、guardrail 规则、记忆检索、checkpoint 行为约束、remote 沙箱、父历史剪枝等核心纯逻辑）

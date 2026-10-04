@@ -38,6 +38,12 @@ export interface ZombieReconcileDeps {
   runs: Pick<RunStore, 'listByStatus' | 'listByThread' | 'setStatus'>;
   threads: Pick<ThreadMetaStore, 'updateStatus'>;
   registry: Pick<RunRegistry, 'ownerOf' | 'isDistributed' | 'ready'>;
+  /**
+   * 归还被回收 run 的全局并发名额（跨进程槽键释放）：kill -9 的 run 走不到
+   * finally，计数留在 Redis 里，不归还则全局名额随僵尸永久流失。可选——
+   * 不传时只修状态不还名额。
+   */
+  releaseRunSlot?: (runId: string) => Promise<void>;
   /** 当前时间源：测试注入。 */
   now?: () => number;
   /** 判死最小年龄覆盖：测试注入极小值观察回收路径。 */
@@ -63,6 +69,13 @@ export async function reconcileZombieRuns(deps: ZombieReconcileDeps): Promise<{ 
         await deps.threads.updateStatus(run.thread_id, 'error', { user_id: null });
       }
       await deps.runs.setStatus(run.run_id, 'failed', ZOMBIE_ERROR);
+      // 名额归还在状态落库之后：先确保 run 已判死，再让名额可被新 run 占用。
+      // 释放本身幂等（槽键 DEL 一次即失效），失败只告警——名额可由下轮对账补还
+      try {
+        await deps.releaseRunSlot?.(run.run_id);
+      } catch (e) {
+        console.warn(`${LOG} release slot failed run_id=${run.run_id}:`, (e as Error)?.message);
+      }
       reaped += 1;
       console.info(`${LOG} reaped zombie run thread_id=${run.thread_id} run_id=${run.run_id}`);
     } catch (e) {

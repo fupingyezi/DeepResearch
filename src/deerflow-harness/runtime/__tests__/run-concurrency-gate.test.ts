@@ -5,12 +5,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * 立即抛出并离队——被取消的 run 不占队位不占名额。
  */
 
-const coord = vi.hoisted(() => ({ reserveResult: true }));
+const coord = vi.hoisted(
+  (): { reserveResult: boolean; reservedIds: string[]; releasedIds: string[] } => ({
+    reserveResult: true,
+    reservedIds: [],
+    releasedIds: [],
+  }),
+);
 
 vi.mock('../../sandbox/docker/docker-coordinator', () => ({
   getSandboxCoordinator: () => ({
-    tryReserveRun: async () => coord.reserveResult,
-    releaseRun: async () => {},
+    tryReserveRun: async (runId: string) => {
+      coord.reservedIds.push(runId);
+      return coord.reserveResult;
+    },
+    releaseRun: async (runId: string) => {
+      coord.releasedIds.push(runId);
+    },
   }),
 }));
 
@@ -23,6 +34,8 @@ const savedMaxRuns = process.env.DEERFLOW_MAX_CONCURRENT_RUNS;
 beforeEach(() => {
   process.env.DEERFLOW_MAX_CONCURRENT_RUNS = '1';
   coord.reserveResult = true;
+  coord.reservedIds = [];
+  coord.releasedIds = [];
 });
 
 afterEach(() => {
@@ -33,18 +46,21 @@ afterEach(() => {
 describe('RunConcurrencyGate', () => {
   it('名额内立即放行；释放后名额归还（后续 acquire 可再次放行）', async () => {
     const gate = getRunConcurrencyGate();
-    const release = await gate.acquire();
+    const release = await gate.acquire('run-1');
+    expect(coord.reservedIds).toEqual(['run-1']);
     release();
-    const release2 = await gate.acquire();
+    // runId 是占位凭据：跨进程槽键上「这条计数属于哪个 run」，释放必须对同一 runId
+    expect(coord.releasedIds).toEqual(['run-1']);
+    const release2 = await gate.acquire('run-2');
     release2();
   });
 
   it('名额满 → FIFO 排队，前一个释放后放行', async () => {
     const gate = getRunConcurrencyGate();
-    const release = await gate.acquire();
+    const release = await gate.acquire('run-1');
 
     let resolved = false;
-    const pending = gate.acquire().then((r) => {
+    const pending = gate.acquire('run-3').then((r) => {
       resolved = true;
       return r;
     });
@@ -58,10 +74,10 @@ describe('RunConcurrencyGate', () => {
 
   it('排队期间 signal 中止 → 以中止原因抛出并离队，不影响后续等待者', async () => {
     const gate = getRunConcurrencyGate();
-    const release = await gate.acquire();
+    const release = await gate.acquire('run-1');
 
     const controller = new AbortController();
-    const pending = gate.acquire(undefined, controller.signal);
+    const pending = gate.acquire('run-4', undefined, controller.signal);
     await delay(10);
     controller.abort(new Error('cancelled: stopped by user'));
 
@@ -69,7 +85,7 @@ describe('RunConcurrencyGate', () => {
 
     // 被中止者已离队：释放名额后新等待者正常放行（队列未被污染）
     release();
-    const r3 = await gate.acquire();
+    const r3 = await gate.acquire('run-5');
     r3();
   });
 
@@ -78,7 +94,9 @@ describe('RunConcurrencyGate', () => {
     const controller = new AbortController();
     controller.abort(new Error('cancelled: early'));
 
-    await expect(gate.acquire(undefined, controller.signal)).rejects.toThrow('cancelled: early');
+    await expect(gate.acquire('run-6', undefined, controller.signal)).rejects.toThrow(
+      'cancelled: early',
+    );
   });
 
   it('跨进程占位重试期间 signal 中止 → 立即抛出而非轮询到底', async () => {
@@ -86,7 +104,7 @@ describe('RunConcurrencyGate', () => {
     coord.reserveResult = false; // 占位永远失败：卡在重试循环里
 
     const controller = new AbortController();
-    const pending = gate.acquire(undefined, controller.signal);
+    const pending = gate.acquire('run-4', undefined, controller.signal);
     await delay(20);
     controller.abort(new Error('cancelled: drain'));
 
@@ -94,7 +112,7 @@ describe('RunConcurrencyGate', () => {
 
     // 中止后名额归还：占位恢复放行后，后续 acquire 不再排队
     coord.reserveResult = true;
-    const r = await gate.acquire();
+    const r = await gate.acquire('run-7');
     r();
   });
 });

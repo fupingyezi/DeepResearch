@@ -301,6 +301,15 @@ redis-cli -a "$REDIS_PASSWORD" --scan --pattern 'deerflow:run:owner:*' | head
 # 有键 = owner 还活着（可能在别的实例上跑着，别动它）；无键且 PG 仍 running = 对账没跑，重启任一新实例
 ```
 
+回收的同时会归还僵尸占用的全局并发名额（`deerflow:sandbox:runs:count` 与
+per-run 槽键）。多次 `kill -9` 后若发现新 run 一直排队（queued），核对：
+
+```bash
+redis-cli -a "$REDIS_PASSWORD" GET deerflow:sandbox:runs:count
+# 计数应 < DEERFLOW_MAX_CONCURRENT_RUNS；若接近上限而 PG 里没有对应数量的
+# running run，说明对账轮次还没跑或回收失败，等下一轮（60s）或重启任一新实例
+```
+
 ### 4. 扩缩容后的连接数核对
 
 ```bash

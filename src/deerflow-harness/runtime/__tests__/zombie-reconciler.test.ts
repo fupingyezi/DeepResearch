@@ -32,6 +32,7 @@ interface ReconcileOpts {
   ownerOf?: ZombieReconcileDeps['registry']['ownerOf'];
   running?: Run[];
   minAgeMs?: number;
+  releaseRunSlot?: ZombieReconcileDeps['releaseRunSlot'];
 }
 
 function makeDeps(opts: ReconcileOpts) {
@@ -48,6 +49,7 @@ function makeDeps(opts: ReconcileOpts) {
       ready: async () => undefined,
       ownerOf: opts.ownerOf ?? (async () => null),
     },
+    releaseRunSlot: opts.releaseRunSlot,
     runs: {
       listByStatus: async () => opts.running ?? [],
       listByThread: async (thread_id: string) =>
@@ -133,6 +135,40 @@ describe('reconcileZombieRuns', () => {
     expect(await reconcileZombieRuns(deps)).toEqual({ reaped: 1 });
     expect(state.runRows.get('r1')).toBeUndefined();
     expect(state.runRows.get('r2')?.status).toBe('failed');
+    warn.mockRestore();
+  });
+
+  it('回收成功后归还全局并发名额（releaseRunSlot 收到 runId）', async () => {
+    const released: string[] = [];
+    const { deps, state } = makeDeps({
+      running: running([
+        { run_id: 'r1', thread_id: 't1', createdAgo: 120_000 },
+        { run_id: 'r2', thread_id: 't2', createdAgo: 120_000 },
+      ]),
+      releaseRunSlot: async (runId) => {
+        released.push(runId);
+      },
+    });
+    state.newestOf.set('t1', ['r1']);
+    state.newestOf.set('t2', ['r2']);
+
+    expect(await reconcileZombieRuns(deps)).toEqual({ reaped: 2 });
+    expect(released).toEqual(['r1', 'r2']);
+  });
+
+  it('名额归还失败只告警，不阻断 run 状态修正', async () => {
+    const { deps, state } = makeDeps({
+      running: running([{ run_id: 'r1', thread_id: 't1', createdAgo: 120_000 }]),
+      releaseRunSlot: async () => {
+        throw new Error('redis down');
+      },
+    });
+    state.newestOf.set('t1', ['r1']);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await reconcileZombieRuns(deps)).toEqual({ reaped: 1 });
+    expect(state.runRows.get('r1')?.status).toBe('failed');
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 });

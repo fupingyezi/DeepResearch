@@ -46,8 +46,14 @@ class RunConcurrencyGate {
    * 获取一个 run 名额。若达上限则进入 FIFO 队列等待；每次等待前触发一次 onQueued。
    * signal 中止（排队期间被取消 / 停机）时抛出中止原因并离开队列——被取消的 run
    * 不应占着名额或队位。返回释放句柄，调用方必须在 finally 中调用以防名额泄漏。
+   * runId 是跨进程占位的凭据：名额落在 per-run 槽键上，owner 崩溃后僵尸回收
+   * 才能凭它把名额归还全局计数。
    */
-  async acquire(onQueued?: () => void, signal?: AbortSignal): Promise<RunReleaseHandle> {
+  async acquire(
+    runId: string,
+    onQueued?: () => void,
+    signal?: AbortSignal,
+  ): Promise<RunReleaseHandle> {
     throwIfAborted(signal);
     const maxRuns = getMaxConcurrentRuns();
     let queuedNotified = false;
@@ -67,7 +73,7 @@ class RunConcurrencyGate {
     // 全局上限按「本进程上限 × 进程数」不可知，故用本进程 maxRuns 作为每进程配额的
     // 上界近似；跨进程 runs:count 以相同 maxRuns 作为全局闸门（部署时按需调大）。
     try {
-      while (!(await coordinator.tryReserveRun(maxRuns))) {
+      while (!(await coordinator.tryReserveRun(runId, maxRuns))) {
         throwIfAborted(signal);
         if (!queuedNotified) {
           queuedNotified = true;
@@ -88,7 +94,7 @@ class RunConcurrencyGate {
       if (released) return;
       released = true;
       this.active = Math.max(0, this.active - 1);
-      void coordinator.releaseRun();
+      void coordinator.releaseRun(runId);
       this.dequeue();
     };
   }

@@ -30,6 +30,7 @@ import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
 import { getRunConcurrencyGate } from './run-concurrency-gate';
 import { getSandboxProvider } from '../sandbox';
+import { getSandboxCoordinator } from '../sandbox/docker/docker-coordinator';
 import { getDistLock, type DistLockHandle } from './locks/dist-lock';
 import type { RunRegistry, RunEventBus } from './contracts';
 import { InMemoryRunRegistry } from './run-registry/in-memory';
@@ -458,19 +459,23 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         // 仅增字段不破坏白名单），对话可先思考，执行体延迟到放行后启动。
         // 传入 controller.signal：排队期间被取消（停止 / 抢占 / 停机）直接抛出，
         // 不必等放行——被取消的 run 不应占着队列名额
-        releaseRunSlot = await getRunConcurrencyGate().acquire(() => {
-          // 闸门回调是同步的，publish 用 void 触发：进程内实现的发布体同步执行，
-          // 「排队中」帧保证落在后续任何事件之前。
-          void runEventBus.publish(
-            thread_id,
-            run_id,
-            createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, threadMeta.assistant_id, {
-              taskId: run_id,
-              status: 'queued',
-              description: 'Run queued: concurrency limit reached, waiting for a free slot.',
-            }),
-          );
-        }, controller.signal);
+        releaseRunSlot = await getRunConcurrencyGate().acquire(
+          run_id,
+          () => {
+            // 闸门回调是同步的，publish 用 void 触发：进程内实现的发布体同步执行，
+            // 「排队中」帧保证落在后续任何事件之前。
+            void runEventBus.publish(
+              thread_id,
+              run_id,
+              createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, threadMeta.assistant_id, {
+                taskId: run_id,
+                status: 'queued',
+                description: 'Run queued: concurrency limit reached, waiting for a free slot.',
+              }),
+            );
+          },
+          controller.signal,
+        );
 
         // 排队期间就被取消（对话在等锁时被删）：不必再启动
         if (controller.signal.aborted) {
@@ -732,6 +737,12 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         draining,
       };
     },
-    reconcileZombieRuns: () => reconcileZombieRuns({ runs, threads, registry: runRegistry }),
+    reconcileZombieRuns: () =>
+      reconcileZombieRuns({
+        runs,
+        threads,
+        registry: runRegistry,
+        releaseRunSlot: (runId) => getSandboxCoordinator().releaseRun(runId),
+      }),
   };
 }
