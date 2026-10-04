@@ -90,9 +90,12 @@ export async function* guardedStream(
       pending = it.next();
     }
   } finally {
-    // 收束后释放订阅：跨进程订阅挂起在 XREAD BLOCK 上，不显式 return 会泄漏连接
+    // 收束后释放订阅：跨进程订阅挂起在 XREAD BLOCK 上，不显式 return 会泄漏连接。
+    // return 是「请求」而非中断——订阅实现挂在内部 await 上时要等它的下个
+    // yield 边界才处理，可能永远等不到；超时兜底，收尾帧不得被它卡死
     pending.catch(() => undefined);
-    await it.return?.().catch(() => undefined);
+    const release = it.return?.().catch(() => undefined) ?? Promise.resolve();
+    await Promise.race([release, delay(1_000).then(() => undefined)]);
   }
 
   if (!sawEnd) {

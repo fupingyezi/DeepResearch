@@ -103,8 +103,26 @@ export class RedisEventBus implements RunEventBus {
     // 订阅连接懒建立（迭代器首次 next 时）——调用方拿到的只是一层壳，
     // 不阻塞 submit 路径；连接失败在迭代内降级
     return {
-      [Symbol.asyncIterator]: (): AsyncIterator<StampedClientAgentEvent> =>
-        this.startSubscription(threadId, runId, fromEventId),
+      [Symbol.asyncIterator]: (): AsyncIterator<StampedClientAgentEvent> => {
+        // 手动迭代器而非直接返回裸生成器：return() 先置 abort 信号再等内部
+        // 生成器收束。async 生成器的 return 是「请求」不是中断——它要等生成
+        // 器走到下个 yield 边界才生效，挂在 XREAD BLOCK 上时永远等不到，
+        // 订阅者无法及时释放连接
+        const abort = new AbortController();
+        const gen = this.startSubscription(threadId, runId, fromEventId, abort.signal);
+        return {
+          next: () => gen.next(),
+          return: async (): Promise<IteratorResult<StampedClientAgentEvent>> => {
+            abort.abort();
+            await gen.return(undefined).catch(() => undefined);
+            return { value: undefined, done: true };
+          },
+          throw: async (error?: unknown): Promise<IteratorResult<StampedClientAgentEvent>> => {
+            abort.abort();
+            return gen.throw(error);
+          },
+        };
+      },
     };
   }
 
@@ -116,7 +134,8 @@ export class RedisEventBus implements RunEventBus {
   private async *startSubscription(
     threadId: string,
     runId: string,
-    fromEventId?: string,
+    fromEventId: string | undefined,
+    signal: AbortSignal,
   ): AsyncGenerator<StampedClientAgentEvent> {
     if (this.degraded) {
       yield* this.fallback.subscribe(threadId, runId, fromEventId);
@@ -149,6 +168,12 @@ export class RedisEventBus implements RunEventBus {
       messages: Array<{ id: string; message: Record<string, string> }>;
     };
 
+    // abort 信号转 promise，订阅生命周期内只建一次（每轮竞速复用，不逐轮挂监听）
+    const aborted = new Promise<{ aborted: true }>((resolve) => {
+      if (signal.aborted) resolve({ aborted: true });
+      else signal.addEventListener('abort', () => resolve({ aborted: true }), { once: true });
+    });
+
     try {
       // 本订阅是否见过事件：见过后流消失（TTL 回收）才判死；从未见过可能是
       // run 尚未产出首条事件（stream 随首个 XADD 才创建），不能因超时而终止
@@ -162,7 +187,14 @@ export class RedisEventBus implements RunEventBus {
           );
           // 订阅被放弃（return()）时挂起中的 XREAD 以拒绝告终且无人消费，先吞掉
           (pending as unknown as Promise<unknown>).catch(() => undefined);
-          entries = (await pending) as XReadStream[] | null;
+          // 与 abort 竞速：return() 的请求要等 yield 边界才处理，不能指望它打断
+          // 内部 await——信号置位后由本轮竞速收束，连接随 finally quit 释放
+          const outcome = await Promise.race([
+            pending.then((value) => ({ aborted: false as const, value })),
+            aborted.then(() => ({ aborted: true as const, value: null as XReadStream[] | null })),
+          ]);
+          if (outcome.aborted) return;
+          entries = outcome.value as XReadStream[] | null;
         } catch (error) {
           // 连接中断 / 命令失败：退避后以同一游标重发（XREAD 幂等，不丢不重）
           console.warn(

@@ -302,6 +302,27 @@ describe('RedisEventBus（假客户端）', () => {
     expect(chunkTexts(stamped)).toEqual(['first']);
   });
 
+  it('订阅挂在 XREAD BLOCK 上时 return() 仍立即收束并释放订阅连接', async () => {
+    const fake = new FakeRedisClient();
+    const bus = new RedisEventBus({ client: asClient(fake), blockMs: 5000 });
+    await bus.publish('t', 'r', chunk('a'));
+
+    const it = bus.subscribe('t', 'r')[Symbol.asyncIterator]();
+    expect((await it.next()).done).toBe(false); // 回放 'a'，下一轮 next 挂进 BLOCK
+    const pending = it.next();
+
+    // 无新事件时 BLOCK 永不返回：return 请求若等 yield 边界就会永远挂起，
+    // 必须在竞速窗口内收束
+    const release = await Promise.race([
+      it.return!().then((r) => ({ kind: 'resolved' as const, done: r.done })),
+      delay(800).then(() => ({ kind: 'hung' as const })),
+    ]);
+    expect(release).toEqual({ kind: 'resolved', done: true });
+    // 收束必须连带释放订阅连接（duplicate 出的实例 quit）
+    expect(fake.state.quitCount).toBe(1);
+    await pending; // 被放弃的 next 以 done 收束，不留悬挂
+  });
+
   it('xRead 失败：退避后以同一游标重发，不丢不重', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fake = new FakeRedisClient();

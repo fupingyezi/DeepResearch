@@ -160,6 +160,27 @@ describe('run-stream-guard', () => {
     expect((out[1].event.payload as { errorCode: string }).errorCode).toBe('RUN_OWNER_LOST');
   });
 
+  it('订阅 return() 永不 settle → 守卫仍以 OWNER_LOST 收束（收尾不依赖订阅释放）', async () => {
+    // 挂在内部 await 上的订阅实现：return 请求要等 yield 边界才处理，可能永不
+    // settle——守卫的收尾帧不能因此卡死
+    const sub = {
+      [Symbol.asyncIterator]: (): AsyncIterator<StampedClientAgentEvent> => ({
+        next: () => new Promise(() => {}), // 永不产出、永不终止
+        return: () => new Promise(() => {}), // 永不 settle
+      }),
+    };
+
+    const gen = guardedStream(sub, makeRuns('running'), RUN_ID, {
+      pollMs: 10,
+      ownerDeadAfterMs: 50,
+    });
+
+    const out = await collectAll(gen);
+    expect(out).toHaveLength(2);
+    expect((out[0].event.payload as { errorCode: string }).errorCode).toBe('RUN_OWNER_LOST');
+    expect(out[1].event.eventType).toBe(ClientAgentEventType.END);
+  });
+
   it('run running 且事件（心跳）持续到达 → 观察窗口内不判死', async () => {
     const sub = makeSubscription();
     const gen = guardedStream(sub.iterable, makeRuns('running'), RUN_ID, {
