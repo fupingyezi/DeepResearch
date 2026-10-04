@@ -5,6 +5,7 @@ import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
+  type StampedClientAgentEvent,
 } from '../sse/client-event';
 
 /**
@@ -25,7 +26,11 @@ export interface EventBusContractImpl {
   name: string;
   make: () => RunEventBus;
   distributed: boolean;
+  /** 每用例的 key 生成器：Redis stream 是追加结构、键跨用例残留，跨进程实现需按用例隔离。 */
+  makeKeys?: () => { threadId: string; runId: string };
 }
+
+const defaultBusKeys = () => ({ threadId: 't', runId: 'r' });
 
 const info = (runId: string, threadId: string) => ({
   runId,
@@ -39,12 +44,12 @@ const ev = (type: ClientAgentEventType, payload: object): ClientAgentEvent =>
 
 /** 读流直到结束（END 后 channel close 终止迭代），或到达 n 条提前退出。 */
 async function collect(
-  stream: AsyncIterable<ClientAgentEvent>,
+  stream: AsyncIterable<StampedClientAgentEvent>,
   n: number,
 ): Promise<ClientAgentEvent[]> {
   const out: ClientAgentEvent[] = [];
-  for await (const e of stream) {
-    out.push(e);
+  for await (const stamped of stream) {
+    out.push(stamped.event);
     if (out.length >= n) return out;
   }
   return out;
@@ -111,12 +116,13 @@ export function describeRunRegistryContract(impl: RegistryContractImpl): void {
 export function describeRunEventBusContract(impl: EventBusContractImpl): void {
   describe(`RunEventBus 契约一致性：${impl.name}`, () => {
     it('晚订阅回放完整历史（发布顺序），END 后流终止', async () => {
+      const { threadId, runId } = (impl.makeKeys ?? defaultBusKeys)();
       const bus = impl.make();
-      await bus.publish('t', 'r', ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
-      await bus.publish('t', 'r', ev(ClientAgentEventType.STREAM_CHUNK, { text: 'b' }));
-      await bus.publish('t', 'r', ev(ClientAgentEventType.END, {}));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'b' }));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.END, {}));
 
-      const events = await collect(bus.subscribe('t', 'r'), 10);
+      const events = await collect(bus.subscribe(threadId, runId), 10);
       expect(events.map((e) => e.eventType)).toEqual([
         ClientAgentEventType.STREAM_CHUNK,
         ClientAgentEventType.STREAM_CHUNK,
@@ -125,13 +131,14 @@ export function describeRunEventBusContract(impl: EventBusContractImpl): void {
     });
 
     it('订阅后的事件实时到达且顺序正确，END 终止迭代', async () => {
+      const { threadId, runId } = (impl.makeKeys ?? defaultBusKeys)();
       const bus = impl.make();
-      const stream = bus.subscribe('t', 'r');
+      const stream = bus.subscribe(threadId, runId);
       const reader = (async () => collect(stream, 3))();
 
-      await bus.publish('t', 'r', ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
-      await bus.publish('t', 'r', ev(ClientAgentEventType.STREAM_CHUNK, { text: 'b' }));
-      await bus.publish('t', 'r', ev(ClientAgentEventType.END, {}));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'b' }));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.END, {}));
 
       const events = await reader;
       expect(events.map((e) => e.eventType)).toEqual([
@@ -142,15 +149,20 @@ export function describeRunEventBusContract(impl: EventBusContractImpl): void {
     });
 
     it('release：未知 run 与重复 release 都不抛错', async () => {
+      const { threadId, runId } = (impl.makeKeys ?? defaultBusKeys)();
       const bus = impl.make();
-      await bus.publish('t', 'r', ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'a' }));
       await expect(bus.release('nope', 'nope')).resolves.toBeUndefined();
-      await expect(bus.release('t', 'r')).resolves.toBeUndefined();
-      await expect(bus.release('t', 'r')).resolves.toBeUndefined();
+      await expect(bus.release(threadId, runId)).resolves.toBeUndefined();
+      await expect(bus.release(threadId, runId)).resolves.toBeUndefined();
     });
 
-    it('isDistributed 反映实现', () => {
-      expect(impl.make().isDistributed()).toBe(impl.distributed);
+    it('isDistributed 反映实现', async () => {
+      const { threadId, runId } = (impl.makeKeys ?? defaultBusKeys)();
+      const bus = impl.make();
+      // 先做一次发布：跨进程实现的连接是懒建立的，未连接前 isDistributed 为 false
+      await bus.publish(threadId, runId, ev(ClientAgentEventType.STREAM_CHUNK, { text: 'x' }));
+      expect(bus.isDistributed()).toBe(impl.distributed);
     });
   });
 }

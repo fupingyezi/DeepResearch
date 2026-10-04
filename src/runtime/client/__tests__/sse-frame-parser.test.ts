@@ -16,8 +16,8 @@ describe('createSseFrameParser', () => {
     const parser = createSseFrameParser();
     const events = parser.feed(frame(chunkEvent('a')) + frame(chunkEvent('b')));
     expect(events).toHaveLength(2);
-    expect(events[0].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
-    expect(events[1].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[0].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[1].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
   });
 
   it('帧跨 chunk 边界（data: 前缀被截断）分两次 feed 正确拼出', () => {
@@ -28,7 +28,7 @@ describe('createSseFrameParser', () => {
     expect(parser.feed(full.slice(0, cut))).toEqual([]);
     const events = parser.feed(full.slice(cut));
     expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[0].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
   });
 
   it('非 data: 行（event:/id:/空行）被忽略', () => {
@@ -37,7 +37,7 @@ describe('createSseFrameParser', () => {
       `event: message\nid: 1\n\n` + `retry: 3000\n\n` + frame(chunkEvent('a')),
     );
     expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[0].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
   });
 
   it('非法 JSON 帧：跳过且不阻塞后续帧', () => {
@@ -45,7 +45,7 @@ describe('createSseFrameParser', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const events = parser.feed(`data: {not-json}\n\n` + frame(chunkEvent('a')));
     expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[0].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
     expect(errorSpy).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
   });
@@ -57,8 +57,17 @@ describe('createSseFrameParser', () => {
     parser.feed(full.slice(0, full.length - 2));
     const events = parser.flush();
     expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(events[0].event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
     expect(parser.flush()).toEqual([]);
+  });
+
+  it('id: 行解析为 eventId（续读游标）；无 id 行则 eventId 为 undefined', () => {
+    const parser = createSseFrameParser();
+    const withId = `id: 3-1\ndata: ${JSON.stringify(chunkEvent('a'))}\n\n`;
+    const [first, second] = parser.feed(withId + frame(chunkEvent('b')));
+    expect(first.eventId).toBe('3-1');
+    expect(first.event.eventType).toBe(ClientAgentEventType.STREAM_CHUNK);
+    expect(second.eventId).toBeUndefined();
   });
 
   it('空帧与空 data 行不产出事件', () => {

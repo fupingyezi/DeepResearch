@@ -11,7 +11,7 @@
  * 模式——降级必须可见，不能静默变成单进程语义。
  */
 
-import type { ClientAgentEvent } from './sse/client-event';
+import type { ClientAgentEvent, StampedClientAgentEvent } from './sse/client-event';
 
 export interface RunOwnerInfo {
   runId: string;
@@ -41,9 +41,14 @@ export interface RunEventBus {
   publish(threadId: string, runId: string, event: ClientAgentEvent): Promise<void>;
   /**
    * 订阅 run 事件流：晚订阅必须能拿到历史（进程内实现回放 ThreadChannel buffer）。
-   * fromEventId 断点续读依赖实现内的事件 ID，进程内实现忽略。
+   * 每个事件带实现生成的单调游标 eventId；fromEventId 断点续读——只交付游标
+   * 严格晚于 fromEventId 的事件（客户端重连带回最后收到的 eventId 即不丢不重）。
    */
-  subscribe(threadId: string, runId: string, fromEventId?: string): AsyncIterable<ClientAgentEvent>;
+  subscribe(
+    threadId: string,
+    runId: string,
+    fromEventId?: string,
+  ): AsyncIterable<StampedClientAgentEvent>;
   /** run 终态且订阅全部结束后释放资源（进程内实现 = StreamBridge.drop）。 */
   release(threadId: string, runId: string): Promise<void>;
   isDistributed(): boolean;

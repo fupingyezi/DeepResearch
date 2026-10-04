@@ -16,10 +16,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 import {
   ClientAgentEventType,
-  consumeTitleUpdate,
   createClientAgentEvent,
   type ClientAgentEvent,
   type ModelConfig,
+  type SseStreamEvent,
   type ThreadImageRef,
   type ThreadService,
 } from '@/deerflow-harness';
@@ -461,7 +461,7 @@ export class ChatService {
    * abort 的 break 触发 generator.return() 才执行 finally 落库 ——
    * 改成「流结束后路由层 await 落库」会在 abort 路径丢持久化。
    */
-  async *streamEvents(prepared: PreparedChat, runId: string): AsyncGenerator<ClientAgentEvent> {
+  async *streamEvents(prepared: PreparedChat, runId: string): AsyncGenerator<SseStreamEvent> {
     const startPayload: Record<string, unknown> = {
       run_id: runId,
       thread_id: prepared.threadId,
@@ -476,7 +476,10 @@ export class ChatService {
     if (typeof prepared.assistantMessageId === 'string')
       startPayload.assistantMessageId = prepared.assistantMessageId;
 
-    yield createClientAgentEvent(ClientAgentEventType.START, 'lead', startPayload as never);
+    // START 由本层合成、不在事件总线里：无 eventId（无 id 行），客户端游标只随总线事件前进
+    yield {
+      event: createClientAgentEvent(ClientAgentEventType.START, 'lead', startPayload as never),
+    };
 
     // resume 续写时用既有 parts seed，使续跑的 TOOL_RESULT 能命中中断前的 tool_call。
     const collector =
@@ -493,16 +496,10 @@ export class ChatService {
     });
 
     try {
-      for await (const ev of subscription) {
-        if (collector) collector.onEvent(ev);
-        if (ev.eventType === ClientAgentEventType.END) {
-          const titleUpdate = consumeTitleUpdate(prepared.threadId);
-          if (titleUpdate) {
-            yield createClientAgentEvent(ClientAgentEventType.END, ev.agentId, { titleUpdate });
-            continue;
-          }
-        }
-        yield ev;
+      for await (const stamped of subscription) {
+        // titleUpdate 已由 service 折进总线 END 载荷，这里原样转发即可
+        if (collector) collector.onEvent(stamped.event);
+        yield { eventId: stamped.eventId, event: stamped.event };
       }
     } finally {
       if (collector && typeof prepared.assistantMessageId === 'string') {

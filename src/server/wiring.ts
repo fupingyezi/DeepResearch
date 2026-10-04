@@ -11,6 +11,7 @@ import {
   InMemoryRunEventBus,
   InMemoryRunRegistry,
   PgRunStore,
+  RedisEventBus,
   RedisRunRegistry,
   PgThreadMetaStore,
   buildThreadConfig,
@@ -282,8 +283,10 @@ async function build(): Promise<ThreadService> {
   };
 
   // REDIS_URL 配置时用跨进程登记表（连接失败自降级进程内、只告警一次），
-  // 未配置直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点
+  // 未配置直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点。
+  // 事件总线同口径：Redis Stream 回放 / 断点续读，否则进程内 buffer 回放。
   const registry = process.env.REDIS_URL ? new RedisRunRegistry() : new InMemoryRunRegistry();
+  const eventBus = process.env.REDIS_URL ? new RedisEventBus() : new InMemoryRunEventBus();
 
   return createThreadService({
     client,
@@ -292,7 +295,7 @@ async function build(): Promise<ThreadService> {
     runs: new PgRunStore(),
     createClientForModel,
     registry,
-    eventBus: new InMemoryRunEventBus(),
+    eventBus,
   });
 }
 

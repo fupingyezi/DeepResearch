@@ -1,19 +1,22 @@
 /**
  * createAgentEventStream
  *
- * 前端事件流的统一接收工厂函数：fetch SSE → 分帧 → yield ClientAgentEvent。
+ * 前端事件流的统一接收工厂函数：fetch SSE → 分帧 → yield SseStreamEvent
+ * （事件 + 可选续读游标 eventId）。
  *
  *
  * 错误统一化：
  * - HTTP 非 2xx → yield 一个 `ClientAgentEventType.ERROR` 后 return
  * - fetch 抛错 / AbortSignal 触发 → yield 一个 `ERROR` 后 return（abort 时不视为异常）
  * - JSON 解析失败的单帧由 sse-frame-parser 跳过，不影响整体流
+ * 客户端自产的错误帧无 eventId——它们不来自事件总线，不推进续读游标。
  */
 
 import {
   ClientAgentEventType,
   type ClientAgentEvent,
-  type ClientAgentEventStream,
+  type SseStreamEvent,
+  type SseStreamEvents,
 } from '../protocol/client-event';
 import { createSseFrameParser } from './sse-frame-parser';
 
@@ -34,12 +37,14 @@ function makeErrorEvent(
   errorCode: string,
   errorMessage: string,
   recoverable = false,
-): ClientAgentEvent {
+): SseStreamEvent {
   return {
-    eventType: ClientAgentEventType.ERROR,
-    timestamp: Date.now(),
-    agentId: 'client',
-    payload: { errorCode, errorMessage, recoverable },
+    event: {
+      eventType: ClientAgentEventType.ERROR,
+      timestamp: Date.now(),
+      agentId: 'client',
+      payload: { errorCode, errorMessage, recoverable },
+    } as ClientAgentEvent,
   };
 }
 
@@ -49,16 +54,14 @@ function makeErrorEvent(
  * @example
  * ```ts
  * const stream = createAgentEventStream({ endpoint: "/api/v3/chat/${threadId}", body: { input } });
- * for await (const event of stream) {
- *   if (event.eventType === ClientAgentEventType.STREAM_CHUNK) {
- *     console.log(event.payload.text);
+ * for await (const frame of stream) {
+ *   if (frame.event.eventType === ClientAgentEventType.STREAM_CHUNK) {
+ *     console.log(frame.event.payload.text);
  *   }
  * }
  * ```
  */
-export async function* createAgentEventStream(
-  opts: AgentEventStreamOptions,
-): ClientAgentEventStream {
+export async function* createAgentEventStream(opts: AgentEventStreamOptions): SseStreamEvents {
   const { endpoint, body, signal, headers, method = 'POST' } = opts;
 
   let response: Response;

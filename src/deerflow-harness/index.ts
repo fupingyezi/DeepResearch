@@ -210,6 +210,8 @@ export {
   ClientAgentEventType,
   type ClientAgentEvent,
   type ClientAgentEventStream,
+  type SseStreamEvent,
+  type StampedClientAgentEvent,
 } from './runtime/sse';
 
 // Thread 系统（runtime + persistence）
@@ -234,6 +236,7 @@ export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/contracts
 export { InMemoryRunRegistry } from './runtime/run-registry/in-memory';
 export { RedisRunRegistry } from './runtime/run-registry/redis';
 export { InMemoryRunEventBus } from './runtime/event-bus/in-memory';
+export { RedisEventBus } from './runtime/event-bus/redis';
 
 // runtime/locks（互斥锁：进程内 / Redis 双实现）
 export {

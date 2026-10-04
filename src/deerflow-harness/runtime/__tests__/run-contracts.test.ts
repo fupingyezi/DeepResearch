@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { InMemoryRunRegistry } from '../run-registry/in-memory';
 import { InMemoryRunEventBus } from '../event-bus/in-memory';
-import { StreamBridge } from '../stream-bridge';
 import { describeRunRegistryContract, describeRunEventBusContract } from './contract-cases';
 
 // 进程内实现的契约一致性（跨进程实现接入后在实现清单追加一行即可复用同一组用例）
@@ -14,7 +13,7 @@ describeRunRegistryContract({
 
 describeRunEventBusContract({
   name: 'InMemoryRunEventBus',
-  make: () => new InMemoryRunEventBus(new StreamBridge()),
+  make: () => new InMemoryRunEventBus(),
   distributed: false,
 });
 

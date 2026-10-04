@@ -11,6 +11,8 @@
  * - EventBus 用 `useRef` 持有单例，Provider 生命周期内引用稳定
  * - 泵化：每个 session 一个泵（fetch + 分帧 + emit），多会话互不干扰；
  *   同 session 重跑先 abort 旧泵（supersede，对齐后端抢占语义）
+ * - 断点续读：连接中断（未收到 END 且非用户取消）时凭最后收到的 eventId
+ *   重连 stream 路由，START 不重、已收事件不重、END 至多一次
  * - 泵在 emit 前给事件贴 sessionId / streamId 两个分拣字段
  *   （RoutedClientAgentEvent，前端本地类型，不进线协议）
  * - store 写入者 SessionStreamSink 是 EventBus 的一等通配订阅者（attachSinkToBus
@@ -21,6 +23,7 @@
 import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { ClientAgentEventType, type SseStreamEvent } from '../protocol/client-event';
 import { EventBus, createAgentEventStream, type RoutedClientAgentEvent } from '../client';
 import {
   attachSinkToBus,
@@ -29,6 +32,34 @@ import {
   startSessionSink,
 } from '@/utils/chat/agent-event-sink';
 import { buildChatRequestBody, type RunOptions } from '@/utils/chat/chat-request-body';
+
+/** 重连最大尝试次数：全部失败后把最后一次失败帧外发（行为与无重连时一致）。 */
+const RECONNECT_MAX_ATTEMPTS = 3;
+/** 重连退避基数（ms）：第 n 次重试前等 n×基数。 */
+const RECONNECT_BACKOFF_MS = 1000;
+
+/** 可中断的退避等待：用户点停止时立即结束等待（abort 信号触发 resolve 而非 reject）。 */
+const delayAbortable = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+/** 客户端自产的失败帧（fetch 失败 / HTTP 错误 / 读中断）的判定：errorCode 前缀。 */
+const isClientFailureFrame = (frame: SseStreamEvent): boolean =>
+  frame.event.eventType === ClientAgentEventType.ERROR &&
+  frame.event.payload.errorCode.startsWith('AGENT_STREAM_');
 
 export interface AgentEventContextValue {
   /** 事件总线，用于订阅 */
@@ -101,18 +132,68 @@ export function AgentEventProvider({ children }: AgentEventProviderProps) {
     setRunningSessionIds((prev) => new Set(prev).add(sessionId));
 
     try {
+      // 断点续读状态：eventId 游标随带 id 的帧前进；START 帧给出重连路由所需的
+      // threadId / runId；sawEnd 标记流已收束（正常结束不再重连）
+      let lastEventId: string | null = null;
+      let sawEnd = false;
+      let streamThreadId: string | null = null;
+      let streamRunId: string | null = null;
+
+      const emitFrame = (frame: SseStreamEvent): void => {
+        if (frame.eventId) lastEventId = frame.eventId;
+        if (frame.event.eventType === ClientAgentEventType.START) {
+          streamThreadId = frame.event.payload.thread_id ?? frame.event.payload.sessionId ?? null;
+          streamRunId = frame.event.payload.run_id ?? null;
+        }
+        if (frame.event.eventType === ClientAgentEventType.END) sawEnd = true;
+        busRef.current?.emit({
+          ...frame.event,
+          sessionId,
+          streamId,
+        } satisfies RoutedClientAgentEvent);
+      };
+
       const stream = createAgentEventStream({
         endpoint: '/api/v3/chat',
         method: 'POST',
         body: buildChatRequestBody({ ...opts, sessionId, isNewSession }),
         signal: controller.signal,
       });
-      for await (const event of stream) {
-        busRef.current?.emit({
-          ...event,
-          sessionId,
-          streamId,
-        } satisfies RoutedClientAgentEvent);
+      for await (const frame of stream) emitFrame(frame);
+
+      // 重连：连接中断（未收到 END 且非用户取消）时凭 last-event-id 续读——
+      // 服务端从游标之后重放，START 不重、已收事件不重、END 至多一次。
+      // 重连失败帧不外发（避免把瞬时网络抖动当成 run 失败刷进气泡），
+      // 全部尝试失败才把最后一次失败帧外发，UI 与无重连时一致。
+      let lastFailure: SseStreamEvent | null = null;
+      for (
+        let attempt = 0;
+        !sawEnd &&
+        !controller.signal.aborted &&
+        streamThreadId &&
+        streamRunId &&
+        attempt < RECONNECT_MAX_ATTEMPTS;
+        attempt++
+      ) {
+        if (attempt > 0) await delayAbortable(attempt * RECONNECT_BACKOFF_MS, controller.signal);
+        if (controller.signal.aborted) break;
+        const reconnect = createAgentEventStream({
+          endpoint: `/api/threads/${streamThreadId}/runs/${streamRunId}/stream${
+            lastEventId ? `?last-event-id=${encodeURIComponent(lastEventId)}` : ''
+          }`,
+          method: 'GET',
+          signal: controller.signal,
+        });
+        for await (const frame of reconnect) {
+          if (isClientFailureFrame(frame)) {
+            lastFailure = frame;
+            break;
+          }
+          emitFrame(frame);
+        }
+      }
+      if (lastFailure && !sawEnd && !controller.signal.aborted) {
+        emitFrame(lastFailure);
       }
     } finally {
       // 仅在当前 controller 仍是最新时清理泵表，避免覆盖后续 run 的注册

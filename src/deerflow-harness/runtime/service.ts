@@ -6,7 +6,7 @@
  * 关键不变量：
  * - submitRun 立即返回 run_id，执行体 fire-and-forget
  * - 执行体 try/finally 兜底 publish END，并收敛 status（succeeded/failed → idle/error）
- * - 事件载荷直接复用 ClientAgentEvent，subscribe 返回 AsyncIterable<ClientAgentEvent>
+ * - 事件载荷复用 ClientAgentEvent，subscribe 返回带续读游标的 AsyncIterable<StampedClientAgentEvent>
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -17,7 +17,9 @@ import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
+  type StampedClientAgentEvent,
 } from './sse/client-event';
+import { consumeTitleUpdate } from '../agents/middlewares/title-middleware/title-bus';
 
 import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
 import type { RunStore } from '../persistence/runs';
@@ -50,6 +52,13 @@ const RUN_CANCELLED_ERROR = 'cancelled: thread deleted';
 const RUN_CANCELLED_BY_USER = 'cancelled: stopped by user';
 /** 同一 thread 只允许一个 run：新 run 抢占上一个未结束的（两个 run 并发写同一份 checkpoint 会交错）。 */
 const RUN_CANCELLED_SUPERSEDED = 'cancelled: superseded by a new run';
+
+/**
+ * run 终态后延迟释放事件通道的宽限：覆盖「刷新页面 / 网络抖动后重连订阅」的
+ * 时间跨度。宽限内晚订阅仍可回放；宽限后内存实现丢 buffer（channel 泄漏修复），
+ * Redis 实现由 stream 的 24h TTL 兜底续读。
+ */
+const EVENT_RELEASE_GRACE_MS = 5 * 60_000;
 
 /**
  * 等 registry 里该 thread 的在跑 run 清空，最多 ms 毫秒。
@@ -128,6 +137,8 @@ export interface SubmitRunInput {
 export interface SubscribeInput {
   thread_id: string;
   run_id: string;
+  /** 断点续读游标（客户端重连带回最后收到的 eventId）；缺省全量回放。 */
+  fromEventId?: string;
 }
 
 export interface ResumeRunInput {
@@ -157,7 +168,7 @@ export interface ThreadService {
    */
   cancelRun(input: CancelRunInput): Promise<{ cancelled: number }>;
   submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
-  subscribe(input: SubscribeInput): AsyncIterable<ClientAgentEvent>;
+  subscribe(input: SubscribeInput): AsyncIterable<StampedClientAgentEvent>;
   getCheckpoint(input: GetCheckpointInput): Promise<any>;
   /**
    * 续跑被 interrupt 暂停的 thread：以用户决策 decision 作为 Command(resume) 输入，
@@ -435,11 +446,24 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         if (releaseRunSlot) releaseRunSlot();
         activeRuns.delete(run_id);
         await runRegistry.unregister(run_id);
+        // autoTitle 结果折进 END 载荷：跨进程部署下消费端可能不在 owner 进程，
+        // 拿不到进程内 title-bus，标题更新必须随事件流本身走
+        const titleUpdate = consumeTitleUpdate(thread_id);
         await runEventBus.publish(
           thread_id,
           run_id,
-          createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
+          createClientAgentEvent(
+            ClientAgentEventType.END,
+            threadMeta.assistant_id,
+            titleUpdate ? { titleUpdate } : ({} as never),
+          ),
         );
+        // 延迟释放事件通道（宽限后）：内存实现丢弃 buffer 回收内存，Redis 实现
+        // 依赖 stream TTL。unref 不阻止进程退出，测试环境不产生悬挂 timer。
+        const releaseTimer = setTimeout(() => {
+          void runEventBus.release(thread_id, run_id);
+        }, EVENT_RELEASE_GRACE_MS);
+        releaseTimer.unref?.();
       }
     })();
 
@@ -570,8 +594,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       });
     },
 
-    subscribe({ thread_id, run_id }) {
-      return runEventBus.subscribe(thread_id, run_id);
+    subscribe({ thread_id, run_id, fromEventId }) {
+      return runEventBus.subscribe(thread_id, run_id, fromEventId);
     },
 
     async getCheckpoint({ thread_id, checkpoint_id }) {

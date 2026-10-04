@@ -287,7 +287,7 @@ describe('cancelRun（用户点停止）', () => {
     const events: string[] = [];
     void (async () => {
       for await (const ev of h.service.subscribe({ thread_id: THREAD_ID, run_id })) {
-        events.push(ev.eventType);
+        events.push(ev.event.eventType);
       }
     })();
 
