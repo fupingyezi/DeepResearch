@@ -183,8 +183,6 @@ export async function createMemoryFact(
     'context') as FactCategory;
   const conf = validateConfidence(confidence);
 
-  const data = await getMemoryData(agentName, userId);
-  const updated: MemoryData = { ...data, facts: [...data.facts] };
   const entry: Fact = {
     id: newFactId(),
     content: normalized,
@@ -193,15 +191,17 @@ export async function createMemoryFact(
     createdAt: utcNowIsoZ(),
     source: 'manual',
   };
-  // 顺手生成语义向量（失败不阻塞创建，交由回填重试）
+  // 顺手生成语义向量（失败不阻塞创建，交由回填重试）——在锁外做：API 调用不进临界区
   if (getMemoryConfig().embeddingEnabled) {
     const vector = await embedQuery(normalized);
     if (vector) entry.embedding = vector;
   }
-  updated.facts.push(entry);
-  const ok = await getMemoryStorage().save(updated, { agentName, userId });
-  if (!ok) throw new Error('Failed to save memory data after creating fact');
-  return updated;
+  const result = await getMemoryStorage().update(
+    (data) => ({ ...data, facts: [...data.facts, entry] }),
+    { agentName, userId },
+  );
+  if (!result) throw new Error('Failed to save memory data after creating fact');
+  return result;
 }
 
 export async function deleteMemoryFact(
@@ -209,13 +209,17 @@ export async function deleteMemoryFact(
   agentName: string | null = null,
   userId: string | null = null,
 ): Promise<MemoryData> {
-  const data = await getMemoryData(agentName, userId);
-  const next = data.facts.filter((f) => f.id !== factId);
-  if (next.length === data.facts.length) throw new Error(`fact not found: ${factId}`);
-  const updated: MemoryData = { ...data, facts: next };
-  const ok = await getMemoryStorage().save(updated, { agentName, userId });
-  if (!ok) throw new Error(`Failed to save memory after deleting fact ${factId}`);
-  return updated;
+  // 存在性检查放在 mutator 内：对锁内最新数据判定，而不是调用方读到的旧快照
+  const result = await getMemoryStorage().update(
+    (data) => {
+      const next = data.facts.filter((f) => f.id !== factId);
+      if (next.length === data.facts.length) throw new Error(`fact not found: ${factId}`);
+      return { ...data, facts: next };
+    },
+    { agentName, userId },
+  );
+  if (!result) throw new Error(`Failed to save memory after deleting fact ${factId}`);
+  return result;
 }
 
 export async function updateMemoryFact(
@@ -224,45 +228,50 @@ export async function updateMemoryFact(
   agentName: string | null = null,
   userId: string | null = null,
 ): Promise<MemoryData> {
-  const data = await getMemoryData(agentName, userId);
-  const next: Fact[] = [];
-  let found = false;
-  let contentChanged = false;
-  for (const f of data.facts) {
-    if (f.id !== factId) {
-      next.push(f);
-      continue;
-    }
-    found = true;
-    const u: Fact = { ...f };
-    if (patch.content != null) {
-      const c = String(patch.content).trim();
-      if (!c) throw new Error('content must be non-empty');
-      if (c !== u.content) contentChanged = true;
-      u.content = c;
-      delete u.embedding; // 旧向量对新 content 失效
-    }
-    if (patch.category != null) {
-      u.category = (String(patch.category).trim() || 'context') as FactCategory;
-    }
-    if (patch.confidence != null) {
-      u.confidence = validateConfidence(Number(patch.confidence));
-    }
-    next.push(u);
-  }
-  if (!found) throw new Error(`fact not found: ${factId}`);
-  // content 变更后重新向量化（失败保持无向量，交由回填重试）
-  if (contentChanged && getMemoryConfig().embeddingEnabled) {
-    const target = next.find((f) => f.id === factId);
-    if (target) {
-      const vector = await embedQuery(target.content);
-      if (vector) target.embedding = vector;
-    }
-  }
-  const updated: MemoryData = { ...data, facts: next };
-  const ok = await getMemoryStorage().save(updated, { agentName, userId });
-  if (!ok) throw new Error(`Failed to save memory after updating fact ${factId}`);
-  return updated;
+  // 整个 patch + 重向量化在 mutator 内完成：content 是否真的变了要在锁内最新数据上
+  // 判定，否则「变更即重嵌」可能基于过期内容，写入的向量对不上落盘的新 content。
+  const result = await getMemoryStorage().update(
+    async (data) => {
+      const next: Fact[] = [];
+      let found = false;
+      let contentChanged = false;
+      for (const f of data.facts) {
+        if (f.id !== factId) {
+          next.push(f);
+          continue;
+        }
+        found = true;
+        const u: Fact = { ...f };
+        if (patch.content != null) {
+          const c = String(patch.content).trim();
+          if (!c) throw new Error('content must be non-empty');
+          if (c !== u.content) contentChanged = true;
+          u.content = c;
+          delete u.embedding; // 旧向量对新 content 失效
+        }
+        if (patch.category != null) {
+          u.category = (String(patch.category).trim() || 'context') as FactCategory;
+        }
+        if (patch.confidence != null) {
+          u.confidence = validateConfidence(Number(patch.confidence));
+        }
+        next.push(u);
+      }
+      if (!found) throw new Error(`fact not found: ${factId}`);
+      // content 变更后重新向量化（失败保持无向量，交由回填重试）
+      if (contentChanged && getMemoryConfig().embeddingEnabled) {
+        const target = next.find((f) => f.id === factId);
+        if (target) {
+          const vector = await embedQuery(target.content);
+          if (vector) target.embedding = vector;
+        }
+      }
+      return { ...data, facts: next };
+    },
+    { agentName, userId },
+  );
+  if (!result) throw new Error(`Failed to save memory after updating fact ${factId}`);
+  return result;
 }
 
 // Strip upload mentions
@@ -572,16 +581,22 @@ export class MemoryUpdater {
         }
       }
 
-      let updated = applyUpdates(current, parsed, opts.threadId ?? null);
-      updated = stripUploadMentions(updated);
-      // 新增 / 保留的 facts 与 sections 批量补齐向量后落盘（失败照常 save，等检索侧回填）。
-      // 必须在 stripUploadMentions 之后：strip 会改写 section summary，先嵌会产生立刻失效的向量
-      await embedMissingSections(updated);
-      await embedMissingFacts(updated);
-
-      const saved = await getMemoryStorage().save(updated, { agentName, userId });
+      // 锁内 RMW：applyUpdates 重新作用于锁内的最新盘上状态。current 是 LLM 调用
+      // 前读的快照（期间其它进程可能已落盘），直接 save 会把它覆盖掉。
+      const saved = await getMemoryStorage().update(
+        async (fresh) => {
+          let updated = applyUpdates(fresh, parsed, opts.threadId ?? null);
+          updated = stripUploadMentions(updated);
+          // 新增 / 保留的 facts 与 sections 批量补齐向量后落盘（失败照常 save，等检索侧回填）。
+          // 必须在 stripUploadMentions 之后：strip 会改写 section summary，先嵌会产生立刻失效的向量
+          await embedMissingSections(updated);
+          await embedMissingFacts(updated);
+          return updated;
+        },
+        { agentName, userId },
+      );
       if (saved) memoryUpdateStats.succeeded += 1;
-      return saved;
+      return !!saved;
     } catch (e) {
       console.error('[memory/updater] Memory update failed:', e);
       return fail();

@@ -235,6 +235,16 @@ export { InMemoryRunRegistry } from './runtime/run-registry/in-memory';
 export { RedisRunRegistry } from './runtime/run-registry/redis';
 export { InMemoryRunEventBus } from './runtime/event-bus/in-memory';
 
+// runtime/locks（互斥锁：进程内 / Redis 双实现）
+export {
+  getDistLock,
+  resetDistLock,
+  InMemoryDistLock,
+  RedisDistLock,
+  type DistLock,
+  type DistLockHandle,
+} from './runtime/locks/dist-lock';
+
 // runtime/service
 export {
   createThreadService,

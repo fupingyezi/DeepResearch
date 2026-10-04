@@ -28,6 +28,7 @@ import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
 import { getRunConcurrencyGate } from './run-concurrency-gate';
 import { getSandboxProvider } from '../sandbox';
+import { getDistLock, type DistLockHandle } from './locks/dist-lock';
 import type { RunRegistry, RunEventBus } from './contracts';
 import { InMemoryRunRegistry } from './run-registry/in-memory';
 import { InMemoryRunEventBus } from './event-bus/in-memory';
@@ -37,6 +38,11 @@ const LOG = '[thread-service]';
 
 /** 取消 run 后等待其收尾的上限：超时就继续删，不能让一个卡住的 run 拖死删除请求。 */
 const RUN_CANCEL_GRACE_MS = 3_000;
+
+/** thread 锁 TTL：覆盖临界区上限（取消收尾 3s + 登记），只兜底持有者崩溃，不续期。 */
+const THREAD_LOCK_TTL_MS = 10_000;
+/** thread 锁等待预算：须大于另一持有者完整走完临界区的时间，超时继续执行并告警。 */
+const THREAD_LOCK_WAIT_MS = 6_000;
 
 /** 被取消的 run 在 runs.error 里的标记（RunStatus 是 DB CHECK 约束的枚举，没有 cancelled）。 */
 const RUN_CANCELLED_ERROR = 'cancelled: thread deleted';
@@ -261,6 +267,38 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     return cancelled;
   };
 
+  /**
+   * thread 级互斥临界区：包住「取消在跑的 run → 等清空 → 建新 run / 删数据」。
+   *
+   * 锁要保护的是「查在跑集合」到「新 run 登记」之间不被另一个进程插入同样的
+   * 序列：两个进程都看到空集合、都开始写同一份 checkpoint，抢占语义就失效了。
+   * 用户点「停止」只广播取消、不写 checkpoint，不需要锁。
+   * 等待期轮询获取（50ms）；超预算说明对方异常，继续执行并告警——锁是防错
+   * 而非门禁，不应把正常请求挡在等锁上。
+   */
+  const withThreadLock = async <T>(thread_id: string, fn: () => Promise<T>): Promise<T> => {
+    const lock = getDistLock();
+    const lockKey = `deerflow:lock:thread:${thread_id}`;
+    const deadline = Date.now() + THREAD_LOCK_WAIT_MS;
+    let handle: DistLockHandle | null = null;
+    for (;;) {
+      handle = await lock.acquire(lockKey, THREAD_LOCK_TTL_MS);
+      if (handle) break;
+      if (Date.now() >= deadline) {
+        console.warn(
+          `${LOG} thread lock wait timeout thread_id=${thread_id}; proceed without lock`,
+        );
+        break;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    try {
+      return await fn();
+    } finally {
+      await handle?.release();
+    }
+  };
+
   // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
   // 关键不变量：fire-and-forget 立即返回 run_id；try/catch/finally 三段收敛状态，
   // finally 始终 publish END（channel 对已 closed 的 publish 是 no-op）。
@@ -449,32 +487,34 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     async deleteThread({ thread_id, user_id }) {
-      // 先取消这个 thread 还在跑的 run，并等它收尾（最多 RUN_CANCEL_GRACE_MS）：
-      // 否则 run 会在 meta / checkpoint 清完之后继续写 checkpoint，把刚删掉的数据写回来。
-      const cancelled = await cancelThreadRuns(thread_id, RUN_CANCELLED_ERROR, true);
-      if (cancelled > 0) {
-        console.info(
-          `${LOG} deleteThread cancelled ${cancelled} running run(s) thread_id=${thread_id}`,
-        );
-      }
-
-      await threads.delete(thread_id, { user_id: user_id ?? null });
-      // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
-      try {
-        getSandboxProvider().releaseByThreadId(thread_id);
-      } catch (e) {
-        console.warn(`${LOG} deleteThread sandbox release failed:`, (e as Error)?.message);
-      }
-      // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
-      const saver = checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
-      if (typeof saver.deleteThread === 'function') {
-        try {
-          await saver.deleteThread.call(saver, thread_id);
-        } catch (e) {
-          console.warn(`${LOG} deleteThread checkpoint cleanup failed:`, (e as Error)?.message);
+      await withThreadLock(thread_id, async () => {
+        // 先取消这个 thread 还在跑的 run，并等它收尾（最多 RUN_CANCEL_GRACE_MS）：
+        // 否则 run 会在 meta / checkpoint 清完之后继续写 checkpoint，把刚删掉的数据写回来。
+        const cancelled = await cancelThreadRuns(thread_id, RUN_CANCELLED_ERROR, true);
+        if (cancelled > 0) {
+          console.info(
+            `${LOG} deleteThread cancelled ${cancelled} running run(s) thread_id=${thread_id}`,
+          );
         }
-      }
-      console.info(`${LOG} deleteThread thread_id=${thread_id}`);
+
+        await threads.delete(thread_id, { user_id: user_id ?? null });
+        // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
+        try {
+          getSandboxProvider().releaseByThreadId(thread_id);
+        } catch (e) {
+          console.warn(`${LOG} deleteThread sandbox release failed:`, (e as Error)?.message);
+        }
+        // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
+        const saver = checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
+        if (typeof saver.deleteThread === 'function') {
+          try {
+            await saver.deleteThread.call(saver, thread_id);
+          } catch (e) {
+            console.warn(`${LOG} deleteThread checkpoint cleanup failed:`, (e as Error)?.message);
+          }
+        }
+        console.info(`${LOG} deleteThread thread_id=${thread_id}`);
+      });
     },
 
     async cancelRun({ thread_id, user_id }) {
@@ -495,34 +535,38 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
       }
 
-      // 同一 thread 只允许一个 run：上一个还没停就先取消并等它停笔，否则两个 run 会并发写
-      // 同一份 LangGraph checkpoint（实测交错增长），对话状态会坏。
-      const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
-      if (superseded > 0) {
-        console.info(
-          `${LOG} submitRun superseded ${superseded} running run(s) thread_id=${thread_id}`,
-        );
-      }
+      // 抢占 + 登记在 thread 锁内完成：锁住的不是 run 全程，而是「取消旧的 → 登记新的」
+      // 这段临界区。run 全程锁会与新 submit 的抢占死锁（新 submit 等锁、锁被旧 run 占着）。
+      return withThreadLock(thread_id, async () => {
+        // 同一 thread 只允许一个 run：上一个还没停就先取消并等它停笔，否则两个 run 会并发写
+        // 同一份 LangGraph checkpoint（实测交错增长），对话状态会坏。
+        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+        if (superseded > 0) {
+          console.info(
+            `${LOG} submitRun superseded ${superseded} running run(s) thread_id=${thread_id}`,
+          );
+        }
 
-      // 单次请求模型切换：带 modelConfig 且注入了工厂时解析对应 client，
-      // 否则用装配时的默认 client。统一走「submitRun → channel」单路径，
-      // 不再有 route 层 dynamicClient 直连分支。
-      const runClient =
-        modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+        // 单次请求模型切换：带 modelConfig 且注入了工厂时解析对应 client，
+        // 否则用装配时的默认 client。统一走「submitRun → channel」单路径，
+        // 不再有 route 层 dynamicClient 直连分支。
+        const runClient =
+          modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
 
-      return executeRun({
-        thread_id,
-        user_id,
-        threadMeta,
-        inputForDb: input,
-        makeStream: (signal) =>
-          runClient.stream(
-            input,
-            thread_id,
-            metadata ?? {},
-            images?.length ? { images } : undefined,
-            signal,
-          ),
+        return executeRun({
+          thread_id,
+          user_id,
+          threadMeta,
+          inputForDb: input,
+          makeStream: (signal) =>
+            runClient.stream(
+              input,
+              thread_id,
+              metadata ?? {},
+              images?.length ? { images } : undefined,
+              signal,
+            ),
+        });
       });
     },
 
@@ -540,24 +584,29 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
       }
 
-      // 同上：续跑也占用同一个 thread 的 checkpoint，先让在跑的 run 停笔
-      const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
-      if (superseded > 0) {
-        console.info(
-          `${LOG} resume superseded ${superseded} running run(s) thread_id=${thread_id}`,
-        );
-      }
+      // 与 submitRun 同一把 thread 锁：续跑同样要「停旧的 → 登记新的」原子成段。
+      return withThreadLock(thread_id, async () => {
+        // 同上：续跑也占用同一个 thread 的 checkpoint，先让在跑的 run 停笔
+        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+        if (superseded > 0) {
+          console.info(
+            `${LOG} resume superseded ${superseded} running run(s) thread_id=${thread_id}`,
+          );
+        }
 
-      const runClient =
-        modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
-      const decisionText = typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
+        const runClient =
+          modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+        const decisionText =
+          typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
 
-      return executeRun({
-        thread_id,
-        user_id,
-        threadMeta,
-        inputForDb: decisionText,
-        makeStream: (signal) => runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
+        return executeRun({
+          thread_id,
+          user_id,
+          threadMeta,
+          inputForDb: decisionText,
+          makeStream: (signal) =>
+            runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
+        });
       });
     },
   };
