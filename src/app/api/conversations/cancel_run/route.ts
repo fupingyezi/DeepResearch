@@ -7,6 +7,7 @@
  *
  * 语义：幂等。没有在跑的 run（或 thread 记录已不在）一律返回 200 + cancelled: 0，
  * 因为停止按钮只关心「停住」这个结果，不该因为无事可停而报错。
+ * cancelled 是取消请求投递数（跨进程部署下为全局语义：送达 owner 即计 1）。
  */
 
 import { NextResponse } from 'next/server';

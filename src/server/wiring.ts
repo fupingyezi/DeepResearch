@@ -11,6 +11,7 @@ import {
   InMemoryRunEventBus,
   InMemoryRunRegistry,
   PgRunStore,
+  RedisRunRegistry,
   PgThreadMetaStore,
   buildThreadConfig,
   createChatModel,
@@ -280,14 +281,17 @@ async function build(): Promise<ThreadService> {
     return next;
   };
 
+  // REDIS_URL 配置时用跨进程登记表（连接失败自降级进程内、只告警一次），
+  // 未配置直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点
+  const registry = process.env.REDIS_URL ? new RedisRunRegistry() : new InMemoryRunRegistry();
+
   return createThreadService({
     client,
     checkpointer,
     threads: new PgThreadMetaStore(),
     runs: new PgRunStore(),
     createClientForModel,
-    // 显式注入进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点，service 自身不感知
-    registry: new InMemoryRunRegistry(),
+    registry,
     eventBus: new InMemoryRunEventBus(),
   });
 }

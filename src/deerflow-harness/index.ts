@@ -229,9 +229,10 @@ export { runWithContext, getContext, requireContext, type RuntimeContext } from 
 // runtime/stream-bridge
 export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
-// runtime/contracts + 进程内实现
+// runtime/contracts + 双实现（进程内 / Redis 跨进程）
 export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/contracts';
 export { InMemoryRunRegistry } from './runtime/run-registry/in-memory';
+export { RedisRunRegistry } from './runtime/run-registry/redis';
 export { InMemoryRunEventBus } from './runtime/event-bus/in-memory';
 
 // runtime/service
