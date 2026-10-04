@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
-export const forceDynamic = true;
+export const dynamic = 'force-dynamic';
 
 import { ThreadServiceError, createSseStream } from '@/deerflow-harness';
 import { withApiHandler } from '@/server/http';
