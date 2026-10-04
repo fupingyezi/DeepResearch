@@ -61,6 +61,14 @@ const RUN_CANCELLED_SUPERSEDED = 'cancelled: superseded by a new run';
 const EVENT_RELEASE_GRACE_MS = 5 * 60_000;
 
 /**
+ * run 执行体的存活心跳间隔。模型长输出 / 长工具调用期间可能几十秒无业务事件，
+ * 重连端凭事件流是否在心跳窗口内继续产出判定 owner 是否已死（kill -9 / 崩溃），
+ * 否则 running 但 owner 死亡的 run 会让重连请求无限挂起。消费侧的死亡阈值取
+ * 3 个心跳窗口，容忍单次心跳抖动。
+ */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
+/**
  * 等 registry 里该 thread 的在跑 run 清空，最多 ms 毫秒。
  *
  * 只能轮询注册表：owner 进程的收尾 Promise 在其它进程里拿不到，而「等清空」是
@@ -194,6 +202,8 @@ export interface ThreadServiceDeps {
    */
   registry?: RunRegistry;
   eventBus?: RunEventBus;
+  /** 可选：存活心跳间隔。缺省 HEARTBEAT_INTERVAL_MS；测试注入更短间隔观察心跳。 */
+  heartbeatIntervalMs?: number;
 }
 
 /** 自定义错误：携带 code 字段，用于路由层做精细化响应。 */
@@ -229,6 +239,7 @@ async function getTupleSafe(
 
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   const { client, checkpointer, threads, runs, createClientForModel } = deps;
+  const heartbeatIntervalMs = deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
   const runRegistry: RunRegistry = deps.registry ?? new InMemoryRunRegistry();
   const runEventBus: RunEventBus = deps.eventBus ?? new InMemoryRunEventBus();
 
@@ -352,6 +363,17 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     void (async () => {
       let releaseRunSlot: (() => void) | null = null;
 
+      // 存活心跳贯穿整个执行体（含排队窗口）：unref 不阻止进程退出；finally 里
+      // 与 END 发布前停止，晚到的心跳不会复活已释放的事件流
+      const heartbeat = setInterval(() => {
+        void runEventBus.publish(
+          thread_id,
+          run_id,
+          createClientAgentEvent(ClientAgentEventType.HEARTBEAT, threadMeta.assistant_id, {}),
+        );
+      }, heartbeatIntervalMs);
+      heartbeat.unref?.();
+
       // 取消收尾：RunStatus 是 DB CHECK 约束的枚举（无 cancelled 值），复用 failed +
       // error 文案，不为一个语义加一次迁移；thread 状态回 idle —— 对话已被删时是 0 行
       // no-op，将来若开「停止按钮」这条路也是对的。
@@ -443,6 +465,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           `${LOG} run ${cancelled ? 'cancelled' : 'failed'} thread_id=${thread_id} run_id=${run_id} err=${message}`,
         );
       } finally {
+        clearInterval(heartbeat);
         if (releaseRunSlot) releaseRunSlot();
         activeRuns.delete(run_id);
         await runRegistry.unregister(run_id);

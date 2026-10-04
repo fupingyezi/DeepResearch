@@ -252,6 +252,7 @@ export {
 export {
   createThreadService,
   ThreadServiceError,
+  HEARTBEAT_INTERVAL_MS,
   type ThreadService,
   type ThreadServiceDeps,
   type CreateThreadInput,
