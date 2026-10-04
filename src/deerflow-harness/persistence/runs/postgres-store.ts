@@ -73,6 +73,18 @@ export class PgRunStore implements RunStore {
     return res.rows.length ? rowToRun(res.rows[0] as RunRow) : null;
   }
 
+  async listByStatus(status: RunStatus, opts?: { limit?: number }): Promise<Run[]> {
+    if (!ALLOWED_STATUS.has(status)) {
+      throw new Error(`invalid run status: ${status}`);
+    }
+    const limit = Math.max(1, Math.min(opts?.limit ?? 200, 1000));
+    const res = await query(
+      `select * from runs where status = $1 order by created_at desc limit $2`,
+      [status, limit],
+    );
+    return (res.rows as RunRow[]).map(rowToRun);
+  }
+
   async listByThread(thread_id: string, opts?: RunListOptions): Promise<Run[]> {
     const where: string[] = ['thread_id = $1'];
     const params: any[] = [thread_id];

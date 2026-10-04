@@ -93,6 +93,8 @@ bash scripts/deploy-remote.sh deepresearch:<git_sha>
 ## 五、健康检查
 
 - **探针路由**：`/api/auth/setup-status`（公开 GET，无副作用，不触发鉴权 302）。
+- **`/api/health`（多进程部署的 LB 探针）**：200 `{status:'ok'|'degraded', distributed, draining}`
+  ——`distributed=false` 表示跨进程协调已降级，`draining=true` 期间返回 503 供 LB 摘除。
 - **compose 层**：app 服务内置 `healthcheck`，用 node 探活（slim 镜像无 curl）。
 - **部署层**：`scripts/health-check.sh` 循环 curl，HTTP 状态码 `< 500` 视为存活。可用环境变量调节：
   - `APP_HEALTH_URL`：探活地址（默认 `http://127.0.0.1:3000/api/auth/setup-status`）
@@ -149,3 +151,64 @@ bash scripts/rollback.sh
 | `scripts/deploy-remote.sh`     | 服务器端部署（build→起服务→健康检查→失败回滚） |
 | `scripts/health-check.sh`      | HTTP 探活                                      |
 | `scripts/rollback.sh`          | 回滚到上一版本镜像                             |
+
+## 十、多进程部署
+
+单进程撑不住时（`DEERFLOW_MAX_CONCURRENT_RUNS` 已调满、LLM 调用量触顶），横向扩到多实例。
+控制面（取消/抢占/删除）与事件面（SSE 回放/重连）均已跨进程化，扩实例不改业务代码，
+只动编排与监控。
+
+### 10.1 前提与降级可见性
+
+- **唯一额外依赖是 `REDIS_URL`**：run owner 登记、取消广播、SSE 事件镜像、沙箱协调全走它。
+  未配置（或运行期连不上）时自动降级为进程内语义——取消/流回放都只能命中发起进程，
+  多进程部署下这等于功能错乱。`GET /api/health` 返回 `distributed` 字段，**多进程部署必须
+  在监控上盯住 `distributed=false`**（响应为 200 `degraded`，仍是活的，但语义退化）。
+- **PG max_connections 重算**：连接数 = 每进程 pg 池上限 × 进程数 + 管理余量。
+  官方镜像缺省 100，3 个进程即可触顶（表现是「重启后偶发连不上库」的 5xx）。
+  生产 compose 已配 `max_connections=200`，进程数再增时按需上调。
+
+### 10.2 负载均衡：不需要粘性
+
+- SSE 事件经 Redis Stream 镜像（`deerflow:stream:{threadId}:{runId}`，24h TTL）；
+  断线重连靠 `fromEventId` 续读，任意实例都能接住任意线程的流。
+- 会话标识在请求 JSON body 里（`sessionId`），nginx 的 `hash $arg_sessionId` 一类
+  query-arg 粘性片段不适用——照抄会恒等哈希到同一实例，看起来像粘性其实是巧合。
+- LB 探活指向 `/api/health`：200 = 健康（`ok` 跨进程 / `degraded` 降级），
+  **503 = 排水期，LB 应摘除该实例**。
+
+### 10.3 优雅停机
+
+SIGTERM 触发的停机序列（`src/instrumentation.ts`）：
+
+1. 置 draining：`/api/health` 转 503，submitRun/resume 抛 `SERVER_DRAINING`
+2. 等待运行中 run 自然收尾，窗口 `DEERFLOW_GRACEFUL_DRAIN_MS`（默认 30s）
+3. 超时取消剩余 run（文案 `cancelled: server draining`，END 帧照常落流），再等 3s 收尾
+4. flush 记忆更新队列（10s 超时上限）
+5. 退出（第二个 SIGTERM/SIGINT 立即 `process.exit(1)`）
+
+编排侧：compose `stop_grace_period` 必须大于排水窗口（模板配 60s > 30s），否则
+compose 在排水完成前 SIGKILL，被强杀的 run 留给僵尸回收兜底。滚动发布时逐实例
+重启，配合 LB 摘除 503 实例，滚动期间无 5xx。
+
+### 10.4 僵尸 run 回收
+
+owner 进程被 kill -9（或整机断电）时，PG 里 `runs.status='running'` 的记录会成为
+僵尸——用户刷新看到永远转圈。判死与回收机制：
+
+- 执行体心跳（15s）持续续租 Redis owner 键（TTL 45s = 3 个心跳窗口，见
+  `runtime/liveness.ts`）；键到期 = owner 已死（`ownerOf` 返回 null）
+- 新进程启动时对账（`runtime/zombie-reconciler.ts`，启动 + 60s 两轮：覆盖
+  owner 键尚未到期的窗口）：running 且 owner 为空的 run → `failed` +
+  `cancelled: process died`，线程状态带出 running
+- 误判防护：低于一个心跳窗口的 run 视为刚启动跳过；线程状态只随**最新** run 走
+  （抢占时旧 owner 崩溃不覆盖新 run 的 running）
+
+### 10.5 进程管理选型
+
+- **多容器 / k8s replicas（优先）**：每容器单进程，SIGTERM 语义最干净，drain、
+  健康检查、滚动发布都是平台原语。
+- **PM2 cluster**：可行，但 drain 依赖信号送达每个 worker。注意 run 级并发闸门
+  的计数方式：进程内信号量上限是 `DEERFLOW_MAX_CONCURRENT_RUNS`，而跨进程占位
+  （Redis `runs:count`）以**相同值作为全局上限**——总并发不是「上限 × 实例数」，
+  扩容时全局上限不变，需按新容量调大 `DEERFLOW_MAX_CONCURRENT_RUNS`。

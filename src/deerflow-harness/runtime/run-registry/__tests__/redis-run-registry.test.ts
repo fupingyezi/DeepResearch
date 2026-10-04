@@ -132,6 +132,37 @@ describe('RedisRunRegistry（假客户端）', () => {
     expect(r.isDistributed()).toBe(true);
   });
 
+  it('owner 键按存活 TTL 登记（3 个心跳窗口）；touch 续租到同一 TTL', async () => {
+    const fake = new FakeRedisClient();
+    const r = new RedisRunRegistry({ client: asClient(fake) });
+    await r.register(info('r1', 't1'));
+    expect(fake.expiries.get('deerflow:run:owner:r1')).toBe(45);
+
+    await r.touch('r1');
+    expect(fake.expiries.get('deerflow:run:owner:r1')).toBe(45);
+    expect(r.isDistributed()).toBe(true);
+  });
+
+  it('touch 失败只告警一次、不降级登记表；恢复后告警窗口复位', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = new FakeRedisClient();
+    const r = new RedisRunRegistry({ client: asClient(fake) });
+    await r.register(info('r1', 't1'));
+
+    fake.failOps = new Set(['expire']);
+    await r.touch('r1');
+    await r.touch('r1');
+    // 续租失败必须保持跨进程协调可用：瞬时失败由下个心跳自愈，不该整体降级
+    expect(r.isDistributed()).toBe(true);
+    const touchWarns = warn.mock.calls.filter(([m]) => String(m).includes('touch failed'));
+    expect(touchWarns).toHaveLength(1);
+
+    fake.failOps = null;
+    await r.touch('r1');
+    expect(r.isDistributed()).toBe(true);
+    warn.mockRestore();
+  });
+
   it('ownerOf / listByThread 解析 Hash；悬挂索引（Hash 已过期）被跳过', async () => {
     const fake = new FakeRedisClient();
     const r = new RedisRunRegistry({ client: asClient(fake) });

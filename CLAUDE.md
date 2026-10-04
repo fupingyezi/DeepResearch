@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 多模型对话（MODEL_PRESETS 预设：Qwen Max/Turbo、DeepSeek v4 Flash/Pro、OpenAI 4o、Moonshot v1、GLM-5.3 Flash，见 `src/config/models.ts`）
 - 用户认证（JWT + OAuth）；模型 API Key **按用户**加密存 DB（`model-keys` + `MODEL_KEY_ENC_SECRET`），主聊天链路经 `resolveUserModelConfig()` 取用户 Key，**不读环境变量默认 Key**（环境 Key 只剩标题 / 提示词增强 / 记忆更新等副链路兜底）
 - 持久化：PostgreSQL（threads/runs 元数据 + LangGraph checkpoint）+ Redis（缓存 / 跨进程沙箱协调）+ MinIO（文件）
-- SSE 事件流：fire-and-forget 执行 + StreamBridge 缓冲回放；LLM 驱动长期记忆；文件上传解析（PDF/Word/图片 OCR）；视觉多模态；可插拔沙箱（local/docker/remote）；MCP/skill 扩展；双层背压并行编排
+- SSE 事件流：fire-and-forget 执行 + 事件缓冲回放（多进程下经 Redis Stream 镜像跨进程续读）；LLM 驱动长期记忆；文件上传解析（PDF/Word/图片 OCR）；视觉多模态；可插拔沙箱（local/docker/remote）；MCP/skill 扩展；双层背压并行编排
 
 技术栈：前端 Next.js 14 / React 18 / Ant Design 5 / Zustand / TailwindCSS；后端 Node.js + LangChain/LangGraph；AI 走 OpenAI 兼容接口；存储 PostgreSQL / Redis / MinIO；搜索 Tavily。
 
@@ -59,6 +59,7 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 - `ZHIPU_API_KEY`——智谱（GLM 预设 / 图片 OCR / embedding 共用）；无 Key 时 OCR 返回占位文本、语义检索回落词面
 - `DEERFLOW_SANDBOX_BACKEND`——local（默认，宿主直连）/ docker（每线程加固容器）/ remote（每线程 SSH）；`DEERFLOW_ALLOW_HOST_BASH` 只门控 local（docker/remote 是隔离边界）
 - `DEERFLOW_MAX_CONCURRENT_RUNS`（run 级闸门，默认 16）/ `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（容器级闸门，默认 32）
+- `DEERFLOW_GRACEFUL_DRAIN_MS`——优雅停机排水窗口（默认 30000）
 - `DEERFLOW_VISION_MAX_IMAGE_MB`——单图上限（默认 5）；**前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它**，否则「发送成功但模型没看到图」静默降级
 - `DEERFLOW_GUARDRAIL_ENABLED` / `DEERFLOW_GUARDRAIL_BLOCK`——规则式护栏（默认开，仅告警）
 - `STREAM_BRIDGE_BUFFER_MAX` / `DEERFLOW_DATA_DIR` / `DEERFLOW_EXTENSIONS_CONFIG_PATH` / `DEERFLOW_SKILLS_DIR` / `DEERFLOW_SANDBOX_DIR`
@@ -101,7 +102,7 @@ Services（src/server/services，领域编排，无 SQL）
 DAOs（单表 SQL）      ThreadService（wiring 进程单例，9 操作）
    │                       ├─ DeerFlowClient（Agent 缓存 + LangGraph stream）
    ▼                       ├─ Checkpointer（PG）/ Stores（threads/runs）
-PostgreSQL                 └─ StreamBridge → ThreadChannel（typed EventEmitter + 缓冲回放）→ SSE → 前端
+PostgreSQL                 └─ RunEventBus（进程内 StreamBridge / Redis Stream 镜像 + 游标续读）→ SSE → 前端
 ```
 
 Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `createBaseAgent()`（中间件链按 `ORDERED_MIDDLEWARES` 位序装配）→ 工具（search_web / task / sandbox 读写执行 / view_image / …）→ `SandboxProvider`（local / docker / remote）。
@@ -110,7 +111,7 @@ Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `create
 
 ### 1. API 路由层
 
-全部 34 条路由走 `src/server/http/api-handler.ts` 的 `withApiHandler(options, handler)` 统一管线：try/catch 全包裹 → auth（缺省 cookie=getCurrentUser；null → 401）→ guard（sandbox token 等非用户主体门禁）→ userIdHeader（threads 的 x-user-id → `ctx.userId`）→ rateLimit（占位 no-op）→ body/query zod 解析 → `handler(ctx)`。每条返回路径记一条 `[http]` 完成日志；catch 先 `logHttpError` 再 `toHttpError(e, fallbackMessage)`。**约定：wrapper 是 body 唯一读取方**（handler 内不得再调 `request.json()/formData()`）；错误响应统一 `{code,message}`；成功 envelope 逐路由冻结；SSE 两路由（v3/chat、threads streams）直接 `new Response(createSseStream(...))`；`runtime='nodejs'` / `force-dynamic` 留在各自 route.ts 原地。
+全部 35 条路由走 `src/server/http/api-handler.ts` 的 `withApiHandler(options, handler)` 统一管线：try/catch 全包裹 → auth（缺省 cookie=getCurrentUser；null → 401）→ guard（sandbox token 等非用户主体门禁）→ userIdHeader（threads 的 x-user-id → `ctx.userId`）→ rateLimit（占位 no-op）→ body/query zod 解析 → `handler(ctx)`。每条返回路径记一条 `[http]` 完成日志；catch 先 `logHttpError` 再 `toHttpError(e, fallbackMessage)`。**约定：wrapper 是 body 唯一读取方**（handler 内不得再调 `request.json()/formData()`）；错误响应统一 `{code,message}`；成功 envelope 逐路由冻结；SSE 两路由（v3/chat、threads streams）直接 `new Response(createSseStream(...))`；`runtime='nodejs'` / `force-dynamic` 留在各自 route.ts 原地。
 
 #### `POST /api/v3/chat`（主聊天接口）
 
@@ -145,7 +146,7 @@ interface ChatStreamBody {
 
 预设与该 provider 的用户 Key 任一缺失 → 400（`no_model_selected` / `no_api_key`）。运行期开关只影响本次 Agent 行为，不修改 baseOptions。
 
-#### 其他路由（全量 34 条见 README「主要 API」）
+#### 其他路由（全量 35 条见 README「主要 API」）
 
 - `/api/threads` POST/GET——创建线程；分页列表（?limit=&offset=&status=）
 - `/api/threads/[threadId]` GET/DELETE——获取详情（可附带 checkpoint）；删除
@@ -181,7 +182,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 
 ### 3. ThreadService
 
-**文件：** `src/deerflow-harness/runtime/service.ts`；**单例入口：** `src/server/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + StreamBridge + AsyncLocalStorage Context（9 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume`）。
+**文件：** `src/deerflow-harness/runtime/service.ts`；**单例入口：** `src/server/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + RunRegistry + RunEventBus + AsyncLocalStorage Context（12 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
 
 **关键不变量：**
 
@@ -193,6 +194,9 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
   - `submitRun()` / `resume()` 抢占：同一 thread 只允许一个 run，新的先取消上一个未结束的（两个 run 并发写同一份 checkpoint 会交错，对话状态会坏）
   - 取消经 `signal` 生效：`DeerFlowClient.stream(..., signal)` → LangGraph `config.signal` → 一路下发到 LLM 调用。被取消的 run 记 `failed` + `cancelled: <原因>` 文案（`RunStatus` 是 DB CHECK 枚举，无 `cancelled` 值），**不能**记成 succeeded——`DeerFlowClient` 会把 abort 异常吞成正常 return，执行体必须显式判 `signal.aborted`（且此时不发 ERROR 帧，避免误报「运行出错」）
 - **单例在 dev 下必须挂 `globalThis`**（`__threadService`）：Next.js 按路由分别编译 + HMR 重新求值模块，纯模块级变量会分裂成多份实例，跨路由的「取消 run」「按 run 订阅事件流」会**静默失效**。与 `lib/db` 的 pg pool 同一套做法，生产单次打包无此问题
+- **心跳是 owner 存活信号**（间隔 `HEARTBEAT_INTERVAL_MS` = 15s，`runtime/liveness.ts` 单一出处）：除 publish HEARTBEAT 帧外还 `runRegistry.touch(run_id)` 续租 Redis owner 键（TTL 3 个心跳窗口）——键存活 = owner 存活，僵尸回收据此判死。touch 失败只告警一次不降级：瞬时失败下个心跳自愈，而按失败降级登记表会永久破坏跨进程取消
+- **优雅停机 `beginShutdown(drainMs)`**（`DEERFLOW_GRACEFUL_DRAIN_MS`，默认 30s）：置 draining → `submitRun`/`resume` 抛 `SERVER_DRAINING`（503）→ 轮询 `activeRuns` 至空（≤drainMs，activeRuns 清空 ⟺ finally 已 publish END）→ 超时 abort 全部剩余 run（文案 `cancelled: server draining`）→ 再等 `RUN_CANCEL_GRACE_MS` 收尾 → 返回 `{cancelled, pending}`。幂等：重复调用复用同一 Promise。`health()` 暴露 `{distributed, draining}` 供 `/api/health` 与 LB 摘除
+- **僵尸回收 `reconcileZombieRuns()`**（`runtime/zombie-reconciler.ts`）：`running` 且 `ownerOf` 为空且超一个心跳窗口的 run → `failed` + `cancelled: process died`。只有线程**最新** run 被回收才把 thread 置 `error`（抢占时旧 owner 崩溃不覆盖新 run 的 running）；单条失败不阻断整体对账；`isDistributed()` 为 false 时整体跳过（进程内登记表无跨进程死亡语义）。启动对账在 instrumentation 跑两轮（启动 + 60s，覆盖 owner 键尚未到期的窗口）
 
 **线程状态机：** `idle → running → idle（成功）/ error（失败）`
 
@@ -217,7 +221,9 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 
 过滤边界在 `runtime/sse/to-client-event.ts`——白名单外的内部事件在此 drop，不泄露给前端。
 
-**StreamBridge**（`runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。**ThreadChannel 是每 run 一个的 typed `EventEmitter<ChannelEventMap>`**——10 个 `ClientAgentEventType` 就是事件名（emit/on 传整个事件对象），另挂 `CLOSED_EVENT` Symbol 事件作内部唤醒信号：close() 时发出，把「唤醒」从「数据」剥离，不再合成 system END 帧（chat-service 里按 `agentId==='system'` 过滤的跨文件耦合随之删除）。`publish()` 是唯一写入口（类内 `emitEvent` 类型桥规避「联合事件名+联合值」的 TS 推断失败）；构造函数常驻 no-op `'error'` 监听——`error` 是白名单事件名却撞 EventEmitter 内建语义（无监听者 emit 会抛）。`subscribe()` 仍是 SSE 稳定契约（返回 AsyncIterable，多实例换 Redis 的换芯点不变）：手写四步 next()（回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件），buffer 快照与对全部事件名的监听注册在**同一同步块**内完成——事件要么在快照里（回放）要么进 pending（实时），不丢不重；跨类型全局序由单一 pending 队列保持。**不用 `events.on()` 重写 subscribe**：合并多事件名会丢跨类型时序，且 'error' 的终止语义与「ERROR 是流中间事件、END 才终止」相反。终止：END → `close()`（emit CLOSED_EVENT + removeAllListeners，后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。多实例部署时把底层 EventEmitter 换 Redis pub/sub 即可，接口稳定。
+**RunEventBus**（契约 `runtime/contracts.ts` + 双实现 `runtime/event-bus/`）——SSE 订阅的 wiring 面：`subscribe(threadId, runId, fromEventId?)` 返回带单调游标的 `StampedClientAgentEvent` 流（游标是断点续读凭证），`publish` 直通 + `release` 释放 run 级资源。进程内实现直包 StreamBridge（游标用 publish 时贴的递增序号，release drop channel 并留墓碑——已释放的 run 再订阅立即结束，不挂空 channel）；`RedisEventBus` 把事件镜像到 `deerflow:stream:{threadId}:{runId}`（XADD 内联 TRIM ~2000 与进程内 buffer 对齐、EXPIRE 24h 从最后一条事件起算）：订阅走独立连接 XREAD BLOCK 续读（阻塞读占住命令队列，**不能与发布共用连接**），中断退避后以同一游标重发——XREAD 幂等不丢不重；无 END 的悬挂流（owner 崩溃）由重连路由按 runs 终态补尾。REDIS_URL 未配置 / 连接失败 → 永久降级进程内实现（告警一次）。跨进程回放使 LB 粘性不再必要。
+
+**StreamBridge**（`runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。**ThreadChannel 是每 run 一个的 typed `EventEmitter<ChannelEventMap>`**——10 个 `ClientAgentEventType` 就是事件名（emit/on 传整个事件对象），另挂 `CLOSED_EVENT` Symbol 事件作内部唤醒信号：close() 时发出，把「唤醒」从「数据」剥离，不再合成 system END 帧（chat-service 里按 `agentId==='system'` 过滤的跨文件耦合随之删除）。`publish()` 是唯一写入口（类内 `emitEvent` 类型桥规避「联合事件名+联合值」的 TS 推断失败）；构造函数常驻 no-op `'error'` 监听——`error` 是白名单事件名却撞 EventEmitter 内建语义（无监听者 emit 会抛）。`subscribe()` 仍是 SSE 稳定契约：手写四步 next()（回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件），buffer 快照与对全部事件名的监听注册在**同一同步块**内完成——事件要么在快照里（回放）要么进 pending（实时），不丢不重；跨类型全局序由单一 pending 队列保持。**不用 `events.on()` 重写 subscribe**：合并多事件名会丢跨类型时序，且 'error' 的终止语义与「ERROR 是流中间事件、END 才终止」相反。终止：END → `close()`（emit CLOSED_EVENT + removeAllListeners，后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。
 
 ### 6. Agent 工厂与中间件管线
 
@@ -360,6 +366,11 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/runtime/usage-accounting.ts`——LLM 用量记账（模型工厂挂接，ALS 累加器）
 - `src/deerflow-harness/agents/factory.ts` / `features.ts`——createBaseAgent + assembleFromFeatures / RuntimeFeatures + Next/Prev 装饰器
 - `src/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`——StreamBridge + ThreadChannel（每 run 一个 typed EventEmitter + 缓冲回放）
+- `src/deerflow-harness/runtime/event-bus/`（in-memory.ts / redis.ts）——RunEventBus 双实现（进程内游标 / Redis Stream 镜像 + XREAD 续读）
+- `src/deerflow-harness/runtime/liveness.ts`——心跳间隔与 owner 死亡窗口常量（单一出处）
+- `src/deerflow-harness/runtime/zombie-reconciler.ts`——僵尸 run 启动对账回收
+- `src/instrumentation.ts`——优雅停机信号处理 + 记忆队列 flush + 僵尸对账两轮调度
+- `src/app/api/health/route.ts`——健康检查（`distributed` / `draining`，排水期 503）
 - `src/deerflow-harness/runtime/sse/client-event.ts` / `to-client-event.ts`——ClientAgentEvent 白名单协议 / 内→外过滤边界
 - `src/deerflow-harness/types/agent-event.ts`——AgentEvent 内部事件枚举
 - `src/deerflow-harness/subagents/executor.ts` / `parent-history.ts`——SubagentExecutor（超时+取消）/ 父历史只读注入
@@ -377,7 +388,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 
 ### 14. 已知限制
 
-1. StreamBridge 与 run 取消均为**进程内**语义（`activeRuns` 挂在 ThreadService 闭包）：多实例部署时 SSE 回放与停止/取消请求必须落到跑该 run 的那个进程，需与 StreamBridge 一起换成 Redis 协调
+1. 跨进程全局 run 上限与进程内同源：Redis `runs:count` 以 `DEERFLOW_MAX_CONCURRENT_RUNS` 为全局闸门，多进程总并发 ≈ 该值（不是 × 实例数），扩容需同步调大；僵尸回收死亡窗口为 3 个心跳（45s），kill -9 后线程在该窗口内仍显示 running（下轮对账修正）
 2. ThreadChannel buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧非关键帧（`start`/`error`/`end`/`human_interrupt` 关键帧永不丢弃）
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
 4. 单元测试覆盖建设中（vitest 已接入，覆盖中间件装配、防递归、guardrail 规则、记忆检索、checkpoint 行为约束、remote 沙箱、父历史剪枝等核心纯逻辑）

@@ -85,6 +85,9 @@ function makeHarness(
     async listByThread() {
       return [];
     },
+    async listByStatus() {
+      return [];
+    },
   };
 
   // 假的 agent 流：复刻真实 DeerFlowClient 的关键行为 —— abort 时抛出，但在自己的

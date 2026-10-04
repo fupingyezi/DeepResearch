@@ -256,3 +256,52 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
   每次部署会把工作目录里不属于新源码包的遗留文件删掉再同步，不要在这里放其他东西
 - 长期记忆 / 沙箱文件 / 自定义技能 / MCP 启用状态都在 named volume 里，
   重建容器不丢；但 `docker volume rm` 会丢
+
+## 七、多进程运维
+
+### 1. 确认协调态与排水态
+
+```bash
+# 每实例都查一遍：distributed=false 说明该实例已降级为进程内语义，多进程下要马上排查 Redis
+curl -s http://127.0.0.1:3000/api/health
+# 排水期返回 503；排水结束实例退出。滚动重启期间 LB 已摘除的实例出现 503 是正常的
+```
+
+### 2. 滚动重启（发版 / 扩缩容）
+
+1. 起新实例，等 `/api/health` 200 且 `distributed=true`，加入 LB
+2. 对旧实例逐个执行：LB 摘除 → `docker stop`（发 SIGTERM，触发优雅排水，
+   默认最多等 30s）→ 确认容器退出 → 下一个
+3. 排水期间该实例的新请求返回 503/`SERVER_DRAINING`——摘除 LB 后新流量不该再进来，
+   若还有请求进来，检查 LB 探活是否已指向 `/api/health`
+4. 观察点：被排水的实例日志出现 `drain done cancelled=N pending=M`；
+   N>0 表示有 run 被超时取消（用户会看到「已被取消」），M>0 表示取消后仍未收尾
+
+### 3. 强杀后的僵尸清理（对账）
+
+进程被 `kill -9` / OOM / 整机重启后，其 running 状态的 run 会在 owner 键到期
+（约 45s）后被新启动的进程自动回收。不需要手动干预；**如需人工核对**：
+
+```bash
+# 终态应该是 failed + 文案 cancelled: process died
+psql "$DATABASE_URL" -c \
+  "SELECT run_id, thread_id, status, error FROM runs WHERE status='running' ORDER BY created_at DESC LIMIT 20;"
+# 对应线程应已带出 running（idle 或 error）
+psql "$DATABASE_URL" -c \
+  "SELECT thread_id, status FROM threads WHERE status='running' LIMIT 20;"
+```
+
+残留 `running` 超过 2 分钟仍未回收，先查 Redis owner 键：
+
+```bash
+redis-cli -a "$REDIS_PASSWORD" --scan --pattern 'deerflow:run:owner:*' | head
+# 有键 = owner 还活着（可能在别的实例上跑着，别动它）；无键且 PG 仍 running = 对账没跑，重启任一新实例
+```
+
+### 4. 扩缩容后的连接数核对
+
+```bash
+# 每实例 pg 池上限 × 实例数 + 余量，不能超过 PG max_connections（compose 已配 200）
+redis-cli -a "$REDIS_PASSWORD" info clients | grep connected_clients   # Redis 侧同理粗看
+psql "$DATABASE_URL" -c "SHOW max_connections;"
+```

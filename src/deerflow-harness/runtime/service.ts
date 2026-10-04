@@ -35,8 +35,16 @@ import type { RunRegistry, RunEventBus } from './contracts';
 import { InMemoryRunRegistry } from './run-registry/in-memory';
 import { InMemoryRunEventBus } from './event-bus/in-memory';
 import { getInstanceOwner } from './instance-id';
+import { HEARTBEAT_INTERVAL_MS } from './liveness';
+import { reconcileZombieRuns } from './zombie-reconciler';
 
 const LOG = '[thread-service]';
+
+/** 优雅停机等待在跑 run 收尾的缺省上限（DEERFLOW_GRACEFUL_DRAIN_MS 可覆盖）。 */
+const GRACEFUL_DRAIN_MS = (() => {
+  const raw = Number(process.env.DEERFLOW_GRACEFUL_DRAIN_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 30_000;
+})();
 
 /** 取消 run 后等待其收尾的上限：超时就继续删，不能让一个卡住的 run 拖死删除请求。 */
 const RUN_CANCEL_GRACE_MS = 3_000;
@@ -52,6 +60,8 @@ const RUN_CANCELLED_ERROR = 'cancelled: thread deleted';
 const RUN_CANCELLED_BY_USER = 'cancelled: stopped by user';
 /** 同一 thread 只允许一个 run：新 run 抢占上一个未结束的（两个 run 并发写同一份 checkpoint 会交错）。 */
 const RUN_CANCELLED_SUPERSEDED = 'cancelled: superseded by a new run';
+/** 优雅停机等待窗口耗尽后取消仍未收尾的 run。 */
+const RUN_CANCELLED_DRAINING = 'cancelled: server draining';
 
 /**
  * run 终态后延迟释放事件通道的宽限：覆盖「刷新页面 / 网络抖动后重连订阅」的
@@ -60,13 +70,8 @@ const RUN_CANCELLED_SUPERSEDED = 'cancelled: superseded by a new run';
  */
 const EVENT_RELEASE_GRACE_MS = 5 * 60_000;
 
-/**
- * run 执行体的存活心跳间隔。模型长输出 / 长工具调用期间可能几十秒无业务事件，
- * 重连端凭事件流是否在心跳窗口内继续产出判定 owner 是否已死（kill -9 / 崩溃），
- * 否则 running 但 owner 死亡的 run 会让重连请求无限挂起。消费侧的死亡阈值取
- * 3 个心跳窗口，容忍单次心跳抖动。
- */
-export const HEARTBEAT_INTERVAL_MS = 15_000;
+/** 心跳间隔与死亡阈值的唯一定义（重连守卫 / owner 登记续租共用，见 liveness.ts）。 */
+export { HEARTBEAT_INTERVAL_MS } from './liveness';
 
 /**
  * 等 registry 里该 thread 的在跑 run 清空，最多 ms 毫秒。
@@ -183,6 +188,17 @@ export interface ThreadService {
    * 复用同一 thread_id（共享 checkpoint），返回新的 run_id。事件经 StreamBridge 推送。
    */
   resume(input: ResumeRunInput): Promise<{ run_id: string }>;
+  /**
+   * 优雅停机：置 draining 后不再接受新 run（submitRun / resume 抛 SERVER_DRAINING），
+   * 等待本进程在跑的 run 自然收尾，超时后取消它们并再等一轮收尾（执行体 finally
+   * 保证 END 落流）。幂等：重复调用返回同一 Promise。返回 cancelled = 超时后取消
+   * 的 run 数，pending = 取消后仍未收尾的残留数（正常为 0）。
+   */
+  beginShutdown(drainMs?: number): Promise<{ cancelled: number; pending: number }>;
+  /** 健康视图：distributed = 跨进程登记表与事件总线均可用；draining = 停机流程已启动。 */
+  health(): { distributed: boolean; draining: boolean };
+  /** 启动对账：把「running 但 owner 已死」的 run 修正为 failed（语义见 zombie-reconciler）。 */
+  reconcileZombieRuns(): Promise<{ reaped: number }>;
 }
 
 export interface ThreadServiceDeps {
@@ -321,6 +337,43 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     }
   };
 
+  // 优雅停机状态。draining 置位后 submitRun / resume 在入口即拒绝（SERVER_DRAINING），
+  // 已提交的执行体照常跑到收尾；beginShutdown 幂等，重复调用复用同一 Promise。
+  let draining = false;
+  let shutdownPromise: Promise<{ cancelled: number; pending: number }> | null = null;
+
+  const beginShutdown = (
+    drainMs = GRACEFUL_DRAIN_MS,
+  ): Promise<{ cancelled: number; pending: number }> => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      draining = true;
+      // activeRuns 是「本进程在跑的 run」的收尾完成标志：执行体 finally 在
+      // 状态落库 + END 落流之后才摘除条目，轮询到空即全部善后完成
+      const waitEmpty = async (ms: number): Promise<void> => {
+        const deadline = Date.now() + ms;
+        while (activeRuns.size > 0) {
+          if (Date.now() >= deadline) return;
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
+      };
+      await waitEmpty(drainMs);
+      let cancelled = 0;
+      if (activeRuns.size > 0) {
+        for (const [, entry] of activeRuns) {
+          entry.controller.abort(new Error(RUN_CANCELLED_DRAINING));
+          cancelled += 1;
+        }
+        // 取消后执行体还要走完收尾（状态落库 + END 落流），再给一轮宽限；
+        // 残留由进程退出兜底，不无限等待
+        await waitEmpty(RUN_CANCEL_GRACE_MS);
+      }
+      console.info(`${LOG} drain done cancelled=${cancelled} pending=${activeRuns.size}`);
+      return { cancelled, pending: activeRuns.size };
+    })();
+    return shutdownPromise;
+  };
+
   // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
   // 关键不变量：fire-and-forget 立即返回 run_id；try/catch/finally 三段收敛状态，
   // finally 始终 publish END（channel 对已 closed 的 publish 是 no-op）。
@@ -371,6 +424,9 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           run_id,
           createClientAgentEvent(ClientAgentEventType.HEARTBEAT, threadMeta.assistant_id, {}),
         );
+        // 同步续租 owner 登记键：键存活 = owner 存活，跨进程僵尸回收凭 ownerOf
+        // 判死。心跳停摆（进程崩溃 / kill -9）后键在死亡窗口内到期
+        void runRegistry.touch(run_id);
       }, heartbeatIntervalMs);
       heartbeat.unref?.();
 
@@ -400,6 +456,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       try {
         // run 级并发闸门：超限时先回传「排队中」状态帧（复用 task_progress 语义，
         // 仅增字段不破坏白名单），对话可先思考，执行体延迟到放行后启动。
+        // 传入 controller.signal：排队期间被取消（停止 / 抢占 / 停机）直接抛出，
+        // 不必等放行——被取消的 run 不应占着队列名额
         releaseRunSlot = await getRunConcurrencyGate().acquire(() => {
           // 闸门回调是同步的，publish 用 void 触发：进程内实现的发布体同步执行，
           // 「排队中」帧保证落在后续任何事件之前。
@@ -412,7 +470,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
               description: 'Run queued: concurrency limit reached, waiting for a free slot.',
             }),
           );
-        });
+        }, controller.signal);
 
         // 排队期间就被取消（对话在等锁时被删）：不必再启动
         if (controller.signal.aborted) {
@@ -577,6 +635,9 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     async submitRun({ thread_id, user_id, input, images, metadata, modelConfig }) {
+      if (draining) {
+        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+      }
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
@@ -626,6 +687,9 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     async resume({ thread_id, user_id, decision, metadata, modelConfig }) {
+      if (draining) {
+        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+      }
       const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
       if (!threadMeta) {
         throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
@@ -656,5 +720,12 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         });
       });
     },
+
+    beginShutdown,
+    health: () => ({
+      distributed: runRegistry.isDistributed() && runEventBus.isDistributed(),
+      draining,
+    }),
+    reconcileZombieRuns: () => reconcileZombieRuns({ runs, threads, registry: runRegistry }),
   };
 }

@@ -31,15 +31,24 @@ interface Waiter {
   resolve: () => void;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  // 取消原因必须是 Error（调用方 abort(reason)），异常路径仍要能抛
+  throw reason instanceof Error ? reason : new Error('run aborted');
+}
+
 class RunConcurrencyGate {
   private active = 0;
   private readonly queue: Waiter[] = [];
 
   /**
    * 获取一个 run 名额。若达上限则进入 FIFO 队列等待；每次等待前触发一次 onQueued。
-   * 返回释放句柄，调用方必须在 finally 中调用以防名额泄漏。
+   * signal 中止（排队期间被取消 / 停机）时抛出中止原因并离开队列——被取消的 run
+   * 不应占着名额或队位。返回释放句柄，调用方必须在 finally 中调用以防名额泄漏。
    */
-  async acquire(onQueued?: () => void): Promise<RunReleaseHandle> {
+  async acquire(onQueued?: () => void, signal?: AbortSignal): Promise<RunReleaseHandle> {
+    throwIfAborted(signal);
     const maxRuns = getMaxConcurrentRuns();
     let queuedNotified = false;
 
@@ -49,7 +58,7 @@ class RunConcurrencyGate {
         queuedNotified = true;
         safeInvoke(onQueued);
       }
-      await this.waitInQueue();
+      await this.waitInQueue(signal);
     }
     this.active += 1;
 
@@ -57,12 +66,21 @@ class RunConcurrencyGate {
     const coordinator = getSandboxCoordinator();
     // 全局上限按「本进程上限 × 进程数」不可知，故用本进程 maxRuns 作为每进程配额的
     // 上界近似；跨进程 runs:count 以相同 maxRuns 作为全局闸门（部署时按需调大）。
-    while (!(await coordinator.tryReserveRun(maxRuns))) {
-      if (!queuedNotified) {
-        queuedNotified = true;
-        safeInvoke(onQueued);
+    try {
+      while (!(await coordinator.tryReserveRun(maxRuns))) {
+        throwIfAborted(signal);
+        if (!queuedNotified) {
+          queuedNotified = true;
+          safeInvoke(onQueued);
+        }
+        await delay(RESERVE_RETRY_INTERVAL_MS);
       }
-      await delay(RESERVE_RETRY_INTERVAL_MS);
+    } catch (error) {
+      // 中止离开占位等待：归还刚占的本进程名额并唤醒队首——名额已 +1，异常路径
+      // 不归还会让闸门永久少一个名额
+      this.active = Math.max(0, this.active - 1);
+      this.dequeue();
+      throw error;
     }
 
     let released = false;
@@ -75,9 +93,23 @@ class RunConcurrencyGate {
     };
   }
 
-  private waitInQueue(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.queue.push({ resolve });
+  private waitInQueue(signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const reason = (): Error =>
+        signal?.reason instanceof Error ? signal.reason : new Error('run aborted');
+      if (signal?.aborted) {
+        reject(reason());
+        return;
+      }
+      const waiter: Waiter = { resolve };
+      // 中止时离队并拒绝：队位留给后面仍有效的等待者
+      const onAbort = () => {
+        const index = this.queue.indexOf(waiter);
+        if (index >= 0) this.queue.splice(index, 1);
+        reject(reason());
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.queue.push(waiter);
     });
   }
 

@@ -358,44 +358,70 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 [deploy-runbook.md](./docs/deploy-runbook.md)（我具体要做哪些操作）→
 [cicd-notes.md](./docs/cicd-notes.md)（为什么 + 坑在哪 + 怎么排）。
 
+## 🚀 多进程部署
+
+单进程撑不住时（run 级并发闸门 / LLM 调用量触顶），可横向扩到多实例。控制面
+（取消 / 抢占 / 删除）与事件面（SSE 回放 / 重连）均已跨进程化，前提是 `REDIS_URL`：
+
+- **取消 / 抢占 / 删除跨进程可达**：run 经 Redis 登记 owner（心跳续租），取消请求广播到
+  任一进程，owner 进程执行 abort；Redis 不可用时自动降级为进程内语义（`/api/health`
+  的 `distributed` 字段可见）。
+- **SSE 事件经 Redis Stream 镜像**（24h TTL，回放 + 重连续读）：**负载均衡不需要粘性**，
+  任意实例都能接住任意线程的流（sessionId 在请求 JSON body 里，`hash $arg_sessionId`
+  这类 nginx 片段也不适用）。
+- **优雅停机**：SIGTERM → 停止接受新 run（`/api/health` 返回 503 供 LB 摘除）→ 等待
+  运行中 run 收尾（`DEERFLOW_GRACEFUL_DRAIN_MS`，默认 30s）→ 超时取消 → flush 记忆
+  队列 → 退出。compose 的 `stop_grace_period` 需大于排水窗口（模板已配 60s）。
+- **僵尸回收**：进程被 kill -9 后，其运行中的 run 残留 `running` 状态；下一个进程启动
+  时对账（owner 键 45s 内到期）自动修正为 `failed`（文案 `cancelled: process died`），
+  线程状态带出 running。
+- **PG 连接数重算**：max_connections ≥ 每进程池上限 × 进程数 + 余量
+  （生产 compose 已配 200，进程数再增时按需上调）。
+
+进程管理选型：多容器 / k8s replicas 优先（每容器单进程，优雅停机语义最干净）；
+PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
+[deployment.md](./docs/deployment.md)「多进程部署」，运维步骤见
+[deploy-runbook.md](./docs/deploy-runbook.md)。
+
 ## 🔌 主要 API
 
-| 路由                                          | 方法          | 说明                                                                  |
-| --------------------------------------------- | ------------- | --------------------------------------------------------------------- |
-| `/api/v3/chat`                                | POST          | ⭐ 主聊天入口，SSE 流。threadId 走请求体 `sessionId`                  |
-| `/api/threads`                                | POST/GET      | 创建线程；分页列出（`?limit=&offset=&status=`）                       |
-| `/api/threads/[threadId]`                     | GET/DELETE    | 获取详情（可附带 checkpoint）/ 删除                                   |
-| `/api/threads/[threadId]/runs`                | POST/GET      | POST 提交 run（fire-and-forget，202 返回 `run_id`）/ 列出线程下的 run |
-| `/api/threads/[threadId]/runs/[runId]/stream` | GET           | SSE 流回放                                                            |
-| `/api/conversations/get_all_sessions`         | GET           | 当前用户的会话列表（按更新时间倒序）                                  |
-| `/api/conversations/history`                  | GET           | 某会话的历史消息（含附件元信息）                                      |
-| `/api/conversations/update_session`           | POST/DELETE   | 重命名 / **彻底删除**会话（消息 + MinIO 文件 + agent 侧 thread 数据） |
-| `/api/conversations/cancel_run`               | POST          | 取消该会话正在跑的 run（用户点「停止」），幂等                        |
-| `/api/files/upload`                           | POST          | multipart 上传，存 MinIO 并解析内容（图片走 OCR）                     |
-| `/api/files/delete`                           | DELETE        | 从 MinIO 删除                                                         |
-| `/api/memory`                                 | GET/DELETE    | 查询记忆数据 / 清空全部记忆                                           |
-| `/api/memory/facts`                           | POST          | 新建记忆事实（来源标记 manual）                                       |
-| `/api/memory/facts/[id]`                      | PUT/DELETE    | 更新 / 删除记忆事实                                                   |
-| `/api/memory/mode`                            | GET/PUT       | 记忆注入模式（`inject` 全量注入 / `retrieve` 按需检索）               |
-| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的词面 / 余弦 / 阈值 / 得分 / 最终注入文本        |
-| `/api/model-keys`                             | GET/PUT/PATCH | 已配置的模型 Key（仅掩码）/ 保存 Key（加密存储）+ 选择模型            |
-| `/api/model-keys/[provider]`                  | DELETE        | 删除某 provider 的 Key                                                |
-| `/api/prompt/enhance`                         | POST          | 输入框「提示词增强」                                                  |
-| `/api/mcp`                                    | GET/POST      | MCP 服务器列表 / 新建                                                 |
-| `/api/mcp/[name]`                             | PATCH/DELETE  | 修改 / 删除 MCP 服务器 + 启停切换                                     |
-| `/api/skills`                                 | GET/POST      | 技能列表 / 新建自定义 skill                                           |
-| `/api/skills/[name]`                          | PATCH         | 技能启用 / 禁用切换                                                   |
-| `/api/tools`                                  | GET           | 当前已绑定工具列表                                                    |
-| `/api/sandbox/stats`                          | GET           | 沙箱运行态快照（容器/并发统计，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控）  |
-| `/api/auth/register`                          | POST          | 用户注册                                                              |
-| `/api/auth/login`                             | POST          | 用户登录（返回 JWT）                                                  |
-| `/api/auth/logout`                            | POST          | 登出                                                                  |
-| `/api/auth/me`                                | GET           | 当前用户信息                                                          |
-| `/api/auth/change-password`                   | POST          | 修改密码                                                              |
-| `/api/auth/initialize`                        | POST          | 初始化管理员账户                                                      |
-| `/api/auth/setup-status`                      | GET           | 查询初始化状态                                                        |
-| `/api/auth/demo-login`                        | POST          | 体验账号一键登录（凭据取自服务端环境变量，未配置则 404）              |
-| `/api/auth/oauth/[provider]`                  | GET           | OAuth 第三方登录回调                                                  |
+| 路由                                          | 方法          | 说明                                                                              |
+| --------------------------------------------- | ------------- | --------------------------------------------------------------------------------- |
+| `/api/v3/chat`                                | POST          | ⭐ 主聊天入口，SSE 流。threadId 走请求体 `sessionId`                              |
+| `/api/health`                                 | GET           | 健康检查（免鉴权）：200 `ok/degraded`（`distributed` 跨进程可见）；停机排水期 503 |
+| `/api/threads`                                | POST/GET      | 创建线程；分页列出（`?limit=&offset=&status=`）                                   |
+| `/api/threads/[threadId]`                     | GET/DELETE    | 获取详情（可附带 checkpoint）/ 删除                                               |
+| `/api/threads/[threadId]/runs`                | POST/GET      | POST 提交 run（fire-and-forget，202 返回 `run_id`）/ 列出线程下的 run             |
+| `/api/threads/[threadId]/runs/[runId]/stream` | GET           | SSE 流回放                                                                        |
+| `/api/conversations/get_all_sessions`         | GET           | 当前用户的会话列表（按更新时间倒序）                                              |
+| `/api/conversations/history`                  | GET           | 某会话的历史消息（含附件元信息）                                                  |
+| `/api/conversations/update_session`           | POST/DELETE   | 重命名 / **彻底删除**会话（消息 + MinIO 文件 + agent 侧 thread 数据）             |
+| `/api/conversations/cancel_run`               | POST          | 取消该会话正在跑的 run（用户点「停止」），幂等                                    |
+| `/api/files/upload`                           | POST          | multipart 上传，存 MinIO 并解析内容（图片走 OCR）                                 |
+| `/api/files/delete`                           | DELETE        | 从 MinIO 删除                                                                     |
+| `/api/memory`                                 | GET/DELETE    | 查询记忆数据 / 清空全部记忆                                                       |
+| `/api/memory/facts`                           | POST          | 新建记忆事实（来源标记 manual）                                                   |
+| `/api/memory/facts/[id]`                      | PUT/DELETE    | 更新 / 删除记忆事实                                                               |
+| `/api/memory/mode`                            | GET/PUT       | 记忆注入模式（`inject` 全量注入 / `retrieve` 按需检索）                           |
+| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的词面 / 余弦 / 阈值 / 得分 / 最终注入文本                    |
+| `/api/model-keys`                             | GET/PUT/PATCH | 已配置的模型 Key（仅掩码）/ 保存 Key（加密存储）+ 选择模型                        |
+| `/api/model-keys/[provider]`                  | DELETE        | 删除某 provider 的 Key                                                            |
+| `/api/prompt/enhance`                         | POST          | 输入框「提示词增强」                                                              |
+| `/api/mcp`                                    | GET/POST      | MCP 服务器列表 / 新建                                                             |
+| `/api/mcp/[name]`                             | PATCH/DELETE  | 修改 / 删除 MCP 服务器 + 启停切换                                                 |
+| `/api/skills`                                 | GET/POST      | 技能列表 / 新建自定义 skill                                                       |
+| `/api/skills/[name]`                          | PATCH         | 技能启用 / 禁用切换                                                               |
+| `/api/tools`                                  | GET           | 当前已绑定工具列表                                                                |
+| `/api/sandbox/stats`                          | GET           | 沙箱运行态快照（容器/并发统计，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控）              |
+| `/api/auth/register`                          | POST          | 用户注册                                                                          |
+| `/api/auth/login`                             | POST          | 用户登录（返回 JWT）                                                              |
+| `/api/auth/logout`                            | POST          | 登出                                                                              |
+| `/api/auth/me`                                | GET           | 当前用户信息                                                                      |
+| `/api/auth/change-password`                   | POST          | 修改密码                                                                          |
+| `/api/auth/initialize`                        | POST          | 初始化管理员账户                                                                  |
+| `/api/auth/setup-status`                      | GET           | 查询初始化状态                                                                    |
+| `/api/auth/demo-login`                        | POST          | 体验账号一键登录（凭据取自服务端环境变量，未配置则 404）                          |
+| `/api/auth/oauth/[provider]`                  | GET           | OAuth 第三方登录回调                                                              |
 
 **主聊天请求体：**
 

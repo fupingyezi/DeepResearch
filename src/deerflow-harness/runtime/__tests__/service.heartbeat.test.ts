@@ -57,6 +57,9 @@ function makeHarness(heartbeatIntervalMs: number) {
     async listByThread() {
       return [];
     },
+    async listByStatus() {
+      return [];
+    },
   };
 
   // 流产出首帧后挂起，直到 abort —— 让 run 维持 running 状态足够久以观察心跳

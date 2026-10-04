@@ -2,9 +2,10 @@
  * RedisRunRegistry —— RunRegistry 的跨进程实现。
  *
  * Redis 承载三块协调状态（均为协调元数据，run 的最终真相在 PG）：
- * - `deerflow:run:owner:{runId}`：Hash（threadId/owner/startedAt），带 TTL ——
- *   owner 路由表，取消请求据此判断 run 是否存在；TTL 兜底僵尸登记（owner
- *   进程崩溃后自行过期）；
+ * - `deerflow:run:owner:{runId}`：Hash（threadId/owner/startedAt），带存活 TTL ——
+ *   owner 路由表，取消请求据此判断 run 是否存在；执行体心跳经 touch() 持续
+ *   续租，键存活 = owner 存活（僵尸回收凭 ownerOf 判死），owner 崩溃后键在
+ *   死亡窗口内到期；
  * - `deerflow:thread:running:{threadId}`：Set —— thread 名下在跑的 run 索引，
  *   每次登记刷新 TTL（「等收尾」轮询该集合，见 service 的 waitForRunsDrained）；
  * - `deerflow:run:cancel`：Pub/Sub 频道 —— 取消请求广播，各进程订阅后查本地
@@ -24,6 +25,7 @@ import { createClient } from 'redis';
 import type { RunOwnerInfo, RunRegistry } from '../contracts';
 import { InMemoryRunRegistry } from './in-memory';
 import { getInstanceOwner } from '../instance-id';
+import { OWNER_DEAD_AFTER_MS } from '../liveness';
 
 type RedisClient = ReturnType<typeof createClient>;
 
@@ -37,12 +39,15 @@ const CANCEL_SEEN_KEY_PREFIX = 'deerflow:run:cancel:seen:';
 /** 重复取消请求的短窗口去重 TTL：窗口内同一 run 只广播一次。 */
 const CANCEL_SEEN_TTL_MS = 10_000;
 
-/** owner 登记 TTL（DEERFLOW_RUN_OWNER_TTL_MS，默认 2h）：崩溃进程的悬挂登记自行过期。 */
+/** thread running 索引 TTL（DEERFLOW_RUN_OWNER_TTL_MS，默认 2h）：悬挂索引条目（owner 崩溃未注销）自行过期。 */
 const RUN_OWNER_TTL_S = (() => {
   const raw = Number(process.env.DEERFLOW_RUN_OWNER_TTL_MS);
   const ms = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2 * 60 * 60 * 1000;
   return Math.max(1, Math.floor(ms / 1000));
 })();
+
+/** owner 键存活 TTL：与死亡判定阈值一致——心跳续租，停摆后键在阈值内到期。 */
+const OWNER_LIVENESS_TTL_S = Math.max(1, Math.ceil(OWNER_DEAD_AFTER_MS / 1000));
 
 const ownerKeyOf = (runId: string): string => `${OWNER_KEY_PREFIX}${runId}`;
 const threadRunningKeyOf = (threadId: string): string => `${THREAD_RUNNING_KEY_PREFIX}${threadId}`;
@@ -66,6 +71,7 @@ export class RedisRunRegistry implements RunRegistry {
   private degraded = false;
   private degradeWarned = false;
   private subscribed = false;
+  private touchWarned = false;
   private readonly handlers: Array<(runId: string, reason: string) => number> = [];
   private readonly fallback = new InMemoryRunRegistry();
   /** runId → threadId 本进程登记镜像：owner Hash 过期后 unregister 仍能清 thread 索引。 */
@@ -97,13 +103,32 @@ export class RedisRunRegistry implements RunRegistry {
         owner: info.owner,
         startedAt: String(info.startedAt),
       });
-      await client.expire(ownerKey, RUN_OWNER_TTL_S);
+      // owner 键按存活 TTL 登记：键从登记起即代表「live owner」，首条心跳
+      // （≤15s）续租；登记后崩溃（心跳从未发出）也只在死亡窗口内残留
+      await client.expire(ownerKey, OWNER_LIVENESS_TTL_S);
       const threadKey = threadRunningKeyOf(info.threadId);
       await client.sAdd(threadKey, info.runId);
       await client.expire(threadKey, RUN_OWNER_TTL_S);
       await this.ensureSubscribed();
     } catch (error) {
       await this.degradeAnd(() => this.fallback.register(info), error);
+    }
+  }
+
+  async touch(runId: string): Promise<void> {
+    const client = await this.ensureClient();
+    if (!client) return; // 降级进程内：无跨进程存活语义
+    try {
+      await client.expire(ownerKeyOf(runId), OWNER_LIVENESS_TTL_S);
+      this.touchWarned = false;
+    } catch (error) {
+      // 续租失败不降级整个登记表：瞬时失败由下个心跳（15s 后）自愈；连续失败
+      // 超过死亡窗口会让键到期、被僵尸回收判死——但那意味着 owner 侧已与
+      // Redis 失联（发布 / 取消同样失效），判死是分布式系统的一致结论
+      if (!this.touchWarned) {
+        this.touchWarned = true;
+        console.warn(`${LOG} touch failed (will keep retrying):`, (error as Error)?.message);
+      }
     }
   }
 

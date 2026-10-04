@@ -24,6 +24,12 @@ export interface RunOwnerInfo {
 export interface RunRegistry {
   register(info: RunOwnerInfo): Promise<void>;
   unregister(runId: string): Promise<void>;
+  /**
+   * 续租 run 的 owner 登记（执行体存活心跳时调用）：跨进程实现把 owner 键 TTL
+   * 刷回死亡窗口——键存活 = owner 存活，僵尸回收凭 ownerOf 判死（owner 崩溃后
+   * 心跳停摆、键到期、ownerOf 落 null）。进程内实现无跨进程死亡语义，no-op。
+   */
+  touch(runId: string): Promise<void>;
   ownerOf(runId: string): Promise<RunOwnerInfo | null>;
   listByThread(threadId: string): Promise<RunOwnerInfo[]>;
   /**

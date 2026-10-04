@@ -20,6 +20,10 @@ export class InMemoryRunRegistry implements RunRegistry {
     else this.byThread.set(info.threadId, new Set([info.runId]));
   }
 
+  async touch(): Promise<void> {
+    // 无跨进程死亡语义：owner 即本进程，进程没了登记也没了，无需续租
+  }
+
   async unregister(runId: string): Promise<void> {
     const info = this.runs.get(runId);
     if (!info) return;
