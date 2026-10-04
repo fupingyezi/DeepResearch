@@ -26,9 +26,12 @@ import type { ThreadImageRef } from '../vision';
 
 import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
-import { streamBridge } from './stream-bridge';
 import { getRunConcurrencyGate } from './run-concurrency-gate';
 import { getSandboxProvider } from '../sandbox';
+import type { RunRegistry, RunEventBus } from './contracts';
+import { InMemoryRunRegistry } from './run-registry/in-memory';
+import { InMemoryRunEventBus } from './event-bus/in-memory';
+import { getInstanceOwner } from './instance-id';
 
 const LOG = '[thread-service]';
 
@@ -42,19 +45,25 @@ const RUN_CANCELLED_BY_USER = 'cancelled: stopped by user';
 /** 同一 thread 只允许一个 run：新 run 抢占上一个未结束的（两个 run 并发写同一份 checkpoint 会交错）。 */
 const RUN_CANCELLED_SUPERSEDED = 'cancelled: superseded by a new run';
 
-/** 等若干 run 收尾，最多 ms 毫秒。 */
-async function waitForRunsFinished(runs: Promise<void>[], ms: number): Promise<void> {
-  if (runs.length === 0) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      Promise.allSettled(runs),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
+/**
+ * 等 registry 里该 thread 的在跑 run 清空，最多 ms 毫秒。
+ *
+ * 只能轮询注册表：owner 进程的收尾 Promise 在其它进程里拿不到，而「等清空」是
+ * 抢占/销毁两条路径的共同前置（同一 thread 的 checkpoint 不允许两个 run 并发写）。
+ * 取消收尾是微任务级，25ms 轮询一次足以在首个间隔内命中，超时照常继续。
+ */
+async function waitForRunsDrained(
+  registry: RunRegistry,
+  thread_id: string,
+  ms: number,
+): Promise<void> {
+  const POLL_INTERVAL_MS = 25;
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const running = await registry.listByThread(thread_id);
+    if (running.length === 0) return;
+    if (Date.now() >= deadline) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 }
 
@@ -135,7 +144,11 @@ export interface ThreadService {
   listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]>;
   getThread(input: GetThreadInput): Promise<{ meta: ThreadMeta; checkpoint?: any } | null>;
   deleteThread(input: DeleteThreadInput): Promise<void>;
-  /** 取消该 thread 在跑的 run（用户点「停止」）。返回被取消的 run 数；thread 不存在抛 NOT_FOUND。 */
+  /**
+   * 取消该 thread 在跑的 run（用户点「停止」）。返回取消请求投递数——单进程
+   * 实现即命中数，跨进程实现为「已送达 owner」的投递数（拿不到远端命中回报）；
+   * thread 不存在抛 NOT_FOUND。
+   */
   cancelRun(input: CancelRunInput): Promise<{ cancelled: number }>;
   submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
   subscribe(input: SubscribeInput): AsyncIterable<ClientAgentEvent>;
@@ -158,6 +171,12 @@ export interface ThreadServiceDeps {
    * 缺省时一律使用默认 client。
    */
   createClientForModel?: (modelConfig: ModelConfig) => DeerFlowClient;
+  /**
+   * 可选：进程间契约实现（RunRegistry / RunEventBus）。缺省为进程内实现；
+   * 跨进程部署在装配侧注入对应实现。
+   */
+  registry?: RunRegistry;
+  eventBus?: RunEventBus;
 }
 
 /** 自定义错误：携带 code 字段，用于路由层做精细化响应。 */
@@ -193,41 +212,53 @@ async function getTupleSafe(
 
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   const { client, checkpointer, threads, runs, createClientForModel } = deps;
+  const runRegistry: RunRegistry = deps.registry ?? new InMemoryRunRegistry();
+  const runEventBus: RunEventBus = deps.eventBus ?? new InMemoryRunEventBus();
 
-  // 进程内「在跑的 run」注册表：run_id → { thread_id, controller, finished }。
+  // 进程内「在跑的 run」控制句柄表：run_id → { thread_id, controller }。
   //
   // 用途：删除对话时先取消它正在跑的 run。run 是 fire-and-forget，不取消的话它会在
   // threads_meta / checkpoint 被清掉之后继续为自己的 thread 写 checkpoint，把刚清理
   // 干净的数据又写回来。
   //
+  // controller 不可序列化，只能留在 owner 进程的闭包里；取消请求经 runRegistry 以
+  // 消息式送达本进程（下方 handler），handler 命中这里才真正 abort。句柄表与
+  // registry 的登记严格同步：executeRun 里同点 set / register，finally 里同点注销。
   // 必须按 run_id 挂在 createThreadService 的闭包里：service 与 client 都是进程级共享
   // 实例，多 run 并行时不能把控制句柄做成单例字段。
-  const activeRuns = new Map<
-    string,
-    { thread_id: string; controller: AbortController; finished: Promise<void> }
-  >();
+  const activeRuns = new Map<string, { thread_id: string; controller: AbortController }>();
+
+  // 消息式取消的唯一落点：收到本进程名下 run 的取消请求时 abort 对应 controller。
+  // 返回 1 = 命中（本进程是 owner 且 run 还在跑），0 = run 不在本进程（已收尾）。
+  runRegistry.onCancelRequest((runId, reason) => {
+    const entry = activeRuns.get(runId);
+    if (!entry) return 0;
+    entry.controller.abort(new Error(reason));
+    return 1;
+  });
 
   /**
    * 取消某 thread 名下所有在跑的 run。
    *
    * wait=true 用于「抢占 / 销毁」这两类必须确保对方停笔的场景（同一 thread 的 checkpoint
    * 不允许两个 run 并发写）；用户点「停止」用 wait=false，立刻返回不拖慢交互。
+   * 取消请求经 runRegistry 投递（跨进程时到达 owner 进程），投递数即取消数。
    */
   const cancelThreadRuns = async (
     thread_id: string,
     reason: string,
     wait: boolean,
   ): Promise<number> => {
-    const entries = [...activeRuns.values()].filter((entry) => entry.thread_id === thread_id);
-    if (entries.length === 0) return 0;
-    for (const entry of entries) entry.controller.abort(new Error(reason));
-    if (wait) {
-      await waitForRunsFinished(
-        entries.map((entry) => entry.finished),
-        RUN_CANCEL_GRACE_MS,
-      );
+    const running = await runRegistry.listByThread(thread_id);
+    if (running.length === 0) return 0;
+    let cancelled = 0;
+    for (const info of running) {
+      cancelled += await runRegistry.requestCancel(info.runId, reason);
     }
-    return entries.length;
+    if (wait) {
+      await waitForRunsDrained(runRegistry, thread_id, RUN_CANCEL_GRACE_MS);
+    }
+    return cancelled;
   };
 
   // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
@@ -253,7 +284,6 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     await threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
     await runs.setStatus(run_id, 'running');
 
-    const channel = streamBridge.channel(thread_id, run_id);
     const ctx: RuntimeContext = {
       thread_id,
       run_id,
@@ -261,14 +291,14 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       ...(user_id ? { user_id } : {}),
     };
 
-    // 取消句柄 + 「已收尾」信号（deleteThread 要等它，见 waitForRunsFinished）。
-    // finished 先于执行体建好，避免执行体比赋值更快结束的竞态。
     const controller = new AbortController();
-    let markFinished: () => void = () => {};
-    const finished = new Promise<void>((resolve) => {
-      markFinished = resolve;
+    activeRuns.set(run_id, { thread_id, controller });
+    await runRegistry.register({
+      runId: run_id,
+      threadId: thread_id,
+      owner: getInstanceOwner(),
+      startedAt: Date.now(),
     });
-    activeRuns.set(run_id, { thread_id, controller, finished });
 
     void (async () => {
       let releaseRunSlot: (() => void) | null = null;
@@ -300,7 +330,11 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         // run 级并发闸门：超限时先回传「排队中」状态帧（复用 task_progress 语义，
         // 仅增字段不破坏白名单），对话可先思考，执行体延迟到放行后启动。
         releaseRunSlot = await getRunConcurrencyGate().acquire(() => {
-          channel.publish(
+          // 闸门回调是同步的，publish 用 void 触发：进程内实现的发布体同步执行，
+          // 「排队中」帧保证落在后续任何事件之前。
+          void runEventBus.publish(
+            thread_id,
+            run_id,
             createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, threadMeta.assistant_id, {
               taskId: run_id,
               status: 'queued',
@@ -317,7 +351,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
 
         await runWithContext(ctx, async () => {
           for await (const ev of makeStream(controller.signal)) {
-            channel.publish(ev);
+            await runEventBus.publish(thread_id, run_id, ev);
           }
         });
 
@@ -338,7 +372,9 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         const cancelled = controller.signal.aborted;
         const message = cancelled ? cancelReasonText() : ((e as Error)?.message ?? String(e));
         if (!cancelled) {
-          channel.publish(
+          await runEventBus.publish(
+            thread_id,
+            run_id,
             createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
               errorCode: 'THREAD_RUN_ERROR',
               errorMessage: message,
@@ -360,8 +396,10 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       } finally {
         if (releaseRunSlot) releaseRunSlot();
         activeRuns.delete(run_id);
-        markFinished();
-        channel.publish(
+        await runRegistry.unregister(run_id);
+        await runEventBus.publish(
+          thread_id,
+          run_id,
           createClientAgentEvent(ClientAgentEventType.END, threadMeta.assistant_id, {} as never),
         );
       }
@@ -489,7 +527,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     },
 
     subscribe({ thread_id, run_id }) {
-      return streamBridge.channel(thread_id, run_id).subscribe();
+      return runEventBus.subscribe(thread_id, run_id);
     },
 
     async getCheckpoint({ thread_id, checkpoint_id }) {

@@ -8,6 +8,8 @@
 
 import {
   DeerFlowClient,
+  InMemoryRunEventBus,
+  InMemoryRunRegistry,
   PgRunStore,
   PgThreadMetaStore,
   buildThreadConfig,
@@ -284,6 +286,9 @@ async function build(): Promise<ThreadService> {
     threads: new PgThreadMetaStore(),
     runs: new PgRunStore(),
     createClientForModel,
+    // 显式注入进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点，service 自身不感知
+    registry: new InMemoryRunRegistry(),
+    eventBus: new InMemoryRunEventBus(),
   });
 }
 

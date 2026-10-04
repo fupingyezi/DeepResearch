@@ -229,6 +229,11 @@ export { runWithContext, getContext, requireContext, type RuntimeContext } from 
 // runtime/stream-bridge
 export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
+// runtime/contracts + 进程内实现
+export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/contracts';
+export { InMemoryRunRegistry } from './runtime/run-registry/in-memory';
+export { InMemoryRunEventBus } from './runtime/event-bus/in-memory';
+
 // runtime/service
 export {
   createThreadService,
