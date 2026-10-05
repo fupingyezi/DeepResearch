@@ -6,7 +6,7 @@
  *
  * 管线：
  * - 路 A 向量召回：pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底）；
- *   余弦 ≥ 语义门槛才进 RRF；4 个打分 section 单独 JS 过门槛并入——pgvector 的
+ *   余弦 ≥ 语义门槛才进 RRF；4 个召回 section 单独 JS 过门槛并入——pgvector 的
  *   top-50 可能全被 facts 占满，section 不能因此丢（只算 ≤4 次余弦，代价可忽略）；
  * - 路 B 词面召回：query token 重叠率 > 0 的 facts + 4 section，top-50；
  * - RRF(k=60) 按**排名**融合——向量分与词面分不同量纲，排名天然可比；
@@ -20,7 +20,7 @@
  * 双路召回皆空判定，不存在绝对分数阈值。
  */
 
-import { cosineSimilarity, isCompatibleVector, SCORED_SECTION_SLOTS } from './embeddings';
+import { cosineSimilarity, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
 import type { VectorSearchResult } from './storage';
 import type { Fact, FactCategory, MemoryData, SectionData } from './types';
 
@@ -188,7 +188,7 @@ function vectorRef(hit: VectorSearchResult): string {
 }
 
 /** 按 group/slot 取 section；UserSection/HistorySection 字面量 key 需经 unknown 中转索引。 */
-function scoredSection(data: MemoryData, group: 'user' | 'history', slot: string): SectionData {
+function getSection(data: MemoryData, group: 'user' | 'history', slot: string): SectionData {
   const value = (data[group] as unknown as Record<string, SectionData>)[slot];
   return value ?? { summary: '', updatedAt: '' };
 }
@@ -200,7 +200,7 @@ export interface LexicalHit {
   lexical: number;
 }
 
-/** 路 B 词面召回：重叠率 > 0 的 facts + 4 个打分 section，按重叠率降序取 top-N。 */
+/** 路 B 词面召回：重叠率 > 0 的 facts + 4 个召回 section，按重叠率降序取 top-N。 */
 export function lexicalRecall(
   data: MemoryData,
   queryTokens: Set<string>,
@@ -211,8 +211,8 @@ export function lexicalRecall(
     const lexical = overlapRatio(f.content, queryTokens);
     if (lexical > 0) hits.push({ ref: factRef(f.id), lexical });
   }
-  for (const [group, slot] of SCORED_SECTION_SLOTS) {
-    const section = scoredSection(data, group, slot);
+  for (const [group, slot] of RECALL_SECTION_SLOTS) {
+    const section = getSection(data, group, slot);
     if (!section?.summary) continue;
     const lexical = overlapRatio(section.summary, queryTokens);
     if (lexical > 0) hits.push({ ref: sectionRef(group, slot), lexical });
@@ -239,8 +239,8 @@ export function vectorRecallJs(
       similarity: cosineSimilarity(f.embedding!, queryEmbedding),
     });
   }
-  for (const [group, slot] of SCORED_SECTION_SLOTS) {
-    const section = scoredSection(data, group, slot);
+  for (const [group, slot] of RECALL_SECTION_SLOTS) {
+    const section = getSection(data, group, slot);
     if (!section?.summary || !isCompatibleVector(section.embedding, queryEmbedding.length)) {
       continue;
     }
@@ -292,29 +292,27 @@ interface PoolEntry {
   text: string;
   rrf: number;
   rerank: number | null;
+  /** 组装排序分：final =（rerank ?? RRF）×（fact 再乘 confidence 权重），
+   *  在 rerank 之后统一算好写回——topK 选择与预览明细读同一个值。 */
+  final: number | null;
   fact?: Fact;
   group?: 'user' | 'history';
   slot?: string;
 }
 
 /** 由 RRF 融合结果解析出完整候选（ref 必须能回到 data 里的实体，否则防御性跳过）。 */
-function buildCandidatePool(
-  data: MemoryData,
-  fused: RrfEntry[],
-  vectorHits: Map<string, number>,
-  lexicalByRef: Map<string, number>,
-): PoolEntry[] {
+function buildCandidatePool(data: MemoryData, fused: RrfEntry[]): PoolEntry[] {
   const factById = new Map((data.facts ?? []).map((f) => [f.id, f]));
   const pool: PoolEntry[] = [];
   for (const { ref, rrf } of fused) {
     if (ref.startsWith('fact:')) {
       const fact = factById.get(ref.slice('fact:'.length));
       if (!fact) continue;
-      pool.push({ ref, kind: 'fact', text: fact.content, rrf, rerank: null, fact });
+      pool.push({ ref, kind: 'fact', text: fact.content, rrf, rerank: null, final: null, fact });
     } else {
       const parsed = parseSectionRef(ref);
       if (!parsed) continue;
-      const section = scoredSection(data, parsed.group, parsed.slot);
+      const section = getSection(data, parsed.group, parsed.slot);
       if (!section?.summary) continue;
       pool.push({
         ref,
@@ -322,6 +320,7 @@ function buildCandidatePool(
         text: section.summary,
         rrf,
         rerank: null,
+        final: null,
         group: parsed.group,
         slot: parsed.slot,
       });
@@ -336,18 +335,18 @@ function confidenceWeight(fact: Fact): number {
 }
 
 /**
- * fact 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence），降序取 topK。
+ * fact 组装：按 final 降序取 topK（final 在组装分步骤已写回池条目）。
  * 稳定排序保持池序：rerank 分压缩（0.99+ 并列常见）时以精排 / RRF 序兜底。
  */
 function finalizeFacts(
   ranked: PoolEntry[],
   topK: number,
 ): { facts: Fact[]; pickedIds: Set<string> } {
-  const weighted = ranked
+  const picked = ranked
     .filter((e) => e.kind === 'fact' && e.fact)
-    .map((e) => ({ fact: e.fact!, final: (e.rerank ?? e.rrf) * confidenceWeight(e.fact!) }));
-  weighted.sort((a, b) => b.final - a.final);
-  const facts = weighted.slice(0, topK).map((w) => w.fact);
+    .sort((a, b) => (b.final ?? 0) - (a.final ?? 0))
+    .slice(0, topK);
+  const facts = picked.map((e) => e.fact!);
   return { facts, pickedIds: new Set(facts.map((f) => f.id)) };
 }
 
@@ -441,7 +440,7 @@ export interface RetrieveResult {
   picked: MemoryData;
   /** 全部 fact 的明细（含未入选者），按 final 降序。 */
   facts: FactScoreDetail[];
-  /** 4 个打分 section 的明细。 */
+  /** 4 个召回 section 的明细。 */
   sections: SectionScoreDetail[];
   /** RRF 融合后的候选池大小。 */
   poolSize: number;
@@ -482,6 +481,26 @@ function warnRerankDegradeOnce(e: unknown): void {
 }
 
 /**
+ * 打分明细的公共字段：全部取自管线过程值（词面命中 / 向量命中 / 池条目），
+ * 明细层不做二次计算——facts 与 sections 明细共用，保证口径一致。
+ */
+function scoreOf(
+  ref: string,
+  entry: PoolEntry | undefined,
+  lexicalByRef: Map<string, number>,
+  vectorHits: Map<string, number>,
+): Pick<FactScoreDetail, 'lexical' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'final'> {
+  return {
+    lexical: lexicalByRef.get(ref) ?? 0,
+    cosine: vectorHits.get(ref) ?? null,
+    inVectorLeg: vectorHits.has(ref),
+    rrf: entry?.rrf ?? null,
+    rerank: entry?.rerank ?? null,
+    final: entry?.final ?? null,
+  };
+}
+
+/**
  * 按 query 检索 memory，返回子集与全程明细。子集可直接喂 formatMemoryForInjection。
  * query 为空且无向量、或双路召回全空时返回 null（调用方据此跳过注入，避免噪声）。
  */
@@ -504,7 +523,6 @@ export async function retrieveMemory(
   let vectorLeg: 'pg' | 'js' | null = null;
   const vectorHits = new Map<string, number>(); // ref → 相似度（≥ 门槛才收录）
   if (queryEmbedding) {
-    vectorLeg = options.vectorRecall ? 'pg' : 'js';
     let hits: VectorSearchResult[] | null = null;
     if (options.vectorRecall) {
       try {
@@ -513,18 +531,21 @@ export async function retrieveMemory(
         warnVectorDegradeOnce(e);
       }
     }
-    if (!hits) {
+    // pg 召回成功才标 pg；未注册 / 抛错 / 无后端一律走 JS 扫描兜底
+    if (hits) {
+      vectorLeg = 'pg';
+    } else {
       hits = vectorRecallJs(data, queryEmbedding, RECALL_EACH);
       vectorLeg = 'js';
     }
     for (const h of hits) {
       if (h.similarity >= threshold) vectorHits.set(vectorRef(h), h.similarity);
     }
-    // 4 个打分 section 单独 JS 过门槛并入：pgvector 的 top-50 可能全被 facts 占满，
+    // 4 个召回 section 单独 JS 过门槛并入：pgvector 的 top-50 可能全被 facts 占满，
     // section 不能因此丢。JS 兜底路径里这些条目已含在 vectorRecallJs 结果中，
     // has 判定跳过、数值同源，不影响最终排名。
-    for (const [group, slot] of SCORED_SECTION_SLOTS) {
-      const section = scoredSection(data, group, slot);
+    for (const [group, slot] of RECALL_SECTION_SLOTS) {
+      const section = getSection(data, group, slot);
       if (!section?.summary || !isCompatibleVector(section.embedding, queryEmbedding.length)) {
         continue;
       }
@@ -552,7 +573,7 @@ export async function retrieveMemory(
   );
   if (fused.length === 0) return null; // 双路全空 → 不注入
 
-  const pool = buildCandidatePool(data, fused, vectorHits, lexicalByRef);
+  const pool = buildCandidatePool(data, fused);
 
   // ---- rerank 精排池头，池尾按 RRF 序衔接 ----
   let rerankUsed = false;
@@ -579,6 +600,12 @@ export async function retrieveMemory(
     }
   }
 
+  // ---- 组装分（单一出处）：final =（rerank ?? RRF）×（fact 再乘 confidence 权重）----
+  // 一次算好写回池条目：topK 选择与预览明细读同一个值，公式不会漂移
+  for (const e of pool) {
+    e.final = (e.rerank ?? e.rrf) * (e.kind === 'fact' && e.fact ? confidenceWeight(e.fact) : 1);
+  }
+
   // ---- 组装 ----
   const { facts: pickedFacts, pickedIds } = finalizeFacts(ranked, topK);
   const { user, history, keepTopOfMind, historySlot } = pickSections(data, ranked);
@@ -595,38 +622,26 @@ export async function retrieveMemory(
   const factsDetail: FactScoreDetail[] = (data.facts ?? [])
     .map((f) => {
       const ref = factRef(f.id);
-      const entry = poolByRef.get(ref);
       return {
         id: f.id,
         content: f.content,
         category: f.category,
         confidence: f.confidence,
-        lexical: lexicalByRef.get(ref) ?? 0,
-        cosine: vectorHits.get(ref) ?? null,
-        inVectorLeg: vectorHits.has(ref),
-        rrf: entry?.rrf ?? null,
-        rerank: entry?.rerank ?? null,
-        final: entry ? (entry.rerank ?? entry.rrf) * confidenceWeight(f) : null,
+        ...scoreOf(ref, poolByRef.get(ref), lexicalByRef, vectorHits),
         picked: pickedIds.has(f.id),
       };
     })
     .sort((a, b) => (b.final ?? -Infinity) - (a.final ?? -Infinity));
 
-  const sectionsDetail: SectionScoreDetail[] = SCORED_SECTION_SLOTS.map(([group, slot]) => {
-    const section = scoredSection(data, group, slot);
+  const sectionsDetail: SectionScoreDetail[] = RECALL_SECTION_SLOTS.map(([group, slot]) => {
+    const section = getSection(data, group, slot);
     const ref = sectionRef(group, slot);
-    const entry = poolByRef.get(ref);
     return {
       ref,
       group,
       slot,
       summary: section.summary ?? '',
-      lexical: lexicalByRef.get(ref) ?? 0,
-      cosine: vectorHits.get(ref) ?? null,
-      inVectorLeg: vectorHits.has(ref),
-      rrf: entry?.rrf ?? null,
-      rerank: entry?.rerank ?? null,
-      final: entry ? (entry.rerank ?? entry.rrf) : null,
+      ...scoreOf(ref, poolByRef.get(ref), lexicalByRef, vectorHits),
       picked: group === 'user' ? keepTopOfMind : historySlot === slot,
     };
   });

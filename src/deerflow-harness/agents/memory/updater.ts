@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import { getMemoryConfig } from './config';
-import { embedQuery, embedTexts, isCompatibleVector, SCORED_SECTION_SLOTS } from './embeddings';
+import { embedQuery, embedTexts, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
 import {
@@ -111,7 +111,7 @@ async function embedMissingFacts(data: MemoryData): Promise<void> {
 }
 
 /**
- * 为参与打分的 sections（SCORED_SECTION_SLOTS）补齐缺失 / 维度失效的向量。
+ * 为参与召回的 sections（RECALL_SECTION_SLOTS）补齐缺失 / 维度失效的向量。
  * 与 embedMissingFacts 同纪律：整槽替换（不 mutate 元素本身，data 是 updater 私有
  * 深拷贝，槽位容器可直接写）、失败保持无向量交由检索侧回填重试。
  */
@@ -119,7 +119,7 @@ async function embedMissingSections(data: MemoryData): Promise<void> {
   const config = getMemoryConfig();
   if (!config.embeddingEnabled) return;
   const slots: Array<['user' | 'history', string]> = [];
-  for (const [group, key] of SCORED_SECTION_SLOTS) {
+  for (const [group, key] of RECALL_SECTION_SLOTS) {
     const container = data[group] as unknown as Record<string, SectionData>;
     const section = container[key];
     if (section?.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions)) {

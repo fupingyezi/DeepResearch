@@ -23,7 +23,7 @@ import {
   isCompatibleVector,
   isUnitVector,
   normalizeVector,
-  SCORED_SECTION_SLOTS,
+  RECALL_SECTION_SLOTS,
 } from './embeddings';
 import { mergeWithEmpty, readLegacyMemoryFile, resolveLegacyFilePath } from './legacy-file';
 import type { MemorySqlExecutor, MemoryStorage, VectorSearchResult } from './storage';
@@ -139,7 +139,7 @@ export class PgMemoryStorage implements MemoryStorage {
         rows.push({ kind: 'fact', refId: f.id, vector: toUnitVector(f.embedding) });
       }
     }
-    for (const [group, slot] of SCORED_SECTION_SLOTS) {
+    for (const [group, slot] of RECALL_SECTION_SLOTS) {
       const section = (data[group] as unknown as Record<string, SectionData>)[slot];
       if (section?.summary && isCompatibleVector(section.embedding, dims)) {
         rows.push({

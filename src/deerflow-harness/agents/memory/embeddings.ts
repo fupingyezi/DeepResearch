@@ -163,12 +163,12 @@ export function isCompatibleVector(v: unknown, dims: number): v is number[] {
 const backfillInFlight = new Set<string>();
 
 /**
- * 参与检索打分的 section 槽位（topOfMind + history 三段）。
- * 恒保留的 workContext/personalContext 不参与打分，不嵌向量——
+ * 参与检索召回的 section 槽位（topOfMind + history 三段）。
+ * 恒保留的 workContext/personalContext 不进召回，不嵌向量——
  * 1024 维浮点数组 JSON 序列化每条约 15-20KB，无决策作用的向量纯占体积。
  * 写入侧补齐（updater.embedMissingSections）与回填共用此集合。
  */
-export const SCORED_SECTION_SLOTS = [
+export const RECALL_SECTION_SLOTS = [
   ['user', 'topOfMind'],
   ['history', 'recentMonths'],
   ['history', 'earlierContext'],
@@ -176,7 +176,7 @@ export const SCORED_SECTION_SLOTS = [
 ] as const;
 
 /** 按 group/slot 取 section；UserSection/HistorySection 字面量 key 需经 unknown 中转索引。 */
-function scoredSection(data: MemoryData, group: 'user' | 'history', slot: string): SectionData {
+function getSection(data: MemoryData, group: 'user' | 'history', slot: string): SectionData {
   return (
     (data[group] as unknown as Record<string, SectionData>)[slot] ?? { summary: '', updatedAt: '' }
   );
@@ -214,8 +214,8 @@ export async function backfillMemoryEmbeddings(opts: {
     const missingFacts = latest.facts.filter(
       (f) => !isCompatibleVector(f.embedding, config.embeddingDimensions),
     );
-    const missingSections = SCORED_SECTION_SLOTS.filter(([group, slot]) => {
-      const section = scoredSection(latest, group, slot);
+    const missingSections = RECALL_SECTION_SLOTS.filter(([group, slot]) => {
+      const section = getSection(latest, group, slot);
       return section.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions);
     });
     // 存量归一：维度合法但非单位向量（归一化落地前写入的旧数据），原地归一零 API 调用
@@ -224,8 +224,8 @@ export async function backfillMemoryEmbeddings(opts: {
         isCompatibleVector(f.embedding, config.embeddingDimensions) &&
         !isUnitVector(f.embedding as number[]),
     );
-    const unnormalizedSections = SCORED_SECTION_SLOTS.filter(([group, slot]) => {
-      const section = scoredSection(latest, group, slot);
+    const unnormalizedSections = RECALL_SECTION_SLOTS.filter(([group, slot]) => {
+      const section = getSection(latest, group, slot);
       return (
         section.summary &&
         isCompatibleVector(section.embedding, config.embeddingDimensions) &&
@@ -243,7 +243,7 @@ export async function backfillMemoryEmbeddings(opts: {
 
     const vectors = await embedTexts([
       ...missingFacts.map((f) => f.content),
-      ...missingSections.map(([group, slot]) => scoredSection(latest, group, slot).summary),
+      ...missingSections.map(([group, slot]) => getSection(latest, group, slot).summary),
     ]);
     // 重嵌全部失败且无归一工作可做：等下次回填重试
     if (
@@ -268,7 +268,7 @@ export async function backfillMemoryEmbeddings(opts: {
       const vector = vectors[missingFacts.length + j];
       if (vector != null) {
         sectionVectorBySlot.set(`${group}.${slot}`, vector);
-        sectionSummaryBySlot.set(`${group}.${slot}`, scoredSection(latest, group, slot).summary);
+        sectionSummaryBySlot.set(`${group}.${slot}`, getSection(latest, group, slot).summary);
       }
     });
 
@@ -282,7 +282,7 @@ export async function backfillMemoryEmbeddings(opts: {
     const normalizedSectionBySlot = new Map<string, number[]>();
     const normalizedSummaryBySlot = new Map<string, string>();
     for (const [group, slot] of unnormalizedSections) {
-      const section = scoredSection(latest, group, slot);
+      const section = getSection(latest, group, slot);
       normalizedSectionBySlot.set(
         `${group}.${slot}`,
         normalizeVector(section.embedding as number[]),
