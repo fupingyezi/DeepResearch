@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisEventBus } from '../redis';
-import { describeRunEventBusContract } from '../../__tests__/contract-cases';
+import { describeRunEventBusContract } from '../../__tests__/helpers/contract-cases';
 import {
   ClientAgentEventType,
   createClientAgentEvent,

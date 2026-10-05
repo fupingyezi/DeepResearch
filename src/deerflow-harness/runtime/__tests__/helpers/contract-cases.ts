@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RunRegistry, RunEventBus } from '../contracts';
+import type { RunRegistry, RunEventBus } from '../../contracts';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
   type StampedClientAgentEvent,
-} from '../sse/client-event';
+} from '../../sse/client-event';
 
 /**
  * RunRegistry / RunEventBus 的契约一致性用例（按实现参数化复用）：

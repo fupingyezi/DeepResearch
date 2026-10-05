@@ -2,7 +2,7 @@ import { afterAll, describe } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisRunRegistry } from '../redis';
-import { describeRunRegistryContract } from '../../__tests__/contract-cases';
+import { describeRunRegistryContract } from '../../__tests__/helpers/contract-cases';
 
 /**
  * RedisRunRegistry 集成套件：需要本机 Redis（REDIS_URL 可达），否则整组跳过。

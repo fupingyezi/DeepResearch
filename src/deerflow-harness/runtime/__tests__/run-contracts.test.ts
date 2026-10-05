@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { InMemoryRunRegistry } from '../run-registry/in-memory';
 import { InMemoryRunEventBus } from '../event-bus/in-memory';
-import { describeRunRegistryContract, describeRunEventBusContract } from './contract-cases';
+import { describeRunRegistryContract, describeRunEventBusContract } from './helpers/contract-cases';
 
 // 进程内实现的契约一致性（跨进程实现接入后在实现清单追加一行即可复用同一组用例）
 describeRunRegistryContract({
