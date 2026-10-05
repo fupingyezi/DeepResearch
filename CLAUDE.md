@@ -56,7 +56,8 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 
 - `DATABASE_URL` / `REDIS_URL` / `MINIO_*`——基础设施（账密端口与 `docker-compose.yaml` 一致）
 - `MODEL_KEY_ENC_SECRET`——用户模型 Key 加密密钥，一旦设置不可更改
-- `ZHIPU_API_KEY`——智谱（GLM 预设 / 图片 OCR / embedding 共用）；无 Key 时 OCR 返回占位文本、语义检索回落词面
+- `ZHIPU_API_KEY`——智谱（GLM 预设 / 图片 OCR / embedding / rerank 共用）；无 Key 时 OCR 返回占位文本、语义检索回落词面、rerank 静默关闭
+- `DEERFLOW_RERANK_ENABLED`（'0' 显式关）/ `DEERFLOW_RERANK_API_KEY`（回落 ZHIPU_API_KEY）/ `DEERFLOW_RERANK_MODEL`（默认 rerank）/ `DEERFLOW_RERANK_BASE_URL`——记忆检索精排（默认开，失败静默保持 RRF 序）
 - `DEERFLOW_SANDBOX_BACKEND`——local（默认，宿主直连）/ docker（每线程加固容器）/ remote（每线程 SSH）；`DEERFLOW_ALLOW_HOST_BASH` 只门控 local（docker/remote 是隔离边界）
 - `DEERFLOW_MAX_CONCURRENT_RUNS`（run 级闸门，默认 16）/ `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（容器级闸门，默认 32）
 - `DEERFLOW_GRACEFUL_DRAIN_MS`——优雅停机排水窗口（默认 30000）
@@ -265,13 +266,14 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 **文件：** `src/deerflow-harness/agents/memory/`
 
 - **结构 `MemoryData`**：`user.workContext/personalContext/topOfMind` + `history.recentMonths/earlierContext/longTermBackground`（各带 summary + updatedAt）+ `facts[]`（id/category/confidence/source/embedding）
-- **存储**：`FileMemoryStorage` 落 `{DEERFLOW_DATA_DIR|~/.deer-flow}/users/{userId}/memory.json`（lead 主链路固定 per-user 作用域，跨 agent 共享该用户记忆）
+- **存储（PG 双表真相源 + 文件降级）**：`PgMemoryStorage`（`memory_state` jsonb 存结构不含 embedding、`memory_vectors` pgvector 列存向量，`scope_key = ${userId}::${agentName}`；update = 单事务行锁 RMW，行锁取代文件后端的 Redis 分布式锁；**mutator 前必须水合向量**——updater 的 embedMissingFacts/Sections 靠读 current 里的 embedding 判缺，不水合会每轮更新全量重嵌）；`FileMemoryStorage`（`{DEERFLOW_DATA_DIR|~/.deer-flow}/users/{userId}/memory.json`）降为测试 / pgvector 不可用时的降级后端。wiring `ensureMemoryStorage()`：`initialMemoryDb`（CREATE EXTENSION + 建表 + 维度变更先清空再 ALTER 列）成功 → 切 PG，失败 warnOnce 保留文件后端。**懒迁移**：scope 行缺失时读旧 memory.json 插行 + 建向量（ON CONFLICT DO NOTHING，跨进程并发只有一个赢家），只读不删旧文件；迁移后 PG 增量不回写文件
 - **LLM 驱动更新（MemoryUpdater）**：加载 → 拼 prompt（注入当前 memory + 对话 + 校正/强化提示）→ LLM invoke（**关键：显式 `callbacks: []`**，切断与外层 SSE handler 的回调链，防止向已关闭的 ReadableStream 写入触发 ERR_INVALID_STATE）→ JSON 解析（含 tryRecoverJson 修复 Qwen maxTokens 触顶的尾部截断）→ applyUpdates（confidence 过滤 + casefold 去重 + maxFacts 截断）→ stripUploadMentions 清洗文件引用 → 落盘
-- **注入模式**：`inject`（默认，全量：所有 section + facts 按 confidence 降序，2000 token 预算）/ `retrieve`（按本轮输入检索 top-K facts + 最相关一段 history，800 token 预算）。由 `configuration.memoryMode` 切换
-- **混合检索**（`retrieval.ts` 纯函数；词面 + 语义混合打分）：词面分量 = 重叠率(|text∩query|/|query|) × (0.5 + 0.5×confidence)；语义分量 = 余弦 × `embeddingHybridWeight`（默认 0.7），需过门槛才参与；facts 与 sections 同一套打分核心。query：词面用近 3 轮用户输入拼接（省略式提问「它呢？」命中上轮实体），语义只用当前轮（拼串稀释向量语义）。全部落空 → 不注入（避免无关记忆干扰）；workContext/personalContext 视为身份信息恒保留
-- **向量基础设施**（`embeddings.ts`）：智谱 embedding-3（OpenAI 兼容 `/embeddings`，dimensions 256..2048 默认 1024），工厂由 wiring 经 `setMemoryEmbeddingsFactory` 注入；未注册 / 无 Key / API 失败一律静默降级词面。**必须显式传 `encodingFormat: 'float'`**：SDK 缺省时按 base64 解码响应，而智谱忽略该参数仍返回 float——1024 维被当字节流重解释成 256 个无意义数，余弦成 NaN，语义检索悄悄退回词面且无报错
-- **阈值 0.6 系实测标定**：embedding-3 中文短文本无关基线 0.44~0.55，真相关 0.64~0.69，阈值须落在两者之间（标定依据见 retrieval.ts 注释）；换 embedding 模型 / 语言后需重标定。**记忆与提问须同语言**：跨语言余弦 0.33~0.49 全低于阈值，故 MEMORY_UPDATE_PROMPT 要求用用户对话的语言写 summary 与 facts
-- 无向量库 / 无 ANN：向量随 memory.json 落盘，检索即内存线性扫描，受 maxFacts（100）约束；观察入口 `GET /api/memory/retrieve?q=`（与真实注入同一段代码）；旧数据回填 `backfillMemoryEmbeddings`（补缺失 / 维度不匹配的 facts 与 sections，save 前 reload 合并防互踩）
+- **注入模式**：`inject`（默认，全量：所有 section + facts 按 confidence 降序，2000 token 预算）/ `retrieve`（RAG 管线检索 top-K facts + 最相关一段 history，800 token 预算）。由 `configuration.memoryMode` 切换
+- **检索管线**（`retrieval.ts`，双路召回 → RRF 融合 → rerank 精排 → 组装）：路 A 向量召回——pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底，`vectorLeg` 记来源），余弦 ≥ 门槛才进 RRF；4 个打分 section 单独 JS 过门槛并入（pgvector top-50 可能被 facts 占满，section 不能因此丢）。路 B 词面召回——overlapRatio > 0 的 facts + 4 section，top-50。RRF(k=60) 按**排名**融合（向量分与词面分不同量纲，排名天然可比；路 A 先入 Map 保 tie 稳定序）→ 候选池（rerank 时 max(topK, 20)）→ rerank 精排池头（≤20 条，池尾按 RRF 序衔接；未注册 / 失败 → warnOnce 保持 RRF 序）→ 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）取 topK(8)。query 分工：词面用近 3 轮用户输入拼接（省略式提问「它呢？」命中上轮实体），语义与 rerank 只用本轮单句（拼串稀释向量语义）。双路全空 → 不注入（即使存在身份信息）；workContext/personalContext 恒保留、history 三段留池内最优一段、topOfMind 进池才留
+- **向量基础设施**（`embeddings.ts`）：智谱 embedding-3（OpenAI 兼容 `/embeddings`，dimensions 256..2048 默认 1024），工厂由 wiring 经 `setMemoryEmbeddingsFactory` 注入；未注册 / 无 Key / API 失败一律静默降级词面。**必须显式传 `encodingFormat: 'float'`**：SDK 缺省时按 base64 解码响应，而智谱忽略该参数仍返回 float——1024 维被当字节流重解释成 256 个无意义数，余弦成 NaN，语义检索悄悄退回词面且无报错。**L2 归一化在 embedding 出口做**：`embedQuery`/`embedTexts` 统一归一（覆盖 query / updater / fact CRUD / backfill 全部向量出生点），存量向量经 backfill 原地归一（零 API 调用）——PG 存归一向量后 `1 - <=>` 即余弦
+- **rerank**（`rerank.ts` + `src/lib/zhipu-rerank.ts`）：单段智谱 rerank API 裸 fetch（`POST {base}/rerank`，`results` 按 index 对齐缺失填 0）。fail-fast 在适配层（非 2xx 抛错）、静默降级在 harness 封装层（`rerankWithFallback` → null + warnOnce）。**rerank 分分布高度压缩（不相关也常 0.99+），只做相对排序**——不存在绝对分数阈值，「全部落空」由双路召回皆空判定。env：`DEERFLOW_RERANK_ENABLED`（'0' 显式关）/ `DEERFLOW_RERANK_API_KEY`（回落 `ZHIPU_API_KEY`）/ `DEERFLOW_RERANK_MODEL=rerank` / `DEERFLOW_RERANK_BASE_URL`（默认 open.bigmodel.cn/api/paas/v4）
+- **阈值 0.6 系实测标定**：embedding-3 中文短文本无关基线 0.44~0.55，真相关 0.64~0.69，取 0.6 作为**路 A 召回门槛**（标定依据见 retrieval.ts 注释）；换 embedding 模型 / 语言后需重标定。**记忆与提问须同语言**：跨语言余弦 0.33~0.49 全低于阈值，故 MEMORY_UPDATE_PROMPT 要求用用户对话的语言写 summary 与 facts
+- 向量检索为 pgvector 精确扫描（B-tree 按 scope 过滤 + `<=>` 排序，无 HNSW），facts 上限 100 不变；观察入口 `GET /api/memory/retrieve?q=`（与真实注入同一段代码，含打分明细 / poolSize / rerankUsed / vectorLeg）；旧数据回填 `backfillMemoryEmbeddings`（补缺失 / 维度不匹配 / 未归一的 facts 与 sections，save 前 reload 合并防互踩）
 
 ### 8.5 MCP 与 Skill 扩展（extensions）
 
@@ -334,7 +336,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 ### 11. 关键设计模式
 
 - **进程级单例**：wiring.ts `getThreadService()` 懒初始化（DeerFlowClient + Checkpointer + Stores + createClientForModel），dev 下挂 globalThis（见 §3）。App 侧 service 用 `createXService(deps?)` 工厂 + 模块级懒单例 `getXService()`——无跨请求可变状态，模块级单例即可
-- **app → harness 注入点**（依赖方向单向，wiring 统一注入）：`setMemoryModelFactory`（记忆更新 LLM）、`setTitleModelFactory`（标题/提示词增强）、`setMemoryEmbeddingsFactory`（智谱 embedding-3）、`setThreadImageFetcher`（MinIO 图片字节读取）、`setParentHistoryProvider`（子 agent 父 checkpoint 读取）
+- **app → harness 注入点**（依赖方向单向，wiring 统一注入）：`setMemoryModelFactory`（记忆更新 LLM）、`setTitleModelFactory`（标题/提示词增强）、`setMemoryEmbeddingsFactory`（智谱 embedding-3）、`setMemoryRerankerFactory`（智谱 rerank 精排）、`setThreadImageFetcher`（MinIO 图片字节读取）、`setParentHistoryProvider`（子 agent 父 checkpoint 读取）
 - **AsyncLocalStorage 上下文传播**（`runtime/context.ts`）：`runWithContext()` 在整个 Agent 调用栈提供 threadId / runId / userId / agent_name / currentModelConfig；SubagentExecutor 经 `getContext()?.thread_id` 读父线程 ID、`currentModelConfig` 透传 modelConfig
 - **幂等线程创建**：前端生成 `sessionId`（UUID）作请求体字段调 `POST /api/v3/chat`，`createThread()` 先查再写，外部指定 ID 天然支持请求重试
 - **LLM 用量记账**（`runtime/usage/usage-accounting.ts` + `usage/pricing.ts`）：模型工厂（models/index.ts，lead 与 subagent 的唯一模型入口）挂 callback handler，把每次调用的 usage 累加进 **ALS 作用域**累加器——一处覆盖 lead + subagent + 中间件的全部 LLM 调用，不改 SSE 协议不动前端。两条不变量：① sink 必须在调用时解析（agent 实例跨 run 缓存，绑死会混用量）② 产品路径默认没有 sink（handler 直接返回，行为与接线前一致）
@@ -377,7 +379,8 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/runtime/sse/client-event.ts` / `to-client-event.ts`——ClientAgentEvent 白名单协议 / 内→外过滤边界
 - `src/deerflow-harness/types/agent-event.ts`——AgentEvent 内部事件枚举
 - `src/deerflow-harness/subagents/executor.ts` / `parent-history.ts`——SubagentExecutor（超时+取消）/ 父历史只读注入
-- `src/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts`——MemoryUpdater / 向量基础设施 / 混合检索
+- `src/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts` / `pg-storage.ts`——MemoryUpdater / 向量基础设施（归一化）/ RAG 检索管线 / PG 存储后端
+- `src/lib/zhipu-rerank.ts`——智谱 rerank 适配层（fail-fast 裸 fetch，降级在 harness `rerankWithFallback`）
 - `src/deerflow-harness/vision/image-fetcher.ts` / `vision-middleware.ts`——图片字节注入 + 多模态 content 构造 / 历史图片压缩
 - `src/deerflow-harness/tools/builtins/`——内置工具（task / search_web / clarification / view_image）
 - `src/lib/files/file-parser.ts`——上传文件解析（PDF/DOCX/文本 + 图片 OCR）
@@ -395,7 +398,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 2. ThreadChannel buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧非关键帧（`start`/`error`/`end`/`human_interrupt` 关键帧永不丢弃）
 3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
 4. 单元测试覆盖建设中（vitest 已接入，覆盖中间件装配、防递归、guardrail 规则、记忆检索、checkpoint 行为约束、remote 沙箱、父历史剪枝等核心纯逻辑）
-5. 记忆检索无向量库 / 无 ANN：向量随 memory.json 落盘，检索即内存线性扫描，受 maxFacts（100）约束；facts 规模显著增长后需另接向量存储
+5. 记忆检索为 pgvector **精确扫描**（B-tree 按 scope 过滤 + 精确 `<=>` 排序，无 HNSW 索引）：单 scope 向量数超 ~5k 再评估 HNSW；facts 上限 100 不变
 6. remote 沙箱并发上限按进程独立计（不做跨进程协调），多进程部署实际连接数 = 上限 × 进程数
 7. `view_image` 仅支持本会话上传的图片（按文件名）；沙箱产物图片（如 matplotlib 输出）未支持——Sandbox 基类只有文本 readFile，要支持需为 local/docker/remote 三个后端各加二进制读取
 8. 智谱 `glm-5.3-flash` 是**推理模型**：reasoning 计入 completion_tokens，`max_tokens` 过小（实测 32）会让 content 为空。副链路（标题生成 maxTokens 默认 64）若被指定为该模型需注意；主聊天链路不设 maxTokens，走 provider 默认值，不受影响

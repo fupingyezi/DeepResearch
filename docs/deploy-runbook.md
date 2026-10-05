@@ -204,6 +204,12 @@ APP_IMAGE=deepresearch:<sha> docker compose --env-file .env.production \
   -f docker-compose.prod.yaml up -d app
 ```
 
+**回滚窗口（记忆存储 PG 化后）**：应用回滚到 PG 化之前的旧镜像时，旧代码走文件记忆后端
+（`memory.json` 迁移时只读不删，旧记忆原样可读），但迁移之后在 PG 里新增 / 更新的记忆
+**不回写文件**——旧版本上看不到这段时间的记忆增量（有损窗口，数据本身不丢，切回新版
+即恢复可见）。回滚期间不建议做记忆相关的写操作；若确认长期留在旧版本，需自行从
+`memory_state` 导出还原文件。
+
 **服务器整体卡死（SSH 都慢/进不去）**：先怀疑磁盘写满或内存打满 —— 本机构建 + 同机跑
 PG/Redis/MinIO/app，任何一项吃满都会让全机失去响应。
 
@@ -256,6 +262,12 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
   每次部署会把工作目录里不属于新源码包的遗留文件删掉再同步，不要在这里放其他东西
 - 长期记忆 / 沙箱文件 / 自定义技能 / MCP 启用状态都在 named volume 里，
   重建容器不丢；但 `docker volume rm` 会丢
+- postgres 容器镜像为 `pgvector/pgvector:pg15`（与 `postgres:15` 同一数据卷格式，
+  原地切换不丢数据、无需重建卷）：发版首次 `up` 会拉新镜像重建 postgres 容器
+  （秒级中断）。`CREATE EXTENSION vector` 失败（镜像 / 权限问题）时应用自动回落
+  文件记忆后端，功能不损，日志有 `[memory]` 告警
+- 记忆懒迁移只读不删：`memory.json` 的旧记忆在首次读取时迁入 PG（`memory_state` /
+  `memory_vectors`），文件原样保留；此后 PG 是真相源、增量不回写文件（回滚窗口见「五」）
 
 ## 七、多进程运维
 
