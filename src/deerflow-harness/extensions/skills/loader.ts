@@ -16,8 +16,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { getExtensionsConfigStore } from '../extensions';
-import { getCustomSkillsDir, getPublicSkillsDir, getSkillsRootDir } from '../extensions/paths';
+import { getExtensionsConfigStore } from '..';
+import { getCustomSkillsDir, getPublicSkillsDir, getSkillsRootDir } from '../paths';
 import { parseFrontmatter } from './frontmatter';
 import { type Skill, type SkillCategory, validateSkillName } from './types';
 

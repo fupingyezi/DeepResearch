@@ -18,8 +18,8 @@ import {
 } from './runtime/sse';
 import { buildThreadConfig } from './runtime/checkpointer';
 import { getContext } from './runtime/context';
-import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './mcp';
-import { getEnabledSkillsSignature } from './skills';
+import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './extensions/mcp';
+import { getEnabledSkillsSignature } from './extensions/skills';
 import { extractMessageContentText } from '@/utils/common';
 import {
   buildHumanMessageContent,

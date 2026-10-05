@@ -17,11 +17,7 @@
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { MultiServerMCPClient, type Connection } from '@langchain/mcp-adapters';
 
-import {
-  getExtensionsConfigStore,
-  resolveEnvPlaceholders,
-  type McpServerConfig,
-} from '../extensions';
+import { getExtensionsConfigStore, resolveEnvPlaceholders, type McpServerConfig } from '..';
 
 /**
  * 把 server 名清洗为合法工具名前缀。

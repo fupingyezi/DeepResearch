@@ -88,10 +88,15 @@ export {
   resetSkillCache,
   createCustomSkill,
   buildSkillsSection,
-} from './skills';
+} from './extensions/skills';
 
 // MCP 子系统（端到端：配置→连接→工具注入）
-export { type McpToolsResult, loadMcpTools, getEnabledMcpSignature, resetMcpClient } from './mcp';
+export {
+  type McpToolsResult,
+  loadMcpTools,
+  getEnabledMcpSignature,
+  resetMcpClient,
+} from './extensions/mcp';
 
 // Memory 子系统
 export {

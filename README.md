@@ -93,9 +93,9 @@ src/
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
 │   │   ├── middlewares/                # 位序中间件实现（全部平铺，装配序见 index.ts）
 │   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储/队列 + embeddings + retrieval（混合检索）
-│   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
-│   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
-│   ├── skills/                         # Skill 加载器（frontmatter 解析 + prompt 注入）
+│   ├── extensions/                     # 统一扩展域：配置存储 + MCP 客户端 + Skill 加载器
+│   │   ├── mcp/                        # MCP 客户端（MultiServerMCPClient 封装）
+│   │   └── skills/                     # Skill 加载器（frontmatter 解析 + prompt 注入）
 │   ├── subagents/                      # SubagentExecutor、注册表、schema、general-purpose 内置、父历史只读注入
 │   ├── vision/                         # 图片多模态
 │   │   ├── image-fetcher.ts            # ThreadImageRef + buildHumanMessageContent（image_url data URL）
