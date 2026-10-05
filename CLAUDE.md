@@ -212,7 +212,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 
 ### 5. 事件系统（双层协议）与 StreamBridge
 
-**内部事件 `AgentEvent`**（`types/agent-event.ts`，20+ 枚举）→ **客户端白名单 `ClientAgentEvent`**（`runtime/sse/client-event.ts`，10 种，前端经 `src/runtime/protocol/client-event.ts` re-export 复用）：
+**内部事件 `AgentEvent`**（`types/agent-event.ts`，20+ 枚举）→ **客户端白名单 `ClientAgentEvent`**（`runtime/sse/client-event.ts`，10 种，前端经 `src/events/protocol/client-event.ts` re-export 复用）：
 
 - `start` — `{ sessionId?, run_id, thread_id, chatSession?, userMessageId?, assistantMessageId? }`（权威 START 由 chat-service 下发）
 - `stream_chunk` — `{ text, reasoning? }`；`tool_call` — `{ toolCallId, toolName, arguments? }`；`tool_result` — `{ toolCallId, toolName, result, success }`
@@ -320,7 +320,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - `sessionRuntimes: Record<sessionId, { messages, status: 'idle'|'running'|'done'|'error', abortController, lastActiveAt }>`——每个对话一个独立运行桶（真并行的真相源）
 - 按 sessionId 的 action：setSessionMessages / setSessionStatus / setSessionAbortController / getSessionRuntime / `migrateSessionRuntime`（临时 id → 真实 id）/ abortSession
 - `currentMessages` / `isChating` 降级为「currentSessionId 桶的投影」，切对话时从桶恢复投影（含正在跑的消息与运行态），避免全局单例被切走的对话覆盖
-- 事件泵（`src/runtime/context/agent-event-context.tsx` 的 `AgentEventProvider`）每 session 一个 pump，emit 前给事件盖 `sessionId`+`streamId` 分拣戳；store 写入者 `SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者按初始 sid 路由写桶——START 用 `migrateSessionRuntime` 衔接新建对话的临时 id 与后端真实 id；侧栏 `SessionStatusIndicator` 订阅 `sessionRuntimes[id]?.status` 显示运行态
+- 事件泵（`src/events/context/agent-event-context.tsx` 的 `AgentEventProvider`）每 session 一个 pump，emit 前给事件盖 `sessionId`+`streamId` 分拣戳；store 写入者 `SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者按初始 sid 路由写桶——START 用 `migrateSessionRuntime` 衔接新建对话的临时 id 与后端真实 id；侧栏 `SessionStatusIndicator` 订阅 `sessionRuntimes[id]?.status` 显示运行态
 
 **停止按钮的三条不变量**（改这块前先看，坑都踩过）：
 
@@ -383,7 +383,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/extensions/config-store.ts` / `skills/loader.ts` / `mcp/client.ts`——扩展配置存储 / skill 加载器 / MCP 客户端
 - `src/deerflow-harness/sandbox/provider-factory.ts` + `docker/` + `remote/`——沙箱后端工厂 + Docker 后端 + Remote 后端
 - `src/store/chat-session-store.ts`——前端聊天会话状态（sessionRuntimes 分桶并行）
-- `src/runtime/context/agent-event-context.tsx`——AgentEventProvider（每 session 泵 + sink 挂载）
+- `src/events/context/agent-event-context.tsx`——AgentEventProvider（每 session 泵 + sink 挂载）
 - `src/utils/chat/agent-event-sink.ts` / `chat-request-body.ts`——SessionStreamSink 注册表（事件→store）/ `/api/v3/chat` 请求体纯组装
 - `.github/workflows/deploy.yml` / `scripts/deploy-remote.sh`——CI/CD 流水线 / 服务器端部署
 - `docs/deploy-runbook.md` / `docs/cicd-notes.md` / `docs/sandbox-implementation.md`——部署操作手册 / 技术沉淀（踩坑实录）/ 沙箱完整设计

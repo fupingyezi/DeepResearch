@@ -1,5 +1,5 @@
 import './globals.css';
-import { AuthProvider } from '@/runtime/context/auth-provider';
+import { AuthProvider } from '@/events/context/auth-provider';
 import { initialDB } from '@/lib/db';
 
 // 在模块加载时触发一次（fire-and-forget），不阻塞 layout 渲染。

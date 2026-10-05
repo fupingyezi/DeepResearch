@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EventBus } from '@/runtime/client';
+import { EventBus } from '@/events/client';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
   type StartPayload,
-} from '@/runtime/protocol/client-event';
+} from '@/events/protocol/client-event';
 import useChatSessionStore from '@/store/chat-session-store';
 import type { ChatMessageType, ChatSessionType, MessagePart } from '@/types';
 import type { RafFlusher } from '@/utils/common';

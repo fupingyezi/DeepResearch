@@ -20,7 +20,7 @@ import { useConversationStore } from '@/store';
 import { UUIDTypes } from 'uuid';
 import { formatYmd } from '@/utils/common';
 import { useOutsideClick } from '@/hooks';
-import { useAuth } from '@/runtime/context/auth-provider';
+import { useAuth } from '@/events/context/auth-provider';
 import { SettingsDialog } from '@/components/settings/settings-dialog';
 
 type SessionDialogMode = 'rename' | 'delete';

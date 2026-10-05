@@ -20,8 +20,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 
-import { ClientAgentEventType } from '@/runtime/protocol/client-event';
-import type { EventBus, RoutedClientAgentEvent } from '@/runtime/client';
+import { ClientAgentEventType } from '@/events/protocol/client-event';
+import type { EventBus, RoutedClientAgentEvent } from '@/events/client';
 import useChatSessionStore, { type SessionRunStatus } from '@/store/chat-session-store';
 import type { TitleUpdatePayload } from '@/deerflow-harness';
 import { createRafFlusher, type RafFlusher } from '@/utils/common';

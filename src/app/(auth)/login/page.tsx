@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
-import { useAuth } from '@/runtime/context/auth-provider';
+import { useAuth } from '@/events/context/auth-provider';
 import type { UserResponse } from '@deerflow-harness/auth/types';
 import {
   AuthRequestError,
