@@ -348,6 +348,12 @@ export class ChatService {
     // —— recall / reEditCall 截断 ——
     if (shouldPersistMessages && (isRecall || isReEdit)) {
       try {
+        // checkpoint 截断先于 DB 截断：模型看到的历史来自 checkpoint（DB 只决定 UI
+        // 显示），且失败时 DB 原封不动（重试不会多删）。checkpoint 里没有 human 消息
+        // （truncated=false）不是错误——提交失败的编辑轮可能从未进过 checkpoint，
+        // DB 侧截断语义照旧。
+        const threadService = await this.deps.getThreadService();
+        await threadService.truncateHistory({ thread_id: threadId, user_id: userId });
         if (isRecall) {
           // recall 的输入不是请求体文本：前端把「复制 / 下载 / recall」共用的回答正文
           // 当作 inputValue 传回来，正文不是新提问。真正的输入是「被重新生成的那条

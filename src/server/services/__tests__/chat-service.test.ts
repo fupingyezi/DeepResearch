@@ -157,7 +157,7 @@ describe('userPartsToContents', () => {
       { partId: 'p1', type: 'text', createdAt: 1 },
       { partId: 'p2', type: 'file', createdAt: 1, content: { fileId: 123 } },
     ];
-    expect(userPartsToContents(parts as MessagePart[])).toEqual([]);
+    expect(userPartsToContents(parts as unknown as MessagePart[])).toEqual([]);
   });
 });
 
@@ -318,10 +318,11 @@ describe('prepare', () => {
         metadata: { memoryEnabled: true },
       }),
     );
+    expect(threadService.truncateHistory).not.toHaveBeenCalled();
   });
 
-  it('recall：截断自最近 assistant 消息起，不写 user message', async () => {
-    const { conversations, getThreadService } = makeDeps();
+  it('recall：先截 checkpoint 再截 DB，自最近 assistant 消息起，不写 user message', async () => {
+    const { conversations, getThreadService, threadService } = makeDeps();
     const createdAt = new Date('2026-01-01T00:00:00Z');
     (conversations.getLatestMessageByRole as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       id: 'a1',
@@ -336,6 +337,17 @@ describe('prepare', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(threadService.truncateHistory).toHaveBeenCalledWith({
+      thread_id: 'sess-1',
+      user_id: 'u1',
+    });
+    // checkpoint 截断在 DB 截断之前：失败时 DB 原封不动，重试不会多删
+    expect(
+      (threadService.truncateHistory as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      (conversations.deleteMessagesAtOrAfter as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    );
     expect(conversations.deleteMessagesAtOrAfter).toHaveBeenCalledWith('sess-1', createdAt);
     expect(conversations.saveUserMessage).not.toHaveBeenCalled();
   });
@@ -406,7 +418,7 @@ describe('prepare', () => {
   });
 
   it('reEditCall：截断自最近 user/assistant 中较早者', async () => {
-    const { conversations, getThreadService } = makeDeps();
+    const { conversations, getThreadService, threadService } = makeDeps();
     const assistantAt = new Date('2026-01-02T00:00:00Z');
     const userAt = new Date('2026-01-01T00:00:00Z');
     (conversations.getLatestMessageByRole as ReturnType<typeof vi.fn>)
@@ -420,6 +432,10 @@ describe('prepare', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(threadService.truncateHistory).toHaveBeenCalledWith({
+      thread_id: 'sess-1',
+      user_id: 'u1',
+    });
     expect(conversations.deleteMessagesAtOrAfter).toHaveBeenCalledWith('sess-1', userAt);
     // reEditCall 要写新的 user message
     expect(conversations.saveUserMessage).toHaveBeenCalled();
@@ -450,5 +466,6 @@ describe('prepare', () => {
       expect.objectContaining({ thread_id: 'sess-1', decision: 'hello' }),
     );
     expect(threadService.submitRun).not.toHaveBeenCalled();
+    expect(threadService.truncateHistory).not.toHaveBeenCalled();
   });
 });

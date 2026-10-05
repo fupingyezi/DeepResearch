@@ -170,6 +170,11 @@ export interface GetCheckpointInput {
   checkpoint_id?: string;
 }
 
+export interface TruncateHistoryInput {
+  thread_id: string;
+  user_id?: string;
+}
+
 export interface ThreadService {
   createThread(input: CreateThreadInput): Promise<{ thread_id: string }>;
   listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]>;
@@ -189,6 +194,13 @@ export interface ThreadService {
    * 复用同一 thread_id（共享 checkpoint），返回新的 run_id。事件经 StreamBridge 推送。
    */
   resume(input: ResumeRunInput): Promise<{ run_id: string }>;
+  /**
+   * recall / reEditCall 的 checkpoint 截断：移除「最近一条 human 消息起至结尾」的
+   * 全部消息。模型看到的历史由 checkpoint 决定，DB 截断只决定 UI 显示，两者必须
+   * 同步截断。返回 truncated = 是否真的截到了（checkpoint 里没有 human 消息 →
+   * false，不是失败）。
+   */
+  truncateHistory(input: TruncateHistoryInput): Promise<{ truncated: boolean }>;
   /**
    * 优雅停机：置 draining 后不再接受新 run（submitRun / resume 抛 SERVER_DRAINING），
    * 等待本进程在跑的 run 自然收尾，超时后取消它们并再等一轮收尾（执行体 finally
@@ -723,6 +735,33 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           makeStream: (signal) =>
             runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
         });
+      });
+    },
+
+    async truncateHistory({ thread_id, user_id }) {
+      // draining 时同样拒绝：截断是为新一轮 run 铺路，此时截了也没法跑（且 prepare
+      // 以 checkpoint 截断为前置，这里抛错保证 DB 侧原封不动）
+      if (draining) {
+        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+      }
+      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
+      if (!threadMeta) {
+        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+      }
+
+      // 与 submitRun 同一把 thread 锁：先取消在跑的 run 并等停笔——否则被取消的旧
+      // run 收尾时会把刚删掉的消息写回 checkpoint（截断在它停笔前生效）。
+      return withThreadLock(thread_id, async () => {
+        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+        if (superseded > 0) {
+          console.info(
+            `${LOG} truncateHistory superseded ${superseded} running run(s) thread_id=${thread_id}`,
+          );
+        }
+        // 截断用默认 client：所有 client 共享同一 checkpointer，用哪个实例结果一致
+        const truncated = await client.truncateHistoryBeforeLatestUserMessage(thread_id);
+        console.info(`${LOG} truncateHistory thread_id=${thread_id} truncated=${truncated}`);
+        return { truncated };
       });
     },
 

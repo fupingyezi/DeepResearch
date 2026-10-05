@@ -118,7 +118,7 @@ Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `create
 
 **文件：** `src/app/api/v3/chat/route.ts`。三阶段管线（编排在 chat-service，路由只做 prepare → submit → streamEvents 串联）：
 
-1. **prepare（preflight 全序列，顺序即不变量）**：inputText 校验 → `resolveFilesByIds` → 组装 `images` → **模型预检**（`resolveUserModelConfig`，失败 400 引导去「设置-模型管理」；置于建会话之前，防空会话）→ 确保会话行存在 + 幂等创建线程 → recall/reEdit 截断 → 写 user message → 预生成 `assistantMessageId`。
+1. **prepare（preflight 全序列，顺序即不变量）**：inputText 校验 → `resolveFilesByIds` → 组装 `images` → **模型预检**（`resolveUserModelConfig`，失败 400 引导去「设置-模型管理」；置于建会话之前，防空会话）→ 确保会话行存在 + 幂等创建线程 → recall/reEdit 截断（**checkpoint 先截、DB 后截**：模型看到的历史来自 checkpoint，失败时 DB 原封不动）→ 写 user message → 预生成 `assistantMessageId`。
    会话行两条路径都经 `ensureSession()`——缺省时新建（UUID），传了 `sessionId` 则「有就复用、没有就补建」。**不能**退回「只在没传 sessionId 时建行」：前端首个请求失败（未收到 START）时不会重置本地状态，下一轮会把本地临时 UUID 当「已有会话」发过来；旧实现会先落下 `threads_meta` 孤儿，紧接着 `chat_message.session_id` 外键失败 500，run 永远起不来。会话属于他人时抛 `ChatSessionAccessError` → 403。
 2. **submit（fire-and-forget）**：`submitRun()` / `resume()` 立即返回 `run_id`，Agent 后台异步执行。
 3. **streamEvents + createSseStream**：先 `yield` START 帧（携 `run_id` / `thread_id` / `chatSession` / `userMessageId` / `assistantMessageId`），再转发 StreamBridge 订阅事件；`AssistantPartsCollector` 同步收集本轮 assistant parts，在生成器 **finally** 里落库（含「用户已取消」标记补写）。整个生成器**必须**整体传给 `createSseStream(request, events)`——abort 的 break 触发 `generator.return()` 才会执行 finally；改成「流结束后路由层 await 落库」会在 abort 路径丢持久化。
@@ -183,12 +183,13 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 
 ### 3. ThreadService
 
-**文件：** `src/deerflow-harness/runtime/service.ts`；**单例入口：** `src/server/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + RunRegistry + RunEventBus + AsyncLocalStorage Context（12 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
+**文件：** `src/deerflow-harness/runtime/service.ts`；**单例入口：** `src/server/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + RunRegistry + RunEventBus + AsyncLocalStorage Context（13 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `truncateHistory` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
 
 **关键不变量：**
 
 - `submitRun` 立即返回 `run_id`，执行体 fire-and-forget；`try/catch/finally` 三重状态收敛：成功 `succeeded` + `idle`；失败 catch 中 publish ERROR 事件 → `failed` + `error`；兜底 finally 始终 publish END（channel 对已关闭状态 publish 是 no-op）
 - `resume()` 经 `resumeStream()` 以 LangGraph `Command({ resume: decision })` 续跑人工中断（HTTP `operation: 'resume'` 触发）
+- `truncateHistory()`（recall/reEditCall 重跑前的 checkpoint 截断）：与 submitRun 同款入口（draining 拒绝 / NOT_FOUND / thread 锁内先取消在跑的 run 并等停笔——顺序不能反，否则旧 run 收尾会把刚删掉的消息写回 checkpoint）→ 默认 client 的 `truncateHistoryBeforeLatestUserMessage`（getState 找最近 human 锚点 → 每被删消息一条 RemoveMessage → `updateState(..., START)` 纯通道写入，不带 asNode 会经节点写手路由到模型）。用默认 client 即可：所有 client 共享同一 checkpointer。返回 `{truncated}`；checkpoint 里没有 human 消息 → false，不算失败（提交失败的编辑轮可能从未进过 checkpoint，DB 侧截断语义照旧）
 - **run 可被取消**（进程内 `activeRuns` 注册表，按 `run_id` 挂在 service 闭包里），三条路径共用「abort signal + 可选等收尾」：
   - `cancelRun()`（用户点停止）：只 abort，不等收尾——交互要立刻有响应
   - `deleteThread()`：abort **并等收尾**（上限 3s）再删 meta / 沙箱容器 / checkpoint，否则 run 会在清理之后继续写 checkpoint，把刚删掉的数据写回来
