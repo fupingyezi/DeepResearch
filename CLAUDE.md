@@ -305,7 +305,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - **历史压缩先于摘要**：VisionMiddleware 用 beforeAgent（摘要中间件用 beforeModel），LangGraph 结构保证压缩先于摘要——否则 base64 会被 JSON.stringify 进摘要 prompt。历史 `image_url` blocks 全部换 `[图片已查看，可用 view_image 重新查看]`（克隆时保留 id——add_messages 按 id merge；无 id 的跳过，否则 append 语义会重复）
 - **`view_image` 工具**：模型按文件名重新查看图片（句柄来自 `[附图: xxx]` 文本块）。返回多模态 ToolMessage，**必须自带 `runtime.toolCallId`**（ToolNode 对 ToolMessage 实例原样采用，不会补）
 - **SSE 安全**：messages 模式显式跳过 ToolMessage；updates 模式 tool 分支经 `extractContentTextBlocks` 剥离 image blocks——base64 不会进入 SSE 事件与前端 parts-reducer
-- **图片 OCR（上传解析）**：`lib/file-parser.ts` 对 image/\* 调 `ocrImageFromZhipu`——主路径智谱**原生** `POST {base}/layout_parsing`（**file 必须用 data URI**：实测裸 base64 被拒 code 1214），失败降级视觉模型读图转 markdown，再失败返回占位文本（layout_parsing 会拒绝某些合法图片）。**永不抛错**：`/api/files/upload` 把解析异常记为 `status='failed'`，前端有「全部文件 parsedStatus 为 success 才可发送」的硬门禁——抛错会让用户传图后根本发不出消息。图片分支**绕过**文本提取末尾的空白折叠，否则 markdown 表格/标题层级会被压平
+- **图片 OCR（上传解析）**：`lib/files/file-parser.ts` 对 image/\* 调 `ocrImageFromZhipu`——主路径智谱**原生** `POST {base}/layout_parsing`（**file 必须用 data URI**：实测裸 base64 被拒 code 1214），失败降级视觉模型读图转 markdown，再失败返回占位文本（layout_parsing 会拒绝某些合法图片）。**永不抛错**：`/api/files/upload` 把解析异常记为 `status='failed'`，前端有「全部文件 parsedStatus 为 success 才可发送」的硬门禁——抛错会让用户传图后根本发不出消息。图片分支**绕过**文本提取末尾的空白折叠，否则 markdown 表格/标题层级会被压平
 
 ### 9. 持久化（PG schema）
 
@@ -379,7 +379,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts`——MemoryUpdater / 向量基础设施 / 混合检索
 - `src/deerflow-harness/vision/image-fetcher.ts` / `vision-middleware.ts`——图片字节注入 + 多模态 content 构造 / 历史图片压缩
 - `src/deerflow-harness/tools/builtins/`——内置工具（task / search_web / clarification / view_image）
-- `src/lib/file-parser.ts`——上传文件解析（PDF/DOCX/文本 + 图片 OCR）
+- `src/lib/files/file-parser.ts`——上传文件解析（PDF/DOCX/文本 + 图片 OCR）
 - `src/deerflow-harness/extensions/config-store.ts` / `skills/loader.ts` / `mcp/client.ts`——扩展配置存储 / skill 加载器 / MCP 客户端
 - `src/deerflow-harness/sandbox/provider-factory.ts` + `docker/` + `remote/`——沙箱后端工厂 + Docker 后端 + Remote 后端
 - `src/store/chat-session-store.ts`——前端聊天会话状态（sessionRuntimes 分桶并行）

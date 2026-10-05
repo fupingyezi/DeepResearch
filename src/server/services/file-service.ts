@@ -7,7 +7,7 @@
  */
 
 import { uploadFile } from '@/lib';
-import { extractTextFromFile } from '@/lib/file-parser';
+import { extractTextFromFile } from '@/lib/files/file-parser';
 import { deleteFile } from '@/lib/storage';
 import { AppError } from '@/server/http';
 import { PgFileContentStore, type FileContentStore } from '@/server/daos/file-content';

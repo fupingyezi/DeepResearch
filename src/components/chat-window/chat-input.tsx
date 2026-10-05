@@ -7,7 +7,7 @@ import FileItem from '../files/file-items';
 import { ChatInputProps } from '@/types';
 import { useConversationStore } from '@/store';
 import { useFileUpload, useTextareaAutoHeight } from '@/hooks';
-import { enhancePrompt } from '@/utils/prompt';
+import { enhancePrompt } from '@/utils/chat/prompt';
 import { cancelRunOnServer } from '@/utils/chat/cancel-run';
 
 /** 增强提示词图标：主体四角星 + 右上角小四角星（fill 跟随 currentColor 变色） */
