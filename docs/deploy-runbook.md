@@ -192,6 +192,32 @@ git push origin main        # 推上去即自动发布
 - 同一批新 push 会取消进行中的旧部署（不排队）
 - **纯文档改动不触发流水线**：改动全部落在 `**.md` / `docs/**` 时，Actions 里**不会出现新的 run**（服务器上不值得为改文档再跑一次全量构建）；`pull_request` 不受此过滤，PR 照常跑质量门禁
 
+### 记忆文件迁移（一次性，记忆存储 PG 化发版时执行）
+
+旧版本的长期记忆在 `memory.json` 文件里（app 容器的 `app_memory` 卷，
+`DEERFLOW_DATA_DIR=/app/.memory`），新版本只读 PG；发版后跑一次迁移脚本把存量
+文件导入 PG。**只读不删**，
+旧文件保留（回滚窗口见「五」）；已存在的 scope 行自动跳过，重复跑安全。
+
+```bash
+cd /opt/mini-deepresearch
+# 确认新版本已启动过一次（initialMemoryDb 建好 memory_state / memory_vectors 表）
+docker compose --env-file .env.production -f docker-compose.prod.yaml exec postgres \
+  psql -U deepresearch -d DeepResearch -c "\dt memory_*"
+
+# 预演：列出将导入的 scope（--dry-run 不写库）
+# 容器内 DEERFLOW_DATA_DIR=/app/.memory（compose 已设），即旧 memory.json 所在卷
+docker compose --env-file .env.production -f docker-compose.prod.yaml exec app \
+  node scripts/migrate-memory-to-pg.mjs --dry-run
+
+# 执行
+docker compose --env-file .env.production -f docker-compose.prod.yaml exec app \
+  node scripts/migrate-memory-to-pg.mjs
+```
+
+输出里每个 scope 一行：`migrate`（已导入）/ `skip`（PG 已有该行，跳过）/ `error`。
+跑完可删 `scripts/migrate-memory-to-pg.mjs`（下次部署 CI 解包会自动清掉它，不删也无妨）。
+
 ## 五、回滚与应急
 
 ```bash
@@ -205,7 +231,7 @@ APP_IMAGE=deepresearch:<sha> docker compose --env-file .env.production \
 ```
 
 **回滚窗口（记忆存储 PG 化后）**：应用回滚到 PG 化之前的旧镜像时，旧代码走文件记忆后端
-（`memory.json` 迁移时只读不删，旧记忆原样可读），但迁移之后在 PG 里新增 / 更新的记忆
+（迁移脚本只读不删，`memory.json` 旧记忆原样可读），但迁移之后在 PG 里新增 / 更新的记忆
 **不回写文件**——旧版本上看不到这段时间的记忆增量（有损窗口，数据本身不丢，切回新版
 即恢复可见）。回滚期间不建议做记忆相关的写操作；若确认长期留在旧版本，需自行从
 `memory_state` 导出还原文件。
@@ -264,10 +290,11 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
   重建容器不丢；但 `docker volume rm` 会丢
 - postgres 容器镜像为 `pgvector/pgvector:pg15`（与 `postgres:15` 同一数据卷格式，
   原地切换不丢数据、无需重建卷）：发版首次 `up` 会拉新镜像重建 postgres 容器
-  （秒级中断）。`CREATE EXTENSION vector` 失败（镜像 / 权限问题）时应用自动回落
-  文件记忆后端，功能不损，日志有 `[memory]` 告警
-- 记忆懒迁移只读不删：`memory.json` 的旧记忆在首次读取时迁入 PG（`memory_state` /
-  `memory_vectors`），文件原样保留；此后 PG 是真相源、增量不回写文件（回滚窗口见「五」）
+  （秒级中断）。`CREATE EXTENSION vector` 失败（镜像 / 权限问题）时应用自动关闭
+  记忆功能（聊天不阻断，日志有 `[wiring]` 告警）
+- 记忆迁移是一次性脚本（`scripts/migrate-memory-to-pg.mjs`，步骤见「四」）：
+  只读不删，`memory.json` 旧文件原样保留；此后 PG 是真相源、增量不回写文件
+  （回滚窗口见「五」）
 
 ## 七、多进程运维
 
