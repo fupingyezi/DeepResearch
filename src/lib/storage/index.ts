@@ -51,7 +51,7 @@ export async function ensureBucket() {
 }
 
 let bucketInitialized = false;
-export async function initializeBucket() {
+async function initializeBucket() {
   if (!bucketInitialized) {
     await ensureBucket();
     bucketInitialized = true;
@@ -70,15 +70,6 @@ export async function uploadFile(fileName: string, fileId: UUIDTypes, buffer: Bu
   });
 
   return { objectKey };
-}
-
-export async function getFileUrl(objectKey: string, expiryHours = 24) {
-  const url = await getMinioClient().presignedGetObject(
-    getBucketName(),
-    objectKey,
-    expiryHours * 7 * 3600,
-  );
-  return url;
 }
 
 /**

@@ -66,7 +66,7 @@ export {
 } from './subagent-limit-middleware';
 export { loopDetectionMiddleware } from './loop-detection-middleware';
 export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
-export { withCallLog, withCallLogAll } from './with-call-log';
+export { withCallLogAll } from './with-call-log';
 export type { WithCallLogOptions } from './with-call-log';
 
 import { threadDataMiddleware } from './thread-data-middleware';

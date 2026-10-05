@@ -79,7 +79,7 @@ export function emptyTokenUsage(): TokenUsage {
   };
 }
 
-export function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
@@ -306,7 +306,7 @@ export function mergeRunUsage(list: Array<RunUsage | undefined>): RunUsage {
 const usageAls = new AsyncLocalStorage<UsageAccumulator>();
 
 /** 当前记账作用域的累加器；不在作用域内（如产品正常对话）返回 undefined。 */
-export function currentUsageAccumulator(): UsageAccumulator | undefined {
+function currentUsageAccumulator(): UsageAccumulator | undefined {
   return usageAls.getStore();
 }
 

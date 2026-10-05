@@ -19,7 +19,6 @@ export { LocalSandboxProvider } from './local/local-sandbox-provider';
 export { LocalSandbox } from './local/local-sandbox';
 export { DockerSandboxProvider } from './docker/docker-sandbox-provider';
 export { DockerSandbox } from './docker/docker-sandbox';
-export { isDockerAvailable } from './docker/docker-cli';
 export { getDockerSandboxConfig, type DockerSandboxConfig } from './docker/docker-config';
 export { RemoteSandboxProvider } from './remote/remote-sandbox-provider';
 export { RemoteSandbox } from './remote/remote-sandbox';

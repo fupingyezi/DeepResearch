@@ -32,13 +32,10 @@ export function inferProvider(config: ModelConfig): ModelProvider {
   return 'unknown';
 }
 
-function defaultStreamingFor(_provider: ModelProvider): boolean {
-  return true;
-}
-
 export function createChatModel(config: ModelConfig) {
   const provider = inferProvider(config);
-  const streaming = config.streaming ?? defaultStreamingFor(provider);
+  // 全部 provider 默认流式（streaming 仅作显式关闭通道）
+  const streaming = config.streaming ?? true;
 
   const baseUrl = config?.baseUrl ?? process.env.DEEPSEEK_BASE_URL;
   const apiKey = config?.apiKey ?? process.env.DEEPSEEK_API_KEY;

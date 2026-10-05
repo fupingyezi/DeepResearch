@@ -429,9 +429,6 @@ export type AgentEvent =
   | TaskCancelledEvent
   | TaskTimedOutEvent;
 
-/** Agent 事件流类型 */
-export type AgentEventStream = AsyncGenerator<AgentEvent>;
-
 /**
  * 创建 AgentEvent 的工厂函数
  * @param eventType 事件类型

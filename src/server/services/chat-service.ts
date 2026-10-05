@@ -17,7 +17,6 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
-  type ClientAgentEvent,
   type ModelConfig,
   type SseStreamEvent,
   type ThreadImageRef,

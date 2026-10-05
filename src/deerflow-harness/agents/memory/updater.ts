@@ -147,7 +147,8 @@ async function embedMissingSections(data: MemoryData): Promise<void> {
 function sanitizeMemoryForPrompt(memory: MemoryData): MemoryData {
   const stripSection = (sec: SectionData): SectionData => {
     if (sec.embedding == null) return sec;
-    const { embedding: _embedding, ...rest } = sec;
+    const rest = { ...sec };
+    delete rest.embedding;
     return rest;
   };
   return {
@@ -164,7 +165,8 @@ function sanitizeMemoryForPrompt(memory: MemoryData): MemoryData {
     },
     facts: (memory.facts ?? []).map((f) => {
       if (f.embedding == null) return f;
-      const { embedding: _embedding, ...rest } = f;
+      const rest = { ...f };
+      delete rest.embedding;
       return rest;
     }),
   };
@@ -475,12 +477,6 @@ const memoryUpdateStats = { attempted: 0, succeeded: 0, failed: 0 };
 
 export function getMemoryUpdateStats(): { attempted: number; succeeded: number; failed: number } {
   return { ...memoryUpdateStats };
-}
-
-export function resetMemoryUpdateStats(): void {
-  memoryUpdateStats.attempted = 0;
-  memoryUpdateStats.succeeded = 0;
-  memoryUpdateStats.failed = 0;
 }
 
 export class MemoryUpdater {

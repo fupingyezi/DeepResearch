@@ -36,7 +36,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
 import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
 import { getMemoryUpdateStats } from '../../src/deerflow-harness/agents/memory/updater';
-import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/usage/pricing';
+import { computeRunCost } from '../../src/deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
   mergeRunUsage,
@@ -45,14 +45,7 @@ import {
   type RunUsage,
   type TokenUsage,
 } from '../../src/deerflow-harness/runtime/usage/usage-accounting';
-import {
-  loadLongMemDataset,
-  printStats,
-  filterByType,
-  exportToJSONL,
-  type LongMemExample,
-  type LongMemQuestionType,
-} from './dataset';
+import { loadLongMemDataset, printStats, exportToJSONL, type LongMemExample } from './dataset';
 import { createLongMemAgent, type LongMemAgentResult, type PerformanceMetrics } from './agent';
 import {
   installMemoryModelFactory,
@@ -96,8 +89,8 @@ interface LongMemArgs {
 function parseArgs(): LongMemArgs {
   const args = process.argv.slice(2);
   return {
-    type: args.find((a, i) => a === '--type') ? args[args.indexOf('--type') + 1] : undefined,
-    id: args.find((a, i) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
+    type: args.find((a) => a === '--type') ? args[args.indexOf('--type') + 1] : undefined,
+    id: args.find((a) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
     variant: args.includes('--variant')
       ? (args[args.indexOf('--variant') + 1] as 's' | 'm' | 'oracle')
       : 's',
@@ -111,13 +104,13 @@ function parseArgs(): LongMemArgs {
     judge: !args.includes('--no-judge'),
     // 两阶段记忆评测（默认关闭，开启会显著增加 LLM 调用：每个 session 抽取一次）
     ingest: args.includes('--ingest'),
-    output: args.find((a, i) => a === '--output')
+    output: args.find((a) => a === '--output')
       ? args[args.indexOf('--output') + 1]
       : 'benchmarks/results/longmem/latest.json',
-    limit: args.find((a, i) => a === '--limit')
+    limit: args.find((a) => a === '--limit')
       ? parseInt(args[args.indexOf('--limit') + 1], 10)
       : undefined,
-    concurrency: args.find((a, i) => a === '--concurrency')
+    concurrency: args.find((a) => a === '--concurrency')
       ? parseInt(args[args.indexOf('--concurrency') + 1], 10)
       : defaultConfig.run.concurrency,
   };

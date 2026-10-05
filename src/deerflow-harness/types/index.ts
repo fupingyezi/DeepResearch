@@ -1,6 +1,5 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { AgentMiddleware } from 'langchain';
-import { HumanMessage, ToolMessage, AIMessage } from 'langchain';
 
 /**
  * Provider 标识。用于针对不同 OpenAI 兼容后端选择适配策略。
@@ -79,15 +78,6 @@ export interface AssembelOptions {
  */
 export type AgentConfigKey = string;
 
-export type StreamEventType = 'values' | 'messages' | 'custom' | 'end';
-
 export * from './agent-event';
-
-export type Message = HumanMessage | ToolMessage | AIMessage | { type: string; content: string };
-
-export interface AgentState {
-  messages: Message[];
-  [key: string]: any;
-}
 
 export * from './subagent';

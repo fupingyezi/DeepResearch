@@ -51,15 +51,15 @@ function parseArgs(): {
 } {
   const args = process.argv.slice(2);
   return {
-    category: args.find((a, i) => a === '--category')
+    category: args.find((a) => a === '--category')
       ? args[args.indexOf('--category') + 1]
       : undefined,
-    id: args.find((a, i) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
+    id: args.find((a) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
     upload: args.includes('--upload'),
-    output: args.find((a, i) => a === '--output')
+    output: args.find((a) => a === '--output')
       ? args[args.indexOf('--output') + 1]
       : 'benchmarks/results/research-qa/latest.json',
-    dataset: (args.find((a, i) => a === '--dataset')
+    dataset: (args.find((a) => a === '--dataset')
       ? args[args.indexOf('--dataset') + 1]
       : undefined) as 'research-qa' | 'longmem' | undefined,
     noJudge: args.includes('--no-judge'),

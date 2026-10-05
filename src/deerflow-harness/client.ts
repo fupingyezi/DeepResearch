@@ -387,16 +387,6 @@ export class DeerFlowClient {
   }
 
   /**
-   * 解析本轮要绑定到 agent 的工具集。
-   * - caller 显式传 tools → 始终使用 caller 的工具集
-   * - 否则 → 沿用 constructor 默认 tools（默认 [searchWebTool]）
-   * task 工具由 factory.assembleFromFeatures 始终注入。
-   */
-  private resolveTools(_opts: RuntimeRunOptions): StructuredToolInterface[] {
-    return this.defaultTools;
-  }
-
-  /**
    * 按 RuntimeRunOptions 获取或构建 agent 实例。
    * memoryEnabled=true 时不缓存（每轮 prompt 含最新 memory，必须重建）。
    *
@@ -428,7 +418,9 @@ export class DeerFlowClient {
 
     const model = createChatModel(this.modelConfig);
     const provider = inferProvider(this.modelConfig);
-    const effectiveTools = [...this.resolveTools(opts), ...mcpTools];
+    // mcpTools 在默认工具集之上追加（caller 预加载透传）；
+    // task 工具由 factory.assembleFromFeatures 始终注入。
+    const effectiveTools = [...this.defaultTools, ...mcpTools];
 
     const agent = createBaseAgent({
       model,

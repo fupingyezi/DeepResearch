@@ -150,11 +150,6 @@ export function getSandboxCoordinator(): SandboxCoordinator {
   return coordinatorSingleton;
 }
 
-/** 测试注入用；重置后下次 get 重新创建。 */
-export function setSandboxCoordinator(coordinator: SandboxCoordinator | null): void {
-  coordinatorSingleton = coordinator;
-}
-
 function threadHashKey(threadId: string): string {
   return `${THREAD_HASH_PREFIX}${threadId}`;
 }

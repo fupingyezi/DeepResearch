@@ -77,7 +77,7 @@ function isWithin(child: string, root: string): boolean {
 }
 
 /** 把单个虚拟路径替换为真实路径（按最长前缀匹配）；无映射命中则原样返回。 */
-export function replaceVirtualPath(
+function replaceVirtualPath(
   targetPath: string,
   threadData: ThreadDataState | null | undefined,
 ): string {

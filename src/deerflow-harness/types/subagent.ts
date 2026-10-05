@@ -32,24 +32,6 @@ export interface SubagentResult {
   abortController: AbortController;
 }
 
-export function createSubagentResult(
-  taskId: string,
-  traceId: string,
-  status: SubagentStatus = SubagentStatus.PENDING,
-): SubagentResult {
-  return {
-    taskId,
-    traceId,
-    status,
-    result: null,
-    error: null,
-    startedAt: null,
-    completedAt: null,
-    assistantMessages: [],
-    abortController: new AbortController(),
-  };
-}
-
 /**
  * SubagentEvent —— Executor 与 task-tool 之间的内部协议。
  *

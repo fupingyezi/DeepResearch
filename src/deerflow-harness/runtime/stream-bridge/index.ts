@@ -1,1 +1,1 @@
-export { ThreadChannel, StreamBridge, streamBridge } from './stream-bridge';
+export { ThreadChannel, StreamBridge } from './stream-bridge';

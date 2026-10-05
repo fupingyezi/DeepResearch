@@ -19,7 +19,7 @@ import {
 import { MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import { AppError } from '@/server/http';
 
-export const VALID_PROVIDERS = new Set<string>(
+const VALID_PROVIDERS = new Set<string>(
   Object.values(MODEL_PRESETS).map((preset) => preset.provider),
 );
 

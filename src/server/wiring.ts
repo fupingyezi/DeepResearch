@@ -162,7 +162,7 @@ export function ensureMemoryEmbeddingsFactory(): void {
  * 故由 app 层注入，模式对齐 setMemoryModelFactory / setTitleModelFactory。
  * 未注册 / minioKey 缺失 / 读取失败 → 返回 null，构造侧自动把该图降级为文本说明。
  */
-export function ensureThreadImageFetcher(): void {
+function ensureThreadImageFetcher(): void {
   if (imageFetcherRegistered) return;
   imageFetcherRegistered = true;
   setThreadImageFetcher(async (ref) => {

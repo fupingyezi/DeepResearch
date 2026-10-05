@@ -231,10 +231,10 @@ export {
 } from './runtime/checkpointer';
 
 // runtime/context
-export { runWithContext, getContext, requireContext, type RuntimeContext } from './runtime/context';
+export { runWithContext, getContext, type RuntimeContext } from './runtime/context';
 
 // runtime/stream-bridge
-export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
+export { StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
 // runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）
 export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/coordination/contracts';

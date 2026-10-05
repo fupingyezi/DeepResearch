@@ -247,4 +247,3 @@ export class StreamBridge<T> {
 }
 
 /** 进程内单例（裸事件载荷）—— 兼容直连 StreamBridge 的调用方 */
-export const streamBridge = new StreamBridge<ClientAgentEvent>((ev) => ev.eventType);

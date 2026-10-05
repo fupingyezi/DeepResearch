@@ -62,8 +62,3 @@ function sweepExpired(): void {
     }
   }
 }
-
-/** 测试用：清空 bus。 */
-export function _resetTitleBus(): void {
-  pending.clear();
-}

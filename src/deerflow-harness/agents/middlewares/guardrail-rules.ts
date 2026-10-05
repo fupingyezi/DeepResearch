@@ -87,7 +87,7 @@ const SENSITIVE_RULES: GuardrailRule[] = [
 ];
 
 /** 按 scope 取规则集。 */
-export function rulesForScope(scope: GuardrailScope): GuardrailRule[] {
+function rulesForScope(scope: GuardrailScope): GuardrailRule[] {
   return scope === 'injection' ? INJECTION_RULES : SENSITIVE_RULES;
 }
 

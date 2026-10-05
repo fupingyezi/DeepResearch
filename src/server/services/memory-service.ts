@@ -27,7 +27,7 @@ import { AppError } from '@/server/http';
 import { ensureMemoryEmbeddingsFactory } from '@/server/wiring';
 
 /** fact 分类白名单（单一出处：facts 路由新建与更新共用）。 */
-export const VALID_CATEGORIES = new Set<FactCategory>([
+const VALID_CATEGORIES = new Set<FactCategory>([
   'preference',
   'knowledge',
   'context',
@@ -40,12 +40,12 @@ export const VALID_CATEGORIES = new Set<FactCategory>([
 const DEFAULT_MODE: MemoryInjectionMode = 'inject';
 
 /** 把非法 category 回落为默认 'context'（现状行为，不 400）。 */
-export function normalizeFactCategory(raw: string | undefined): FactCategory {
+function normalizeFactCategory(raw: string | undefined): FactCategory {
   return VALID_CATEGORIES.has(raw as FactCategory) ? (raw as FactCategory) : 'context';
 }
 
 /** 把非法 confidence 回落为默认 0.6（现状行为，不 400）。 */
-export function normalizeConfidence(raw: number | undefined): number {
+function normalizeConfidence(raw: number | undefined): number {
   return typeof raw === 'number' && raw >= 0 && raw <= 1 ? raw : 0.6;
 }
 

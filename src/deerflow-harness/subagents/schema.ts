@@ -197,7 +197,7 @@ export function extractSubagentReport(raw: string | null | undefined): {
  *
  * 返回 null 表示 markdown 信息量不足以构成报告。
  */
-export function parseReportFromMarkdown(markdown: string): SubagentReport | null {
+function parseReportFromMarkdown(markdown: string): SubagentReport | null {
   const text = (markdown ?? '').trim();
   if (text.length === 0) return null;
 

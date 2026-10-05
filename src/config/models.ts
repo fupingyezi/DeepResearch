@@ -226,10 +226,3 @@ export function buildModelConfigForUser(presetKey: ModelPresetName, apiKey: stri
 export function getAvailablePresets(): ModelPreset[] {
   return Object.values(MODEL_PRESETS);
 }
-
-/**
- * 根据 provider 过滤模型预设
- */
-export function getPresetsByProvider(provider: ModelProvider): ModelPreset[] {
-  return Object.values(MODEL_PRESETS).filter((p) => p.provider === provider);
-}

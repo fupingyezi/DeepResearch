@@ -96,7 +96,7 @@ function sanitizeAiMessage(
   return removed;
 }
 
-export const unknownToolCallRule: IntegrityRule = {
+const unknownToolCallRule: IntegrityRule = {
   name: 'UnknownToolCallRule',
 
   sanitizeHistory(messages: BaseMessage[], ctx: RuleContext) {
@@ -258,7 +258,7 @@ function extractToolCalls(msg: BaseMessage): NormalizedToolCall[] {
   return out;
 }
 
-export const danglingToolCallRule: IntegrityRule = {
+const danglingToolCallRule: IntegrityRule = {
   name: 'DanglingToolCallRule',
 
   sanitizeHistory(messages) {
@@ -398,7 +398,7 @@ export const danglingToolCallRule: IntegrityRule = {
  *   然后 Unknown 再剔除该 tool_call、把刚补的占位当作孤立 ToolMessage 丢弃 ——
  *   产生一次无效写入。当前顺序两条规则职责不重叠、各自只做一次工作。
  *
- * 新增规则只需在此处追加导出，外部使用方不感知。
+ * 新增规则只需追加进 DEFAULT_INTEGRITY_RULES，外部使用方不感知。
  */
 export const DEFAULT_INTEGRITY_RULES: readonly IntegrityRule[] = [
   unknownToolCallRule,

@@ -1,43 +1,12 @@
 /**
  * 模型配置解析服务。
  *
- * 两条链路：
- * - resolveModelConfigFromConfiguration：从 env 注入 apiKey，仅保留给副链路 / 兼容用途
- * - resolveUserModelConfig：按「当前登录用户」解析主聊天链路的 ModelConfig（用户自带 Key）
+ * 单一链路：按「当前登录用户」解析主聊天链路的 ModelConfig（用户自带 Key）。
  */
 
 import { getDecryptedKey, getSelectedModel } from '@deerflow-harness/auth';
-import {
-  buildModelConfigFromPreset,
-  buildModelConfigForUser,
-  MODEL_PRESETS,
-  type ModelPresetName,
-} from '@/config/models';
+import { buildModelConfigForUser, MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import type { ModelConfig } from '@/deerflow-harness';
-
-/**
- * 从请求 body 的 configuration 中解析 modelConfig：
- * - body.configuration.model.value: string  → 在 MODEL_PRESETS 中查找
- *
- * 返回 null 表示请求未指定模型（由调用方决定走默认 client）。
- *
- * 注意：此函数从环境变量注入 apiKey，仅保留给副链路 / 兼容用途；
- * 主聊天链路应改用 resolveUserModelConfig（按当前用户解密 Key 注入）。
- */
-export function resolveModelConfigFromConfiguration(
-  configuration?: { model?: { value?: string } } | null,
-): ModelConfig | null {
-  const value = configuration?.model?.value;
-  if (typeof value === 'string' && value.length > 0) {
-    try {
-      return buildModelConfigFromPreset(value as ModelPresetName);
-    } catch (e) {
-      console.warn('[resolveModelConfigFromConfiguration] Failed to resolve preset key:', e);
-      return null;
-    }
-  }
-  return null;
-}
 
 /**
  * 用户感知的模型解析结果（discriminated union）。

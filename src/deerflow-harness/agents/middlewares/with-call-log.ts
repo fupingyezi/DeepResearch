@@ -66,7 +66,7 @@ function describeErr(err: any): string {
   }
 }
 
-export function withCallLog<M extends AgentMiddleware>(
+function withCallLog<M extends AgentMiddleware>(
   middleware: M,
   options: WithCallLogOptions = {},
 ): M {

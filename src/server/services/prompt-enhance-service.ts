@@ -42,7 +42,7 @@ function extractText(content: unknown): string {
 /**
  * 清洗：去 <think> 推理段 → 剥离整段 markdown 代码围栏 → 去首尾空白与包裹引号。
  */
-export function sanitizeEnhanced(raw: string): string {
+function sanitizeEnhanced(raw: string): string {
   let s = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
   s = s.replace(/^```[\w-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
   s = s.trim();
