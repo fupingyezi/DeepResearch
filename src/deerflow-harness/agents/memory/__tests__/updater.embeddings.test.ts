@@ -7,7 +7,11 @@ import type { Embeddings } from '@langchain/core/embeddings';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
-import { resetMemoryEmbeddingsFactory, setMemoryEmbeddingsFactory } from '../embeddings';
+import {
+  normalizeVector,
+  resetMemoryEmbeddingsFactory,
+  setMemoryEmbeddingsFactory,
+} from '../embeddings';
 import { getMemoryStorage, resetMemoryStorage } from '../storage';
 import {
   createMemoryFact,
@@ -23,8 +27,10 @@ function humanMsg(content: string) {
   return { _getType: () => 'human' as const, content };
 }
 
+/** 单位向量（embedTexts 出口归一化后落盘值即此形态）。 */
 function vec(seed: number): number[] {
-  return Array.from({ length: DIMS }, (_, i) => (i === 0 ? seed : seed / 2));
+  const raw = Array.from({ length: DIMS }, (_, i) => (i === 0 ? seed : seed / 2));
+  return normalizeVector(raw);
 }
 
 /** 记录 prompt 的假 chat model：返回固定 JSON 文本。 */

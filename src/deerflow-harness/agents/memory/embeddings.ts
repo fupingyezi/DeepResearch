@@ -78,7 +78,7 @@ export async function embedQuery(text: string): Promise<number[] | null> {
   if (!embeddings) return null;
   try {
     const vector = await embeddings.embedQuery(text);
-    return isExpectedLength(vector) ? vector : null;
+    return isExpectedLength(vector) ? normalizeVector(vector) : null;
   } catch (e) {
     warnEmbedFailureOnce('embedQuery', e);
     return null;
@@ -101,7 +101,7 @@ export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> 
       const vectors = await embeddings.embedDocuments(batch);
       for (let j = 0; j < batch.length; j++) {
         const vector = vectors[j];
-        out[i + j] = isExpectedLength(vector) ? vector : null;
+        out[i + j] = isExpectedLength(vector) ? normalizeVector(vector) : null;
       }
     } catch (e) {
       warnEmbedFailureOnce(`embedDocuments(batch #${Math.floor(i / EMBEDDING_BATCH_LIMIT)})`, e);
@@ -123,6 +123,34 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   }
   if (normA === 0 || normB === 0) return 0;
   return dot / Math.sqrt(normA * normB);
+}
+
+/**
+ * 是否为单位向量（|normSq − 1| ≤ 1e-5）。
+ * 容差依据：1024 维求和的浮点噪声约 1e-12 量级，1e-5 高七个数量级，
+ * 而 embedding-3 等模型的原始向量模长与 1 的偏差普遍在 1e-2 以上，不会误判。
+ */
+export function isUnitVector(v: number[]): boolean {
+  let normSq = 0;
+  for (const x of v) normSq += x * x;
+  return Math.abs(normSq - 1) <= 1e-5;
+}
+
+/**
+ * L2 归一化。返回新数组，不原地改（不触碰 provider/SDK 返回的对象）。
+ * - 零向量（normSq < 1e-12）：方向无定义，原样拷贝（cosineSimilarity 按 0 处理）；
+ * - 已单位向量（|normSq−1| ≤ 1e-5）：原样拷贝，避免无谓的逐元素除法抖动；
+ * - 否则逐元素除以模长。
+ *
+ * 归一化后 L2 距离与余弦排序等价，pgvector 的 <=>（余弦距离）与 JS 余弦
+ * 对同一批向量给出同量纲结果；这是「归一化在 embedding 出口做」的落点。
+ */
+export function normalizeVector(v: number[]): number[] {
+  let normSq = 0;
+  for (const x of v) normSq += x * x;
+  if (normSq < 1e-12 || Math.abs(normSq - 1) <= 1e-5) return [...v];
+  const inv = 1 / Math.sqrt(normSq);
+  return v.map((x) => x * inv);
 }
 
 /** 结构 + 维度校验：数组、长度与 dims 一致、全部为有限数字。 */
@@ -155,7 +183,8 @@ function scoredSection(data: MemoryData, group: 'user' | 'history', slot: string
 }
 
 /**
- * 回填旧数据：为缺失 / 维度不匹配的 facts 与打分 sections 补齐向量并落盘。
+ * 回填旧数据：为缺失 / 维度不匹配的 facts 与打分 sections 补齐向量并落盘；
+ * 顺带把维度合法但未归一化的存量向量原地归一（零 API 调用）。
  * 检索侧命中后 fire-and-forget 调用，失败静默（warn 一次）。
  *
  * facts 与 sections 合并在同一函数、同一 in-flight 锁、同一次 embed 批里处理——
@@ -189,13 +218,41 @@ export async function backfillMemoryEmbeddings(opts: {
       const section = scoredSection(latest, group, slot);
       return section.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions);
     });
-    if (missingFacts.length === 0 && missingSections.length === 0) return;
+    // 存量归一：维度合法但非单位向量（归一化落地前写入的旧数据），原地归一零 API 调用
+    const unnormalizedFacts = latest.facts.filter(
+      (f) =>
+        isCompatibleVector(f.embedding, config.embeddingDimensions) &&
+        !isUnitVector(f.embedding as number[]),
+    );
+    const unnormalizedSections = SCORED_SECTION_SLOTS.filter(([group, slot]) => {
+      const section = scoredSection(latest, group, slot);
+      return (
+        section.summary &&
+        isCompatibleVector(section.embedding, config.embeddingDimensions) &&
+        !isUnitVector(section.embedding as number[])
+      );
+    });
+    if (
+      missingFacts.length === 0 &&
+      missingSections.length === 0 &&
+      unnormalizedFacts.length === 0 &&
+      unnormalizedSections.length === 0
+    ) {
+      return;
+    }
 
     const vectors = await embedTexts([
       ...missingFacts.map((f) => f.content),
       ...missingSections.map(([group, slot]) => scoredSection(latest, group, slot).summary),
     ]);
-    if (vectors.every((v) => v == null)) return; // 全部失败：等下次回填重试
+    // 重嵌全部失败且无归一工作可做：等下次回填重试
+    if (
+      vectors.every((v) => v == null) &&
+      unnormalizedFacts.length === 0 &&
+      unnormalizedSections.length === 0
+    ) {
+      return;
+    }
 
     const vectorById = new Map<string, number[]>();
     const contentById = new Map<string, string>();
@@ -215,6 +272,24 @@ export async function backfillMemoryEmbeddings(opts: {
       }
     });
 
+    // 存量归一结果：由 latest 快照原地计算（零 API），与重嵌向量同走锁内 content 守卫合并
+    const normalizedFactById = new Map<string, number[]>();
+    const normalizedContentById = new Map<string, string>();
+    for (const f of unnormalizedFacts) {
+      normalizedFactById.set(f.id, normalizeVector(f.embedding as number[]));
+      normalizedContentById.set(f.id, f.content);
+    }
+    const normalizedSectionBySlot = new Map<string, number[]>();
+    const normalizedSummaryBySlot = new Map<string, string>();
+    for (const [group, slot] of unnormalizedSections) {
+      const section = scoredSection(latest, group, slot);
+      normalizedSectionBySlot.set(
+        `${group}.${slot}`,
+        normalizeVector(section.embedding as number[]),
+      );
+      normalizedSummaryBySlot.set(`${group}.${slot}`, section.summary);
+    }
+
     // 锁内重读最新状态并重新执行合并：嵌入期间 updater 可能已落盘新内容，
     // 只合入「仍存在且 content / summary 未变」的条目，与 updater 的写互斥。
     await storage.update((fresh) => {
@@ -223,9 +298,18 @@ export async function backfillMemoryEmbeddings(opts: {
 
       const mergedFacts = fresh.facts.map((f: Fact) => {
         const vector = vectorById.get(f.id);
-        if (vector == null) return f;
-        if (contentById.get(f.id) !== f.content) return f; // content 已变：旧向量作废
-        return { ...f, embedding: vector };
+        if (vector != null) {
+          // 重嵌结果优先；content 已变则旧向量作废
+          return contentById.get(f.id) === f.content ? { ...f, embedding: vector } : f;
+        }
+        const normalized = normalizedFactById.get(f.id);
+        if (normalized == null) return f;
+        if (normalizedContentById.get(f.id) !== f.content) return f; // content 已变：跳过
+        // 合并窗口内已被它处补齐为单位向量 → 跳过无谓写
+        if (isCompatibleVector(f.embedding, normalized.length) && isUnitVector(f.embedding)) {
+          return f;
+        }
+        return { ...f, embedding: normalized };
       });
       if (mergedFacts.some((f, i) => f !== fresh.facts[i])) {
         next.facts = mergedFacts;
@@ -236,12 +320,19 @@ export async function backfillMemoryEmbeddings(opts: {
       // 整槽替换（不动 fresh 原对象，与 facts 侧同纪律）
       const sectionVectorFor = (slotKey: string, currentSummary: string): number[] | null => {
         const vector = sectionVectorBySlot.get(slotKey);
-        if (vector == null) return null;
-        if (sectionSummaryBySlot.get(slotKey) !== currentSummary) return null; // summary 已变
-        return vector;
+        if (vector != null) {
+          return sectionSummaryBySlot.get(slotKey) === currentSummary ? vector : null;
+        }
+        const normalized = normalizedSectionBySlot.get(slotKey);
+        if (normalized == null) return null;
+        return normalizedSummaryBySlot.get(slotKey) === currentSummary ? normalized : null;
       };
       const topOfMindVec = sectionVectorFor('user.topOfMind', next.user.topOfMind.summary);
-      if (topOfMindVec && !isCompatibleVector(next.user.topOfMind.embedding, topOfMindVec.length)) {
+      if (
+        topOfMindVec &&
+        (!isCompatibleVector(next.user.topOfMind.embedding, topOfMindVec.length) ||
+          !isUnitVector(next.user.topOfMind.embedding))
+      ) {
         next.user = {
           ...next.user,
           topOfMind: { ...next.user.topOfMind, embedding: topOfMindVec },
@@ -249,7 +340,11 @@ export async function backfillMemoryEmbeddings(opts: {
         dirty = true;
       }
       const recentVec = sectionVectorFor('history.recentMonths', next.history.recentMonths.summary);
-      if (recentVec && !isCompatibleVector(next.history.recentMonths.embedding, recentVec.length)) {
+      if (
+        recentVec &&
+        (!isCompatibleVector(next.history.recentMonths.embedding, recentVec.length) ||
+          !isUnitVector(next.history.recentMonths.embedding))
+      ) {
         next.history = {
           ...next.history,
           recentMonths: { ...next.history.recentMonths, embedding: recentVec },
@@ -262,7 +357,8 @@ export async function backfillMemoryEmbeddings(opts: {
       );
       if (
         earlierVec &&
-        !isCompatibleVector(next.history.earlierContext.embedding, earlierVec.length)
+        (!isCompatibleVector(next.history.earlierContext.embedding, earlierVec.length) ||
+          !isUnitVector(next.history.earlierContext.embedding))
       ) {
         next.history = {
           ...next.history,
@@ -276,7 +372,8 @@ export async function backfillMemoryEmbeddings(opts: {
       );
       if (
         longTermVec &&
-        !isCompatibleVector(next.history.longTermBackground.embedding, longTermVec.length)
+        (!isCompatibleVector(next.history.longTermBackground.embedding, longTermVec.length) ||
+          !isUnitVector(next.history.longTermBackground.embedding))
       ) {
         next.history = {
           ...next.history,

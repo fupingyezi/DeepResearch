@@ -12,6 +12,8 @@ import {
   embedQuery,
   embedTexts,
   isCompatibleVector,
+  isUnitVector,
+  normalizeVector,
   resetMemoryEmbeddingsFactory,
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
@@ -43,7 +45,13 @@ function fakeEmbeddings(
   return new FakeEmbeddings(behavior);
 }
 
+/** 单位向量（embedTexts 出口归一化后落盘值即此形态）。 */
 function vec(seed: number): number[] {
+  return normalizeVector(rawVec(seed));
+}
+
+/** 原始非单位向量：用于归一化行为本身（导出、存量原地归一）的断言。 */
+function rawVec(seed: number): number[] {
   return Array.from({ length: DIMS }, (_, i) => (i === 0 ? seed : seed / 2));
 }
 
@@ -73,6 +81,33 @@ describe('cosineSimilarity / isCompatibleVector', () => {
     expect(isCompatibleVector('nope', DIMS)).toBe(false);
     expect(isCompatibleVector([1, 2, 3, NaN], DIMS)).toBe(false);
     expect(isCompatibleVector(null, DIMS)).toBe(false);
+  });
+});
+
+describe('normalizeVector / isUnitVector', () => {
+  it('非单位向量 → 单位向量（L2 归一）', () => {
+    const out = normalizeVector(rawVec(2));
+    expect(isUnitVector(out)).toBe(true);
+    expect(out).toEqual(rawVec(2).map((x) => x / Math.sqrt(7)));
+  });
+
+  it('零向量 / 已单位向量 → 原样拷贝；不原地改输入', () => {
+    const zero = [0, 0, 0, 0];
+    expect(normalizeVector(zero)).toEqual(zero);
+    const unit = vec(3);
+    expect(normalizeVector(unit)).toEqual(unit);
+
+    const input = rawVec(4);
+    const out = normalizeVector(input);
+    expect(out).not.toBe(input); // 新数组
+    expect(input).toEqual(rawVec(4)); // 输入未被触碰
+  });
+
+  it('isUnitVector 容差：|normSq−1| ≤ 1e-5 视为已归一', () => {
+    const nearlyUnit = vec(1).map((x) => x * 1.000001); // normSq ≈ 1+2e-6
+    expect(isUnitVector(nearlyUnit)).toBe(true);
+    expect(isUnitVector(rawVec(1))).toBe(false);
+    expect(isUnitVector([0, 0])).toBe(false);
   });
 });
 
@@ -154,6 +189,19 @@ describe('embedQuery / embedTexts', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(embedQuery('test')).resolves.toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('出口统一 L2 归一化：embedQuery 与 embedTexts 返回单位向量', async () => {
+    const fake = fakeEmbeddings(async (batch) => batch.map(() => rawVec(2)));
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    const q = await embedQuery('归一化');
+    expect(isUnitVector(q!)).toBe(true);
+    expect(q).toEqual(vec(2));
+
+    const [one] = await embedTexts(['a']);
+    expect(isUnitVector(one!)).toBe(true);
+    expect(one).toEqual(vec(2));
   });
 });
 
@@ -329,6 +377,66 @@ describe('backfillMemoryEmbeddings', () => {
     const reloaded = await getMemoryStorage().reload(scope);
     expect(reloaded.user.topOfMind.summary).toBe('被改写的新关注点');
     expect(reloaded.user.topOfMind.embedding).toBeUndefined(); // 旧向量作废，等下轮重嵌
+  });
+
+  it('存量非单位向量原地归一落盘，零 API 调用', async () => {
+    const scope = { agentName: null, userId: null };
+    const legacy = rawVec(5);
+    await getMemoryStorage().save(
+      { ...emptyMemory(), facts: [fact('旧未归一向量', 'fact_legacy', legacy)] },
+      scope,
+    );
+    const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    await backfillMemoryEmbeddings(scope);
+
+    expect(fake.calls).toHaveLength(0); // 无缺失项：不发起任何 embed 请求
+    const reloaded = await getMemoryStorage().reload(scope);
+    const stored = reloaded.facts.find((f) => f.id === 'fact_legacy')?.embedding;
+    expect(stored).toEqual(normalizeVector(legacy));
+    expect(isUnitVector(stored!)).toBe(true);
+  });
+
+  it('存量 section 向量同样原地归一', async () => {
+    const scope = { agentName: null, userId: null };
+    const legacy = rawVec(6);
+    const base = emptyMemory();
+    await getMemoryStorage().save(
+      {
+        ...base,
+        user: {
+          ...base.user,
+          topOfMind: { summary: '在学日语', updatedAt: '', embedding: legacy },
+        },
+      },
+      scope,
+    );
+    const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    await backfillMemoryEmbeddings(scope);
+
+    expect(fake.calls).toHaveLength(0);
+    const reloaded = await getMemoryStorage().reload(scope);
+    expect(reloaded.user.topOfMind.embedding).toEqual(normalizeVector(legacy));
+  });
+
+  it('容差内（|normSq−1|≤1e-5）视为已归一：不触发写入', async () => {
+    const scope = { agentName: null, userId: null };
+    const nearlyUnit = vec(1).map((x) => x * 1.000001);
+    await getMemoryStorage().save(
+      { ...emptyMemory(), facts: [fact('容差内向量', 'fact_nearly', nearlyUnit)] },
+      scope,
+    );
+    const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
+    setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
+
+    await backfillMemoryEmbeddings(scope);
+
+    expect(fake.calls).toHaveLength(0);
+    const reloaded = await getMemoryStorage().reload(scope);
+    expect(reloaded.facts.find((f) => f.id === 'fact_nearly')?.embedding).toEqual(nearlyUnit);
   });
 });
 
