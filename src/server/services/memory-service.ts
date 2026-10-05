@@ -24,7 +24,7 @@ import {
 } from '@/deerflow-harness';
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
 import { AppError } from '@/server/http';
-import { ensureMemoryStorage } from '@/server/wiring';
+import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '@/server/wiring';
 
 /** fact 分类白名单（单一出处：facts 路由新建与更新共用）。 */
 const VALID_CATEGORIES = new Set<FactCategory>([
@@ -145,11 +145,12 @@ export class MemoryService {
 
   /**
    * 检索模式效果预览：与真实注入走同一段代码。
-   * 前置幂等装配存储后端 + embedding 工厂（threadService 未初始化时也要能
-   * 向量化 query，否则退化为纯词面预览）。
+   * 前置幂等装配存储后端 + embedding / rerank 工厂（threadService 未初始化时
+   * 也要能向量化 query 并精排，否则退化为纯词面 + RRF 序预览）。
    */
   async previewRetrieval(userId: string, query: string): Promise<unknown> {
     await ensureMemoryStorage();
+    await ensureMemoryRerankerFactory();
     return this.deps.preview({ agentName: null, userId, query });
   }
 
