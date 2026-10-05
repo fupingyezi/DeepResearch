@@ -24,7 +24,7 @@ import {
 } from '@/deerflow-harness';
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
 import { AppError } from '@/server/http';
-import { ensureMemoryEmbeddingsFactory } from '@/server/wiring';
+import { ensureMemoryStorage } from '@/server/wiring';
 
 /** fact 分类白名单（单一出处：facts 路由新建与更新共用）。 */
 const VALID_CATEGORIES = new Set<FactCategory>([
@@ -82,16 +82,19 @@ export class MemoryService {
 
   /** 读取当前用户记忆（结构化 summary + facts）。 */
   async getMemory(userId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.read(null, userId);
   }
 
   /** 清空当前用户记忆。 */
   async clearMemory(userId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.clear(null, userId);
   }
 
   /** 新建 fact（来源 manual）。category / confidence 非法值回落默认。 */
   async createFact(userId: string, input: CreateMemoryFactInput): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.createFact(
       input.content,
       normalizeFactCategory(input.category),
@@ -107,6 +110,7 @@ export class MemoryService {
     factId: string,
     input: UpdateMemoryFactInput,
   ): Promise<MemoryData> {
+    await ensureMemoryStorage();
     const patch: { content?: string; category?: FactCategory; confidence?: number } = {};
     if (input.content !== undefined) patch.content = input.content;
     if (input.category !== undefined && VALID_CATEGORIES.has(input.category as FactCategory)) {
@@ -128,6 +132,7 @@ export class MemoryService {
 
   /** 删除 fact；fact 不存在 → MEMORY_FACT_NOT_FOUND。 */
   async deleteFact(userId: string, factId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     try {
       return await this.deps.deleteFact(factId, null, userId);
     } catch (e) {
@@ -140,11 +145,11 @@ export class MemoryService {
 
   /**
    * 检索模式效果预览：与真实注入走同一段代码。
-   * 前置幂等注册 embedding 工厂（threadService 未初始化时也要能向量化 query，
-   * 否则退化为纯词面预览）。
+   * 前置幂等装配存储后端 + embedding 工厂（threadService 未初始化时也要能
+   * 向量化 query，否则退化为纯词面预览）。
    */
   async previewRetrieval(userId: string, query: string): Promise<unknown> {
-    ensureMemoryEmbeddingsFactory();
+    await ensureMemoryStorage();
     return this.deps.preview({ agentName: null, userId, query });
   }
 
