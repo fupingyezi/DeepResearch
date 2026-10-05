@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 import { AIMessage, BaseMessage, ToolMessage } from '@langchain/core/messages';
-import type { IntegrityRule, RuleContext } from './types';
-import { DEFAULT_INTEGRITY_RULES } from './rules';
+import type { IntegrityRule, RuleContext } from './tool-call-integrity-types';
+import { DEFAULT_INTEGRITY_RULES } from './tool-call-integrity-rules';
 
 /**
  * ToolCallIntegrityMiddleware（始终启用）
@@ -11,12 +11,12 @@ import { DEFAULT_INTEGRITY_RULES } from './rules';
  *  - DanglingToolCallRule：补齐缺失 ToolMessage（中断/取消/断流场景）
  *  - UnknownToolCallRule：剔除引用未知工具的 tool_call 并补占位
  *
- * 新增异常类型 → 实现一个 IntegrityRule 加到 rules/index.ts，**不再加新中间件**。
+ * 新增异常类型 → 实现一个 IntegrityRule 加到 tool-call-integrity-rules.ts，**不再加新中间件**。
  *
  * 为什么把这两件事合并在同一个中间件里？
  *   - 都作用于 wrapModelCall 的入/出口
  *   - 都修改 messages / AIMessage.tool_calls
- *   - 顺序敏感（见 rules/index.ts 注释）
+ *   - 顺序敏感（见 tool-call-integrity-rules.ts 注释）
  *   把它们放在不同中间件里会让"中间件之间的协作顺序"额外暴露在外，
  *   而其实它们是同一类问题的不同分支。集中后中间件链更稳定，外层装配
  *   层（factory.assembleFromFeatures）只需关心一个位序。
@@ -162,5 +162,5 @@ export function createToolCallIntegrityMiddleware(options: ToolCallIntegrityOpti
 /** 默认实例：装配链直接使用即可。 */
 export const toolCallIntegrityMiddleware = createToolCallIntegrityMiddleware();
 
-export type { IntegrityRule, RuleContext } from './types';
-export { DEFAULT_INTEGRITY_RULES } from './rules';
+export type { IntegrityRule, RuleContext } from './tool-call-integrity-types';
+export { DEFAULT_INTEGRITY_RULES } from './tool-call-integrity-rules';

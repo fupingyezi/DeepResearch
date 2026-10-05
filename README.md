@@ -91,7 +91,7 @@ src/
 │   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
 │   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
-│   │   ├── middlewares/                # 位序中间件实现（含 tool-call-integrity / guardrail 子目录）
+│   │   ├── middlewares/                # 位序中间件实现（全部平铺，装配序见 index.ts）
 │   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储/队列 + embeddings + retrieval（混合检索）
 │   ├── extensions/                     # 统一扩展配置存储（extensions_config.json）
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）

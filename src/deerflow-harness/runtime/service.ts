@@ -19,7 +19,7 @@ import {
   type ClientAgentEvent,
   type StampedClientAgentEvent,
 } from './sse/client-event';
-import { consumeTitleUpdate } from '../agents/middlewares/title-middleware/title-bus';
+import { consumeTitleUpdate } from '../agents/middlewares/title-bus';
 
 import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
 import type { RunStore } from '../persistence/runs';

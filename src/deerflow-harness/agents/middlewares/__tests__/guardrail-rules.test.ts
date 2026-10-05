@@ -5,7 +5,7 @@ import {
   scanForScope,
   scanPromptInjection,
   scanSensitiveOutput,
-} from '../rules';
+} from '../guardrail-rules';
 
 describe('scanPromptInjection —— 命中', () => {
   it('英文「忽略先前指令」类注入', () => {

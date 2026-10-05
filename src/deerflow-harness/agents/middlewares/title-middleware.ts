@@ -3,7 +3,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { createMiddleware } from 'langchain';
 
 import { query } from '@/lib/db';
-import { getContext } from '../../../runtime/context';
+import { getContext } from '../../runtime/context';
 import { publishTitleUpdate } from './title-bus';
 
 /**
