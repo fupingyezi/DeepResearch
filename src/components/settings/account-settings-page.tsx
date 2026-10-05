@@ -3,7 +3,7 @@
 import { LogoutOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 
-import { useAuth } from '@/runtime/context/auth-provider';
+import { useAuth } from '@/events/context/auth-provider';
 import { AuthRequestError, changePassword } from '@/utils/auth/client';
 
 /**

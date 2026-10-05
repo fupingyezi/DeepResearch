@@ -23,7 +23,7 @@ import {
   type MessageTimelineProps,
   type TimelineStepPart,
 } from '@/types';
-import { useAgentEvent } from '@/runtime/context';
+import { useAgentEvent } from '@/events/context';
 import {
   handleDownloadPDF,
   handleDownloadDOC,

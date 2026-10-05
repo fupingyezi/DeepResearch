@@ -40,6 +40,9 @@ function interruptEvent(): ClientAgentEvent {
   return createClientAgentEvent(ClientAgentEventType.HUMAN_INTERRUPT, 'lead', payload);
 }
 
+/** 裸事件载荷的事件名提取器：ThreadChannel / StreamBridge 的裁剪与终止判定只问事件名。 */
+const eventNameOf = (ev: ClientAgentEvent) => ev.eventType;
+
 /** 收集一个订阅的全部事件（阻塞到迭代器自然结束）。 */
 async function collect(iterable: AsyncIterable<ClientAgentEvent>): Promise<ClientAgentEvent[]> {
   const events: ClientAgentEvent[] = [];
@@ -51,7 +54,7 @@ async function collect(iterable: AsyncIterable<ClientAgentEvent>): Promise<Clien
 
 describe('ThreadChannel 回放与实时分发', () => {
   it('订阅前 publish 的事件按序回放', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     ch.publish(chunk('a'));
     ch.publish(chunk('b'));
     ch.close(); // 先终止：订阅者回放完 buffer 后按 closed 语义自然结束
@@ -61,7 +64,7 @@ describe('ThreadChannel 回放与实时分发', () => {
   });
 
   it('多订阅者各自独立拿完整回放', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     ch.publish(chunk('a'));
     ch.publish(chunk('b'));
     ch.close();
@@ -75,7 +78,7 @@ describe('ThreadChannel 回放与实时分发', () => {
   });
 
   it('回放期间 publish 的事件不丢且序正确（回放→实时）', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     ch.publish(chunk('a'));
 
     const it = ch.subscribe()[Symbol.asyncIterator]();
@@ -90,7 +93,7 @@ describe('ThreadChannel 回放与实时分发', () => {
   });
 
   it('subscribe 后、首次 next 前同步 publish 不丢（锁竞态窗口）', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     const it = ch.subscribe()[Symbol.asyncIterator]();
     // 快照为空、监听已注册：此事件只能经 pending 送达
     ch.publish(chunk('x'));
@@ -101,7 +104,7 @@ describe('ThreadChannel 回放与实时分发', () => {
   });
 
   it('typed on 收窄：handler 参数为事件名对应的判别成员', () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     ch.on(ClientAgentEventType.END, (ev) => {
       expectTypeOf(ev).toEqualTypeOf<EndEvent>();
     });
@@ -114,7 +117,7 @@ describe('ThreadChannel 回放与实时分发', () => {
 
 describe('ThreadChannel buffer 裁剪', () => {
   it('超限时丢弃最旧的非关键帧，关键帧永不丢', async () => {
-    const ch = new ThreadChannel('t', 'r', { bufferMax: 4 });
+    const ch = new ThreadChannel('t', 'r', eventNameOf, { bufferMax: 4 });
     // 满 4 条后每次 publish 挤掉最旧的一个普通帧：a、b 依次被挤；
     // 关键帧 START / HUMAN_INTERRUPT 在裁剪循环里被跳过，永不丢
     ch.publish(startEvent());
@@ -137,7 +140,7 @@ describe('ThreadChannel buffer 裁剪', () => {
 
 describe('ThreadChannel 终止语义', () => {
   it('publish(END) 后 channel 关闭，后续 publish no-op', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     const received: ClientAgentEvent[] = [];
     const collecting = (async () => {
       for await (const ev of ch.subscribe()) received.push(ev);
@@ -154,7 +157,7 @@ describe('ThreadChannel 终止语义', () => {
   });
 
   it('close()（无 END）唤醒挂起的 next() 返回 done，且不向订阅者注入 system END', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     const events = collect(ch.subscribe());
     const it = ch.subscribe()[Symbol.asyncIterator]();
 
@@ -167,13 +170,13 @@ describe('ThreadChannel 终止语义', () => {
   });
 
   it('publish(ERROR) 在无订阅者时不抛异常（error 事件名 no-op 常驻监听）', () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     expect(() => ch.publish(errorEvent(false))).not.toThrow();
     ch.close();
   });
 
   it('iterator.return() 清理监听器（各事件名 listenerCount 回到基线）', async () => {
-    const ch = new ThreadChannel('t', 'r');
+    const ch = new ThreadChannel('t', 'r', eventNameOf);
     const baseline = ch.listenerCount(ClientAgentEventType.STREAM_CHUNK);
     // 监听注册发生在 subscribe() 内（与快照同一同步段），迭代前即生效
     const it = ch.subscribe()[Symbol.asyncIterator]();
@@ -189,7 +192,7 @@ describe('ThreadChannel 终止语义', () => {
 
 describe('StreamBridge 通道管理', () => {
   it('channel 同 key 幂等、不同 key 隔离', () => {
-    const bridge = new StreamBridge();
+    const bridge = new StreamBridge<ClientAgentEvent>(eventNameOf);
     const a1 = bridge.channel('t1', 'r1');
     const a2 = bridge.channel('t1', 'r1');
     const b = bridge.channel('t1', 'r2');
@@ -199,7 +202,7 @@ describe('StreamBridge 通道管理', () => {
   });
 
   it('drop 关闭旧 channel 并清除；重新 channel 得到新实例', () => {
-    const bridge = new StreamBridge();
+    const bridge = new StreamBridge<ClientAgentEvent>(eventNameOf);
     const old = bridge.channel('t1', 'r1');
     bridge.drop('t1', 'r1');
     expect(old.isClosed()).toBe(true);

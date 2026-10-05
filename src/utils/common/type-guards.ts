@@ -5,21 +5,6 @@
  */
 
 /**
- * 判断 data 是否是带有指定 key 的对象，且该 key 的值类型为 V（默认 string）。
- *
- * 注意：本函数仅做形态校验，对 V 的运行时类型默认按 'string' 校验；当调用方
- * 传入非 string 的类型参数时，仍会按 string 校验（保留与历史实现一致的语义）。
- */
-export function isObjectWithKey<V = string>(data: unknown, key: string): data is Record<string, V> {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    key in data &&
-    typeof (data as Record<string, unknown>)[key] === 'string'
-  );
-}
-
-/**
  * args 是否「有意义」（非空）。
  *
  * 与前后端 collector / 前端 timeline 同口径，避免落库出现 ghost 子调用记录：

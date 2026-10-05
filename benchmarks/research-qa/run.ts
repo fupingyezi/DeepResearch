@@ -21,13 +21,13 @@ import path from 'path';
 
 import { Client } from 'langsmith';
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
-import { computeRunCost } from '../../src/deerflow-harness/runtime/pricing';
+import { computeRunCost } from '../../src/deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
   mergeRunUsage,
   type RunUsage,
   type TokenUsage,
-} from '../../src/deerflow-harness/runtime/usage-accounting';
+} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
 import { DATASET_V1, toJSONL, toLangSmithFormat } from './dataset';
 import { createBenchmarkAgent, type AgentRunResult, type PerformanceMetrics } from './agent';
 import {
@@ -51,15 +51,15 @@ function parseArgs(): {
 } {
   const args = process.argv.slice(2);
   return {
-    category: args.find((a, i) => a === '--category')
+    category: args.find((a) => a === '--category')
       ? args[args.indexOf('--category') + 1]
       : undefined,
-    id: args.find((a, i) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
+    id: args.find((a) => a === '--id') ? args[args.indexOf('--id') + 1] : undefined,
     upload: args.includes('--upload'),
-    output: args.find((a, i) => a === '--output')
+    output: args.find((a) => a === '--output')
       ? args[args.indexOf('--output') + 1]
       : 'benchmarks/results/research-qa/latest.json',
-    dataset: (args.find((a, i) => a === '--dataset')
+    dataset: (args.find((a) => a === '--dataset')
       ? args[args.indexOf('--dataset') + 1]
       : undefined) as 'research-qa' | 'longmem' | undefined,
     noJudge: args.includes('--no-judge'),

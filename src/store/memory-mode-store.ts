@@ -7,7 +7,7 @@ import { isMemoryInjectionMode, type MemoryInjectionMode } from '@/types';
 /** 记忆注入模式（类型与守卫定义在 @/types —— 那也是请求体契约的所在地）。 */
 export type MemoryMode = MemoryInjectionMode;
 
-export const DEFAULT_MEMORY_MODE: MemoryMode = 'inject';
+const DEFAULT_MEMORY_MODE: MemoryMode = 'inject';
 
 const isMemoryMode = isMemoryInjectionMode;
 

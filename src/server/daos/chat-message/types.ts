@@ -29,6 +29,13 @@ export interface LatestMessageRow {
   createdAt: Date;
 }
 
+/** recall 重放的原始提问：最近一条 user 消息的 parts（文本 + 附件块）。 */
+export interface LatestUserMessageWithParts {
+  id: string;
+  createdAt: Date;
+  parts: MessagePart[];
+}
+
 /** resume 续写的 seed：最近一条 assistant 消息的 id 与既有 parts。 */
 export interface LatestAssistantParts {
   id: string;
@@ -42,6 +49,7 @@ export interface ChatMessageStore {
   /** 截断 created_at >= fromCreatedAt 的消息（recall/reEditCall；file_metadata 靠外键级联） */
   deleteAtOrAfter(sessionId: string, fromCreatedAt: string | Date): Promise<void>;
   getLatestByRole(sessionId: string, role: 'user' | 'assistant'): Promise<LatestMessageRow | null>;
+  getLatestUserWithParts(sessionId: string): Promise<LatestUserMessageWithParts | null>;
   getLatestAssistantWithParts(
     sessionId: string,
     userId: string,

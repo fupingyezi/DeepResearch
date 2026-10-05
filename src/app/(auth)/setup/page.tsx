@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Image from 'next/image';
 
-import { useAuth } from '@/runtime/context/auth-provider';
+import { useAuth } from '@/events/context/auth-provider';
 import { AuthRequestError, initializeAdmin } from '@/utils/auth/client';
 
 export default function SetupPage() {

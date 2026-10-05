@@ -6,7 +6,7 @@
  *   {
  *     "sessionId"?: string,                       // 缺省 = 新建会话；存在 = 已有会话
  *     "configuration"?: {
- *       "model"?: { "value"?: string },           // 替代旧的 metadata.modelKey
+ *       "model"?: { "value"?: string },           // 显式指定模型预设；缺省回落用户落库的选择
  *       "memoryEnabled"?: boolean                 // 单次请求覆盖服务级 memory 开关
  *     },
  *     "message": {

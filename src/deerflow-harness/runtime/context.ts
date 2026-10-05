@@ -38,9 +38,3 @@ export function runWithContext<T>(ctx: RuntimeContext, fn: () => Promise<T>): Pr
 export function getContext(): RuntimeContext | undefined {
   return als.getStore();
 }
-
-export function requireContext(): RuntimeContext {
-  const c = als.getStore();
-  if (!c) throw new Error('[runtime/context] runtime context is not set');
-  return c;
-}

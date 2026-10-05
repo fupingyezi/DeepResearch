@@ -9,7 +9,7 @@
  */
 
 import { buildMemoryContext } from '../memory';
-import { buildSkillsSection, loadEnabledSkills } from '../../skills';
+import { buildSkillsSection, loadEnabledSkills } from '../../extensions/skills';
 
 /**
  * 与 SubagentLimitMiddleware 默认值保持一致。

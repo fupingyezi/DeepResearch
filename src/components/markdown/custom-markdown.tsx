@@ -25,13 +25,13 @@ const CustomMarkdown: React.FC<{ content: string }> = ({ content }) => {
             );
           },
           code({
-            node,
+            _node,
             inline,
             className,
             children,
             ...props
           }: {
-            node?: any;
+            _node?: any;
             inline?: boolean;
             className?: string;
             children?: React.ReactNode;

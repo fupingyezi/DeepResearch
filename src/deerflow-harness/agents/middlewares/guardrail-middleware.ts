@@ -1,7 +1,7 @@
 import { createMiddleware } from 'langchain';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 
-import { scanPromptInjection, scanSensitiveOutput, type GuardrailHit } from './guardrail/rules';
+import { scanPromptInjection, scanSensitiveOutput, type GuardrailHit } from './guardrail-rules';
 
 /**
  * GuardrailMiddleware（features.guardrail 启用，位序 4）

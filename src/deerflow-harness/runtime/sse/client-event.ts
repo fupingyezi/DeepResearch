@@ -2,7 +2,7 @@
  * ClientAgentEvent —— 前后端共享的对外事件协议（白名单 10 项）
  *
  * 设计原则：
- * - 这是后端发往前端的事件「白名单」，前端 `src/runtime/protocol/client-event.ts`
+ * - 这是后端发往前端的事件「白名单」，前端 `src/events/protocol/client-event.ts`
  *   通过 re-export 直接复用本文件的枚举与类型，避免双向手动维护。
  * - 内部观测事件（NODE_ENTER / NODE_EXIT / LLM_COMPLETE / SUB_AGENT_DISPATCH /
  *   HARNESS_LIFECYCLE / HUMAN_RESUME / TASK_STARTED|RUNNING|COMPLETED|FAILED|
@@ -39,6 +39,9 @@ export enum ClientAgentEventType {
 
 export interface StartPayload {
   sessionId?: string;
+  /** 本轮 run / thread 标识（重连续读路由据以定位事件流）。 */
+  run_id?: string;
+  thread_id?: string;
   /**
    * 完整的 chat_session 元信息，仅在新建 session 场景下由后端首次下发，
    * 前端据此把临时 session 替换为真实记录并加入侧栏。
@@ -239,6 +242,28 @@ export type ClientAgentEvent =
 
 /** 客户端事件流（async generator） */
 export type ClientAgentEventStream = AsyncGenerator<ClientAgentEvent>;
+
+/**
+ * 带游标的事件：eventId 是 per-run 单调递增的续读游标（进程内实现为序号、
+ * Redis 实现为 Stream entry id）。只存在于事件面内部与 SSE 帧头，不进入
+ * 事件 payload——客户端重连时把最后收到的 eventId 原样带回即可断点续读。
+ */
+export interface StampedClientAgentEvent {
+  eventId: string;
+  event: ClientAgentEvent;
+}
+
+/**
+ * SSE 输出帧：createSseStream 的输入。eventId 存在时序列化为 `id:` 行
+ * （客户端据此更新续读游标）；START 等非总线事件不携带（无 id 行）。
+ */
+export interface SseStreamEvent {
+  eventId?: string;
+  event: ClientAgentEvent;
+}
+
+/** SSE 输出帧流（async generator） */
+export type SseStreamEvents = AsyncGenerator<SseStreamEvent>;
 
 /**
  * 创建 ClientAgentEvent 的工厂函数。

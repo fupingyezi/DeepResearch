@@ -4,8 +4,8 @@ import Image from 'next/image';
 
 import { useConversationStore } from '@/store';
 import { useState, useRef, type KeyboardEvent } from 'react';
-import { ClientAgentEventType } from '@/runtime/protocol';
-import { useAgentEvent, useAgentEventListener } from '@/runtime/context';
+import { ClientAgentEventType } from '@/events/protocol';
+import { useAgentEvent, useAgentEventListener } from '@/events/context';
 
 /**
  * 中断决策（human-in-the-loop）交互组件。

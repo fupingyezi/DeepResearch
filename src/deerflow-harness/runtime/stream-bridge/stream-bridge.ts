@@ -7,11 +7,12 @@
  *   `ClientAgentEvent`（与前端 handler 签名统一）
  * - 事件分发语义（buffer 回放 / close 终止 / 关键帧保护）由 ThreadChannel 在
  *   EventEmitter 之上维护：`subscribe()` 返回 AsyncIterable，晚订阅可拿历史
- * - `close()` 用私有符号事件唤醒挂起的 `next()`，不再合成假的 system END 帧——
- *   内部唤醒信号不能以真实协议帧的形态漏给消费者
+ * - `close()` 用私有符号事件唤醒挂起的 `next()`：内部唤醒信号不进 buffer、
+ *   不对外，不能以真实协议帧的形态漏给消费者
+ * - 载荷类型参数化（裸事件 / 带游标事件皆可）：裁剪与终止判定只依赖事件名提取器
  *
- * 多实例部署时，把 EventEmitter 换成 Redis pub/sub 即可，`publish()` /
- * `subscribe()` 接口保持稳定。
+ * 跨进程的事件面（Redis Stream 回放）在 RunEventBus 的 Redis 实现里，本桥
+ * 保持进程内语义不变。
  */
 
 import { EventEmitter } from 'node:events';
@@ -22,13 +23,19 @@ import { ClientAgentEventType, type ClientAgentEvent } from '../sse/client-event
 const CLOSED_EVENT = Symbol('thread-channel-closed');
 
 /**
- * 事件名 → 参数元组映射表：每个 ClientAgentEventType 对应 [该类型的判别成员]。
+ * 事件名 → 参数元组映射表：每个 ClientAgentEventType 对应 [该载荷类型的一个值]。
  * EventEmitter 泛型（@types/node 的 EventMap 约定）借此让 on<K>/emit<K> 在
- * 类型层把事件名与事件成员（含 payload 收窄）绑定。
+ * 类型层把事件名与载荷绑定。载荷类型 T 由使用方决定（裸事件或带游标的事件）；
+ * T 是带 eventType 判别字段的联合时按事件名收窄到判别成员，否则原样返回 T。
  */
-type ChannelEventMap = {
-  [K in ClientAgentEventType]: [Extract<ClientAgentEvent, { eventType: K }>];
-} & { [CLOSED_EVENT]: [] };
+type EventPayloadFor<T, K extends ClientAgentEventType> = T extends {
+  eventType: ClientAgentEventType;
+}
+  ? Extract<T, { eventType: K }>
+  : T;
+type ChannelEventMap<T> = { [K in ClientAgentEventType]: [EventPayloadFor<T, K>] } & {
+  [CLOSED_EVENT]: [];
+};
 
 const ALL_EVENT_TYPES = Object.values(ClientAgentEventType) as ClientAgentEventType[];
 
@@ -50,8 +57,8 @@ const CRITICAL_EVENT_TYPES = new Set<ClientAgentEventType>([
   ClientAgentEventType.HUMAN_INTERRUPT,
 ]);
 
-export class ThreadChannel extends EventEmitter<ChannelEventMap> {
-  private readonly buffer: ClientAgentEvent[] = [];
+export class ThreadChannel<T> extends EventEmitter<ChannelEventMap<T>> {
+  private readonly buffer: T[] = [];
   private readonly bufferMax: number;
   private closed = false;
   private droppedCount = 0;
@@ -59,6 +66,8 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
   constructor(
     public readonly threadId: string,
     public readonly runId: string,
+    /** 载荷 → 事件名提取器：buffer 裁剪 / 终止判定不感知载荷结构，只问事件名。 */
+    private readonly eventNameOf: (payload: T) => ClientAgentEventType,
     options?: { bufferMax?: number },
   ) {
     super();
@@ -75,23 +84,14 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
     return this.closed;
   }
 
-  publish(ev: ClientAgentEvent): void {
+  publish(payload: T): void {
     if (this.closed) return;
-    this.buffer.push(ev);
+    this.buffer.push(payload);
     this.trimBufferIfNeeded();
-    this.emitEvent(ev);
-    // END 一律视为终止；ERROR 仅在 recoverable=false 时终止
-    if (ev.eventType === ClientAgentEventType.END) {
+    this.emitEvent(payload);
+    // END 一律视为终止；ERROR 不立即 close（让消费者读到 ERROR 帧），由 END 兜底
+    if (this.eventNameOf(payload) === ClientAgentEventType.END) {
       this.close();
-      return;
-    }
-    if (
-      ev.eventType === ClientAgentEventType.ERROR &&
-      ev.payload &&
-      ev.payload.recoverable === false
-    ) {
-      // 不立即 close —— 让消费者读到 ERROR 帧后再关闭
-      // 终止由 publish END 兜底
     }
   }
 
@@ -99,10 +99,10 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
    * 类型桥：emit<K> 对「联合事件名 + 联合事件值」只能推断到成员级，这里显式
    * 声明成员级签名（publish 是唯一写入口，subscribe 是唯一监听入口）。
    */
-  private emitEvent(ev: ClientAgentEvent): boolean {
-    return (this.emit as (eventName: ClientAgentEventType, event: ClientAgentEvent) => boolean)(
-      ev.eventType,
-      ev,
+  private emitEvent(payload: T): boolean {
+    return (this.emit as (eventName: ClientAgentEventType, payload: T) => boolean)(
+      this.eventNameOf(payload),
+      payload,
     );
   }
 
@@ -113,7 +113,7 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
   private trimBufferIfNeeded(): void {
     if (this.buffer.length <= this.bufferMax) return;
     for (let i = 0; i < this.buffer.length; i++) {
-      if (!CRITICAL_EVENT_TYPES.has(this.buffer[i].eventType)) {
+      if (!CRITICAL_EVENT_TYPES.has(this.eventNameOf(this.buffer[i]))) {
         this.buffer.splice(i, 1);
         this.droppedCount += 1;
         if (this.droppedCount === 1 || this.droppedCount % 500 === 0) {
@@ -133,14 +133,14 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
    * 每个事件名注册一个监听（CLOSED_EVENT 额外一个）：跨类型的全局时序由单一的
    * pending 队列保持——所有类型共用一条队列，先到先出。
    */
-  subscribe(): AsyncIterable<ClientAgentEvent> {
+  subscribe(): AsyncIterable<T> {
     const buffered = this.buffer.slice();
     const isClosed = () => this.closed;
     // 后续事件队列：回放完成后到达的 publish 进这里；保证不丢事件
-    const pending: ClientAgentEvent[] = [];
-    let resolveNext: ((v: IteratorResult<ClientAgentEvent>) => void) | null = null;
+    const pending: T[] = [];
+    let resolveNext: ((v: IteratorResult<T>) => void) | null = null;
 
-    const onEvent = (ev: ClientAgentEvent) => {
+    const onEvent = (ev: T) => {
       if (resolveNext) {
         const r = resolveNext;
         resolveNext = null;
@@ -171,18 +171,18 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
     };
 
     return {
-      [Symbol.asyncIterator](): AsyncIterator<ClientAgentEvent> {
+      [Symbol.asyncIterator](): AsyncIterator<T> {
         let i = 0;
 
         return {
-          async next(): Promise<IteratorResult<ClientAgentEvent>> {
+          async next(): Promise<IteratorResult<T>> {
             // 1) 回放历史
             if (i < buffered.length) {
               return { value: buffered[i++], done: false };
             }
             // 2) 已有未消费的实时事件
             if (pending.length > 0) {
-              return { value: pending.shift() as ClientAgentEvent, done: false };
+              return { value: pending.shift() as T, done: false };
             }
             // 3) 已 close 且无残留 → 终止
             if (isClosed()) {
@@ -190,11 +190,11 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
               return { value: undefined, done: true };
             }
             // 4) 等待下一个事件
-            return new Promise<IteratorResult<ClientAgentEvent>>((resolve) => {
+            return new Promise<IteratorResult<T>>((resolve) => {
               resolveNext = resolve;
             });
           },
-          async return(): Promise<IteratorResult<ClientAgentEvent>> {
+          async return(): Promise<IteratorResult<T>> {
             cleanup();
             return { value: undefined, done: true };
           },
@@ -213,18 +213,20 @@ export class ThreadChannel extends EventEmitter<ChannelEventMap> {
   }
 }
 
-export class StreamBridge {
-  private readonly channels = new Map<string, ThreadChannel>();
+export class StreamBridge<T> {
+  private readonly channels = new Map<string, ThreadChannel<T>>();
+
+  constructor(private readonly eventNameOf: (payload: T) => ClientAgentEventType) {}
 
   private static key(threadId: string, runId: string): string {
     return `${threadId}:${runId}`;
   }
 
-  channel(threadId: string, runId: string): ThreadChannel {
+  channel(threadId: string, runId: string): ThreadChannel<T> {
     const k = StreamBridge.key(threadId, runId);
     let ch = this.channels.get(k);
     if (!ch) {
-      ch = new ThreadChannel(threadId, runId);
+      ch = new ThreadChannel(threadId, runId, this.eventNameOf);
       this.channels.set(k, ch);
     }
     return ch;
@@ -244,5 +246,4 @@ export class StreamBridge {
   }
 }
 
-/** 进程内单例 —— 所有路由共用同一总线 */
-export const streamBridge = new StreamBridge();
+/** 进程内单例（裸事件载荷）—— 兼容直连 StreamBridge 的调用方 */

@@ -38,11 +38,6 @@ export enum AuthErrorCode {
   INVALID_INPUT = 'INVALID_INPUT',
 }
 
-export interface AuthErrorBody {
-  code: AuthErrorCode;
-  message: string;
-}
-
 export function toUserResponse(user: UserRecord): UserResponse {
   return {
     id: user.id,

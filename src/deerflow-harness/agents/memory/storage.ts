@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import { getDistLock, type DistLockHandle } from '../../runtime/locks/dist-lock';
 import { getMemoryConfig } from './config';
 import {
   agentMemoryFile,
@@ -21,6 +22,11 @@ import {
 } from './paths';
 import { createEmptyMemory, MemoryData, SectionData, utcNowIsoZ, validateAgentName } from './types';
 
+/** 记忆锁 TTL：mutator 可能内含 embedding 补齐（批量 API 调用），只兜底持有者崩溃。 */
+const MEMORY_LOCK_TTL_MS = 15_000;
+/** 记忆锁等待预算：覆盖对方完整走完一次 mutator 的时间。 */
+const MEMORY_LOCK_WAIT_MS = 5_000;
+
 export interface MemoryStorage {
   load(opts?: { agentName?: string | null; userId?: string | null }): Promise<MemoryData>;
   reload(opts?: { agentName?: string | null; userId?: string | null }): Promise<MemoryData>;
@@ -28,6 +34,15 @@ export interface MemoryStorage {
     data: MemoryData,
     opts?: { agentName?: string | null; userId?: string | null },
   ): Promise<boolean>;
+  /**
+   * 加锁的 read-modify-write：per-user 锁内重读磁盘 → 应用 mutator → 原子写。
+   * mutator 返回同一引用视为无变更，跳过写入；mutator 抛错原样上抛（领域错误
+   * 与 IO 失败区分开），IO 失败返回 null。
+   */
+  update(
+    mutator: (current: MemoryData) => Promise<MemoryData> | MemoryData,
+    opts?: { agentName?: string | null; userId?: string | null },
+  ): Promise<MemoryData | null>;
 }
 
 interface CacheEntry {
@@ -142,28 +157,72 @@ export class FileMemoryStorage implements MemoryStorage {
     data: MemoryData,
     opts: { agentName?: string | null; userId?: string | null } = {},
   ): Promise<boolean> {
+    // 与 update 同一条锁路径：全量覆盖也是 RMW，不能绕过锁直接写盘
+    const updated = await this.update(() => data, opts);
+    return updated !== null;
+  }
+
+  async update(
+    mutator: (current: MemoryData) => Promise<MemoryData> | MemoryData,
+    opts: { agentName?: string | null; userId?: string | null } = {},
+  ): Promise<MemoryData | null> {
     const { agentName = null, userId = null } = opts;
     const filePath = this.resolveFilePath(agentName, userId);
     const key = this.cacheKey(agentName, userId);
 
+    // per-user 锁：同一用户的记忆只允许一个写者。等待期轮询（mutator 内含
+    // embedding 补齐，对方持锁可达秒级）；超预算继续执行并告警——锁是防错
+    // 而非门禁，最后的残余竞态由原子写保证文件不损坏。
+    const handle = await this.acquireMemoryLock(userId);
     try {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      // shallow copy + 刷新 lastUpdated（避免直接 mutate 调用方对象）
-      const toWrite: MemoryData = { ...data, lastUpdated: utcNowIsoZ() };
-
-      const tmpPath = `${filePath}.${randomUUID().replace(/-/g, '')}.tmp`;
-      await fs.writeFile(tmpPath, JSON.stringify(toWrite, null, 2), 'utf-8');
-      await fs.rename(tmpPath, filePath);
-
-      const mtime = await this.statMtime(filePath);
-      this.cache.set(key, { data: toWrite, mtimeMs: mtime });
-      if (process.env.MEMORY_DEBUG === '1' || process.env.MEMORY_DEBUG === 'true') {
-        console.log(`[memory/storage] Memory saved to ${filePath}`);
+      // 锁内直读磁盘（绕开 mtime 缓存）：RMW 的 read 必须看到其它进程的最新写入
+      const current = await this.loadFromFile(filePath);
+      // mutator 的领域错误（fact 不存在等）原样上抛；只有落盘 IO 失败收敛为 null
+      const next = await mutator(current);
+      if (next === current) return current;
+      try {
+        await this.writeToFile(filePath, key, next);
+      } catch (e) {
+        console.error('[memory/storage] Failed to write memory file:', e);
+        return null;
       }
-      return true;
-    } catch (e) {
-      console.error('[memory/storage] Failed to save memory file:', e);
-      return false;
+      return next;
+    } finally {
+      await handle?.release();
+    }
+  }
+
+  private async acquireMemoryLock(userId: string | null): Promise<DistLockHandle | null> {
+    const lock = getDistLock();
+    const lockKey = `deerflow:lock:memory:${userId ?? 'global'}`;
+    const deadline = Date.now() + MEMORY_LOCK_WAIT_MS;
+    for (;;) {
+      const handle = await lock.acquire(lockKey, MEMORY_LOCK_TTL_MS);
+      if (handle) return handle;
+      if (Date.now() >= deadline) {
+        console.warn(
+          `[memory/storage] memory lock wait timeout key=${lockKey}; proceed without lock`,
+        );
+        return null;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  /** 原子写：临时文件 + rename，任何时刻读文件都不会读到半截 JSON。 */
+  private async writeToFile(filePath: string, key: string, data: MemoryData): Promise<void> {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    // shallow copy + 刷新 lastUpdated（避免直接 mutate 调用方对象）
+    const toWrite: MemoryData = { ...data, lastUpdated: utcNowIsoZ() };
+
+    const tmpPath = `${filePath}.${randomUUID().replace(/-/g, '')}.tmp`;
+    await fs.writeFile(tmpPath, JSON.stringify(toWrite, null, 2), 'utf-8');
+    await fs.rename(tmpPath, filePath);
+
+    const mtime = await this.statMtime(filePath);
+    this.cache.set(key, { data: toWrite, mtimeMs: mtime });
+    if (process.env.MEMORY_DEBUG === '1' || process.env.MEMORY_DEBUG === 'true') {
+      console.log(`[memory/storage] Memory saved to ${filePath}`);
     }
   }
 }

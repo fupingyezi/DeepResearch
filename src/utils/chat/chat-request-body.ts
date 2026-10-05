@@ -1,7 +1,7 @@
 /**
  * chat-request-body
  *
- * `/api/v3/chat` 请求体的纯组装函数（逻辑迁移自旧 StreamChatHandler.executeStreamRequest）。
+ * `/api/v3/chat` 请求体的纯组装函数。
  *
  * 单独成模块的理由与 chat-configuration 相同：不进 React 组件 import 链，node 环境
  * 可直接单测；请求体是前后端线协议的一部分，字段被静默丢弃时（历史教训：metadata

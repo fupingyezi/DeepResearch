@@ -10,7 +10,7 @@ import {
   tokenUsageFromUsageMetadata,
   withUsageAccounting,
   type UsageCall,
-} from '../usage-accounting';
+} from '../usage/usage-accounting';
 
 /** 造一个最小的 LLMResult；message 就是 chat generation 上的 AIMessage。 */
 function llmResult(message: unknown, llmOutput?: unknown): LLMResult {

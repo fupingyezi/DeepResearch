@@ -32,7 +32,7 @@ export const fileIdBodySchema = z.object({
 
 // ---- v3/chat ----
 
-export const chatContentBlockSchema = z.discriminatedUnion('type', [
+const chatContentBlockSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({ type: z.literal('file'), fileId: z.string().min(1) }),
   z.object({ type: z.literal('image'), fileId: z.string().min(1) }),

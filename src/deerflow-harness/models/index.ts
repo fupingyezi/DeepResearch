@@ -1,6 +1,6 @@
 import { ModelConfig, ModelProvider } from '../types';
 import { ChatOpenAI } from '@langchain/openai';
-import { UsageRecordingHandler } from '../runtime/usage-accounting';
+import { UsageRecordingHandler } from '../runtime/usage/usage-accounting';
 
 /** 根据 baseUrl / modelName 推断 provider，config.provider 优先级最高 */
 export function inferProvider(config: ModelConfig): ModelProvider {
@@ -32,13 +32,10 @@ export function inferProvider(config: ModelConfig): ModelProvider {
   return 'unknown';
 }
 
-function defaultStreamingFor(_provider: ModelProvider): boolean {
-  return true;
-}
-
 export function createChatModel(config: ModelConfig) {
   const provider = inferProvider(config);
-  const streaming = config.streaming ?? defaultStreamingFor(provider);
+  // 全部 provider 默认流式（streaming 仅作显式关闭通道）
+  const streaming = config.streaming ?? true;
 
   const baseUrl = config?.baseUrl ?? process.env.DEEPSEEK_BASE_URL;
   const apiKey = config?.apiKey ?? process.env.DEEPSEEK_API_KEY;
@@ -79,7 +76,7 @@ export function createChatModel(config: ModelConfig) {
     temperature,
     topP,
     maxTokens,
-    // 用量记账（见 runtime/usage-accounting.ts）：这是 lead 与 subagent 唯一的模型工厂，
+    // 用量记账（见 runtime/usage/usage-accounting.ts）：这是 lead 与 subagent 唯一的模型工厂，
     // 一处挂载即可覆盖两者以及中间件自身的 LLM 调用。handler 在**调用时**才经 ALS 解析
     // 累加器，产品路径没有记账作用域 → no-op，故 agent 实例跨 run 复用也不会串账。
     callbacks: [new UsageRecordingHandler(modelName)],

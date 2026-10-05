@@ -85,6 +85,9 @@ function makeHarness(
     async listByThread() {
       return [];
     },
+    async listByStatus() {
+      return [];
+    },
   };
 
   // 假的 agent 流：复刻真实 DeerFlowClient 的关键行为 —— abort 时抛出，但在自己的
@@ -287,7 +290,7 @@ describe('cancelRun（用户点停止）', () => {
     const events: string[] = [];
     void (async () => {
       for await (const ev of h.service.subscribe({ thread_id: THREAD_ID, run_id })) {
-        events.push(ev.eventType);
+        events.push(ev.event.eventType);
       }
     })();
 

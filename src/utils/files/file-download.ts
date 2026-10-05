@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 
-export const downloadFile = (content: string | Blob, filename: string, mimeType: string) => {
+const downloadFile = (content: string | Blob, filename: string, mimeType: string) => {
   const blob = typeof content === 'string' ? new Blob([content], { type: mimeType }) : content;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -45,9 +45,6 @@ export const handleDownloadPDF = (text: string) => {
   }
 
   doc.save('report.pdf');
-
-  //   const pdfBlob = doc.output("blob");
-  //   downloadFile(pdfBlob, "report.pdf", "application/pdf");
 };
 
 export const handleDownloadDOC = (text: string) => {

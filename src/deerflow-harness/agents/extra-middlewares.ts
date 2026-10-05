@@ -32,7 +32,7 @@ import { resolveMiddlewareAnchor, anchorDisplayName, middlewareDisplayName } fro
  * - **实例跨 agent 共享**：同一实例进 lead 与每次 subagent 构建，与内置
  *   中间件的单例风格一致——不得在实例上挂 per-agent 状态，需要时用
  *   beforeAgent 写 state。
- * - 注册应在 service import graph 内完成（如 `_service.ts` 的 build()）；
+ * - 注册应在 service import graph 内完成（如 `src/server/wiring.ts` 的 build()）；
  *   在其它模块实例里注册（dev HMR 分裂场景）会写入另一个注册表实例，
  *   静默不生效。生产单次打包无此问题。
  * - `createBaseAgent` 显式传 `middlewares` 的调用方不走 features 装配路径，

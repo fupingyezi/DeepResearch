@@ -318,10 +318,10 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 ### 10.2 双层并发背压
 
-| 层级   | 落点                                       | 机制                                                   | 超限表现                                                        |
-| ------ | ------------------------------------------ | ------------------------------------------------------ | --------------------------------------------------------------- |
-| run 级 | `runtime/run-concurrency-gate.ts`          | 本进程 FIFO 信号量 + 跨进程 `runs:count` 原子占位      | 进入队列，先回传 `task_progress{status:'queued'}`，对话可先思考 |
-| 容器级 | `DockerSandboxProvider.provisionContainer` | `containers:count` Lua 原子占位 + LRU 淘汰空闲容器腾位 | 无可淘汰则抛可读错误，bash 工具转为 `Error:` 结果               |
+| 层级   | 落点                                        | 机制                                                   | 超限表现                                                        |
+| ------ | ------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| run 级 | `runtime/lifecycle/run-concurrency-gate.ts` | 本进程 FIFO 信号量 + 跨进程 `runs:count` 原子占位      | 进入队列，先回传 `task_progress{status:'queued'}`，对话可先思考 |
+| 容器级 | `DockerSandboxProvider.provisionContainer`  | `containers:count` Lua 原子占位 + LRU 淘汰空闲容器腾位 | 无可淘汰则抛可读错误，bash 工具转为 `Error:` 结果               |
 
 ### 10.3 生命周期与会话状态同步
 
@@ -384,7 +384,7 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 | `sandbox/sandbox-provider.ts`               | 基类新增 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId`（默认 no-op） |
 | `sandbox/sandbox-monitor.ts`                | 新增：只读快照聚合                                                               |
 | `agents/middlewares/sandbox-middleware.ts`  | 补 `afterAgent` markIdle；`beforeAgent` retain                                   |
-| `runtime/run-concurrency-gate.ts`           | 新增：run 级并发闸门                                                             |
+| `runtime/lifecycle/run-concurrency-gate.ts` | 新增：run 级并发闸门                                                             |
 | `runtime/service.ts`                        | `executeRun` 前置 run 闸门 + 排队帧；`deleteThread` 联动销毁                     |
 | `app/api/sandbox/stats/route.ts`            | 新增：只读监控 API                                                               |
 

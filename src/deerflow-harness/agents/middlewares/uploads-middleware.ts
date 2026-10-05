@@ -26,7 +26,7 @@ import { loadSessionUploadedFiles } from './thread-data-middleware';
  *   add_messages 默认按 id 合并，本中间件不给注入消息分配 id，故每次进入都会追加；
  *   tag 是阻止"同一 run 多次 beforeAgent 入口"重复注入的唯一手段。
  *
- * 顺序：与 ThreadDataMiddleware 的先后不再有语义依赖（自行取数兜底），仍保持位序在后。
+ * 顺序：与 ThreadDataMiddleware 先后无语义依赖（自行取数兜底），位序保持在后。
  *
  * 错误隔离：任何异常仅 console.error，不影响主流程。
  */

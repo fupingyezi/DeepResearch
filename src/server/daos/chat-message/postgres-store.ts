@@ -10,6 +10,7 @@ import type {
   InsertChatMessageInput,
   LatestAssistantParts,
   LatestMessageRow,
+  LatestUserMessageWithParts,
 } from './types';
 
 type Row = Record<string, unknown>;
@@ -62,6 +63,23 @@ export class PgChatMessageStore implements ChatMessageStore {
       id: String(row.id),
       role: row.role as 'user' | 'assistant',
       createdAt: new Date(row.created_at as string | number | Date),
+    };
+  }
+
+  async getLatestUserWithParts(sessionId: string): Promise<LatestUserMessageWithParts | null> {
+    const res = await query(
+      `select id, parts, created_at from chat_message
+        where session_id = $1 and role = 'user'
+        order by created_at desc
+        limit 1;`,
+      [sessionId],
+    );
+    const row = res.rows[0] as Row | undefined;
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      createdAt: new Date(row.created_at as string | number | Date),
+      parts: (row.parts ?? []) as MessagePart[],
     };
   }
 

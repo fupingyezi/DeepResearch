@@ -8,7 +8,7 @@
 
 import { ChatOpenAI } from '@langchain/openai';
 
-import { tokenUsageFromUsageMetadata } from '../../src/deerflow-harness/runtime/usage-accounting';
+import { tokenUsageFromUsageMetadata } from '../../src/deerflow-harness/runtime/usage/usage-accounting';
 import type { AgentRunResult } from './agent';
 
 // ── 类型定义 ──

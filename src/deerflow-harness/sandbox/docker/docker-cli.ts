@@ -8,7 +8,6 @@
  * 辅助能力（多对话并行编排用）：
  * - dockerPsByPrefix：按 name 前缀列出容器，供启动对账（reconcile）以 daemon 为真相源。
  * - dockerStats：单次采样容器资源占用，供只读监控 API。
- * - runDockerWithRetry：对瞬时故障做有限次退避重试。
  */
 
 import { execFile } from 'node:child_process';
@@ -69,36 +68,6 @@ export function runDocker(
   });
 }
 
-/**
- * 带有限次退避重试的 docker 调用：仅对「非超时且 exitCode!=0」的瞬时故障重试，
- * 超时不重试（避免叠加长耗时）。retries 为首次之外的额外尝试次数。
- */
-export async function runDockerWithRetry(
-  args: string[],
-  opts: { timeoutMs?: number; input?: string; retries: number },
-): Promise<DockerExecResult> {
-  const { retries, ...runOpts } = opts;
-  let last = await runDocker(args, runOpts);
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    if (last.exitCode === 0 || last.timedOut) return last;
-    await delay(200 * (attempt + 1));
-    last = await runDocker(args, runOpts);
-  }
-  return last;
-}
-
-/** docker daemon 是否可用（`docker info` 成功）。 */
-export async function isDockerAvailable(): Promise<boolean> {
-  try {
-    const result = await runDocker(['info', '--format', '{{.ServerVersion}}'], {
-      timeoutMs: 15_000,
-    });
-    return result.exitCode === 0 && result.stdout.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
 /** 按容器名前缀列出容器名（含已停止），供启动对账以 daemon 为真相源。 */
 export async function dockerPsByPrefix(prefix: string): Promise<string[]> {
   const result = await runDocker(
@@ -135,8 +104,4 @@ export async function dockerStats(containerName: string): Promise<DockerContaine
     memPerc: memPerc ?? '',
     pids: pids ?? '',
   };
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

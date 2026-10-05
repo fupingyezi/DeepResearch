@@ -8,7 +8,11 @@
 
 import {
   DeerFlowClient,
+  InMemoryRunEventBus,
+  InMemoryRunRegistry,
   PgRunStore,
+  RedisEventBus,
+  RedisRunRegistry,
   PgThreadMetaStore,
   buildThreadConfig,
   createChatModel,
@@ -158,7 +162,7 @@ export function ensureMemoryEmbeddingsFactory(): void {
  * 故由 app 层注入，模式对齐 setMemoryModelFactory / setTitleModelFactory。
  * 未注册 / minioKey 缺失 / 读取失败 → 返回 null，构造侧自动把该图降级为文本说明。
  */
-export function ensureThreadImageFetcher(): void {
+function ensureThreadImageFetcher(): void {
   if (imageFetcherRegistered) return;
   imageFetcherRegistered = true;
   setThreadImageFetcher(async (ref) => {
@@ -278,12 +282,20 @@ async function build(): Promise<ThreadService> {
     return next;
   };
 
+  // REDIS_URL 配置时用跨进程登记表（连接失败自降级进程内、只告警一次），
+  // 未配置直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点。
+  // 事件总线同口径：Redis Stream 回放 / 断点续读，否则进程内 buffer 回放。
+  const registry = process.env.REDIS_URL ? new RedisRunRegistry() : new InMemoryRunRegistry();
+  const eventBus = process.env.REDIS_URL ? new RedisEventBus() : new InMemoryRunEventBus();
+
   return createThreadService({
     client,
     checkpointer,
     threads: new PgThreadMetaStore(),
     runs: new PgRunStore(),
     createClientForModel,
+    registry,
+    eventBus,
   });
 }
 

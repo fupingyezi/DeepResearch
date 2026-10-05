@@ -16,10 +16,9 @@ import { v4 as uuidv4 } from 'uuid';
 
 import {
   ClientAgentEventType,
-  consumeTitleUpdate,
   createClientAgentEvent,
-  type ClientAgentEvent,
   type ModelConfig,
+  type SseStreamEvent,
   type ThreadImageRef,
   type ThreadService,
 } from '@/deerflow-harness';
@@ -110,6 +109,39 @@ export function pickEarlier(a: Date | undefined, b: Date | undefined): Date | un
   if (!a) return b;
   if (!b) return a;
   return a.getTime() <= b.getTime() ? a : b;
+}
+
+/**
+ * user 消息 parts → 请求体 contents 块。recall 重放原始提问时用：
+ * 原提问可能带文件/图片附件，只有重放它们，模型重跑才能看到与首轮一致的输入。
+ * 非 text/file/image 的 part（user 消息不会出现）直接跳过。
+ */
+export function userPartsToContents(parts: MessagePart[]): ChatContentBlock[] {
+  const blocks: ChatContentBlock[] = [];
+  for (const part of parts) {
+    if (part.type === 'text' && typeof part.content?.text === 'string') {
+      blocks.push({ type: 'text', text: part.content.text });
+    } else if (
+      (part.type === 'file' || part.type === 'image') &&
+      typeof part.content?.fileId === 'string'
+    ) {
+      blocks.push({ type: part.type, fileId: part.content.fileId });
+    }
+  }
+  return blocks;
+}
+
+/** 已解析文件 → 本轮视觉图片引用（仅 image/* 参与多模态下发）。 */
+export function toThreadImages(files: SavedFileMetadata[]): ThreadImageRef[] {
+  return files
+    .filter((f) => f.mimeType.startsWith('image/'))
+    .map((f) => ({
+      fileId: f.fileId,
+      filename: f.filename,
+      mimeType: f.mimeType,
+      minioKey: f.minioKey,
+      sizeBytes: f.sizeBytes,
+    }));
 }
 
 /**
@@ -218,7 +250,8 @@ export class ChatService {
     const shouldPersistMessages = !isResume;
 
     const contents = body.message.contents;
-    const inputText = pickInputText(contents);
+    // recall / reEditCall 会在截断分支用「原始提问」覆盖输入（见下），故用 let。
+    let inputText = pickInputText(contents);
     if (!inputText) {
       return {
         ok: false,
@@ -241,15 +274,8 @@ export class ChatService {
     // （metadata 会被 `...metadata` 展开进每个事件载荷，塞图片引用会污染前端协议）。
     // 是否真的以多模态下发由 client.stream 按 modelConfig.supportsVision 二次判定 ——
     // 此处不做视觉能力判断，避免第二个真相源。
-    const images: ThreadImageRef[] = resolvedFiles
-      .filter((f) => f.mimeType.startsWith('image/'))
-      .map((f) => ({
-        fileId: f.fileId,
-        filename: f.filename,
-        mimeType: f.mimeType,
-        minioKey: f.minioKey,
-        sizeBytes: f.sizeBytes,
-      }));
+    // recall 分支会用原始提问的附件覆盖 images（见下），故用 let。
+    let images: ThreadImageRef[] = toThreadImages(resolvedFiles);
 
     // —— 模型与 Key 解析（前置守卫，置于建会话之前以避免产生空会话） ——
     const modelResolution = await resolveUserModelConfig(userId, body.configuration ?? undefined);
@@ -272,8 +298,8 @@ export class ChatService {
     // —— sessionId 分流 ——
     // 无论有没有传 sessionId，都先「确保会话行存在」：传进来的 id 未必真的落过库 ——
     // 前端首个请求失败（没收到 START）时不会重置本地状态，下一轮会把本地生成的临时 UUID
-    // 当「已有会话」发过来。旧实现只在「没传 sessionId」时建行，于是这种情况会先建成
-    // threads_meta 孤儿，紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
+    // 当「已有会话」发过来。缺了这步，临时 id 会先落下 threads_meta 孤儿，
+    // 紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
     const incomingSessionId =
       typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : null;
 
@@ -321,7 +347,34 @@ export class ChatService {
     // —— recall / reEditCall 截断 ——
     if (shouldPersistMessages && (isRecall || isReEdit)) {
       try {
+        // checkpoint 截断先于 DB 截断：模型看到的历史来自 checkpoint（DB 只决定 UI
+        // 显示），且失败时 DB 原封不动（重试不会多删）。checkpoint 里没有 human 消息
+        // （truncated=false）不是错误——提交失败的编辑轮可能从未进过 checkpoint，
+        // DB 侧截断语义照旧。
+        const threadService = await this.deps.getThreadService();
+        await threadService.truncateHistory({ thread_id: threadId, user_id: userId });
         if (isRecall) {
+          // recall 的输入不是请求体文本：前端把「复制 / 下载 / recall」共用的回答正文
+          // 当作 inputValue 传回来，正文不是新提问。真正的输入是「被重新生成的那条
+          // 回答对应的原始提问」——连同其文件/图片附件一起重放，模型重跑才能看到与
+          // 首轮一致的输入。必须先读再删：截断落在提问之后，读晚了数据就没了。
+          const original = await this.deps.conversations.getLatestUserMessageWithParts(threadId);
+          if (original) {
+            const originalContents = userPartsToContents(original.parts);
+            const originalText = pickInputText(originalContents);
+            if (originalText) inputText = originalText;
+            const originalFileIds = pickFileIds(originalContents);
+            if (originalFileIds.length > 0) {
+              try {
+                const files = await this.deps.conversations.resolveFilesByIds(originalFileIds);
+                images = toThreadImages(files);
+              } catch (e) {
+                console.error('[POST /api/v3/chat] recall re-attach files failed:', e, {
+                  originalFileIds,
+                });
+              }
+            }
+          }
           const lastAssistant = await this.deps.conversations.getLatestMessageByRole(
             threadId,
             'assistant',
@@ -461,22 +514,24 @@ export class ChatService {
    * abort 的 break 触发 generator.return() 才执行 finally 落库 ——
    * 改成「流结束后路由层 await 落库」会在 abort 路径丢持久化。
    */
-  async *streamEvents(prepared: PreparedChat, runId: string): AsyncGenerator<ClientAgentEvent> {
+  async *streamEvents(prepared: PreparedChat, runId: string): AsyncGenerator<SseStreamEvent> {
     const startPayload: Record<string, unknown> = {
       run_id: runId,
       thread_id: prepared.threadId,
       sessionId: prepared.threadId,
     };
-    // 总是回传会话记录：正常新建时前端要把它加进侧栏；「临时 id 首次落库」那种续聊也
-    // 需要（此前这类对话因为没落库、永远不进侧栏）；真正的续聊则被 store 的 addChatSession
-    // 按同 id 幂等跳过，重复下发无副作用。
+    // 总是回传会话记录：新建会话前端要把它加进侧栏，「临时 id 首次落库」的续聊同样
+    // 需要；真正的续聊则被 store 的 addChatSession 按同 id 幂等跳过，重复下发无副作用。
     if (prepared.chatSession) startPayload.chatSession = prepared.chatSession;
     if (typeof prepared.userMessageId === 'string')
       startPayload.userMessageId = prepared.userMessageId;
     if (typeof prepared.assistantMessageId === 'string')
       startPayload.assistantMessageId = prepared.assistantMessageId;
 
-    yield createClientAgentEvent(ClientAgentEventType.START, 'lead', startPayload as never);
+    // START 由本层合成、不在事件总线里：无 eventId（无 id 行），客户端游标只随总线事件前进
+    yield {
+      event: createClientAgentEvent(ClientAgentEventType.START, 'lead', startPayload as never),
+    };
 
     // resume 续写时用既有 parts seed，使续跑的 TOOL_RESULT 能命中中断前的 tool_call。
     const collector =
@@ -493,16 +548,10 @@ export class ChatService {
     });
 
     try {
-      for await (const ev of subscription) {
-        if (collector) collector.onEvent(ev);
-        if (ev.eventType === ClientAgentEventType.END) {
-          const titleUpdate = consumeTitleUpdate(prepared.threadId);
-          if (titleUpdate) {
-            yield createClientAgentEvent(ClientAgentEventType.END, ev.agentId, { titleUpdate });
-            continue;
-          }
-        }
-        yield ev;
+      for await (const stamped of subscription) {
+        // titleUpdate 已由 service 折进总线 END 载荷，这里原样转发即可
+        if (collector) collector.onEvent(stamped.event);
+        yield { eventId: stamped.eventId, event: stamped.event };
       }
     } finally {
       if (collector && typeof prepared.assistantMessageId === 'string') {

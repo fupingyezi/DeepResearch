@@ -25,6 +25,10 @@ services:
     image: ${APP_IMAGE:-deepresearch:latest}
     restart: unless-stopped
     logging: *default-logging
+    # SIGTERM → 优雅停机（排水在跑 run）→ 超时 SIGKILL。
+    # 窗口须 > DEERFLOW_GRACEFUL_DRAIN_MS（默认 30s）+ 记忆队列 flush 余量，
+    # 否则 compose 在排水完成前强杀，僵尸回收靠下个进程启动对账兜底。
+    stop_grace_period: 60s
     env_file:
       - .env.production
     environment:
@@ -32,6 +36,9 @@ services:
       DEERFLOW_DATA_DIR: /app/.memory
       # MCP/skill 启用状态默认写 {cwd}/extensions_config.json，同样指到卷内
       DEERFLOW_EXTENSIONS_CONFIG_PATH: /app/.data/extensions_config.json
+      # 关掉 Next 自带的信号清理（server.close → exit(0)）：否则 SIGTERM 一到
+      # 进程就被 Next 直接退出，instrumentation 的排水序列根本跑不完
+      NEXT_MANUAL_SIG_HANDLE: '1'
     ports:
       - '3000:3000'
     depends_on:
@@ -65,6 +72,10 @@ services:
     logging: *default-logging
     image: postgres:15
     restart: unless-stopped
+    # 多进程部署：连接数 = 每进程 pg 池上限 × 进程数 + 管理余量。
+    # 官方镜像缺省 100，3 进程 × 默认池即可触顶（超限请求直接 5xx，表现为
+    # 「重启后偶发连不上库」）。此处给 200，进程数再增时按需上调。
+    command: postgres -c max_connections=200
     environment:
       POSTGRES_DB: DeepResearch
       POSTGRES_USER: ${POSTGRES_USER:-deepresearch}

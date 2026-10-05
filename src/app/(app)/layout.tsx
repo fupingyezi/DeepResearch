@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import Sider from '@/components/sider/sider';
 import { useAuthStore } from '@/store/auth-store';
-import { AgentEventProvider } from '@/runtime/context';
+import { AgentEventProvider } from '@/events/context';
 
 /**
  * 应用主区布局：渲染侧边栏 + 业务页面。

@@ -15,8 +15,8 @@
  * 11. SubagentLimitMiddleware           (始终启用)
  * 12. LoopDetectionMiddleware           (始终启用)
  *
- * 澄清追问已改用 LangGraph 原生 interrupt（ask_clarification 工具 + Command resume），
- * 不再依赖中间件短路，详见 tools/builtins/clarification-tool.ts。
+ * 澄清追问走 LangGraph 原生 interrupt（ask_clarification 工具 + Command resume），
+ * 不经中间件短路，详见 tools/builtins/clarification-tool.ts。
  *
  * 关键顺序约束：
  * - ToolCallIntegrity (3) **先于** ToolErrorHandling (5)：在到达 ToolNode
@@ -26,7 +26,7 @@
  *   异常，定位不同、不可互替。
  *
  * 添加新的"消息层面工具调用完整性问题"请优先实现 IntegrityRule 注册到
- * ToolCallIntegrityMiddleware（见 tool-call-integrity/rules/）。
+ * ToolCallIntegrityMiddleware（见 tool-call-integrity-rules.ts）。
  */
 
 export { threadDataMiddleware } from './thread-data-middleware';
@@ -36,8 +36,12 @@ export {
   toolCallIntegrityMiddleware,
   createToolCallIntegrityMiddleware,
   DEFAULT_INTEGRITY_RULES,
-} from './tool-call-integrity';
-export type { IntegrityRule, RuleContext, ToolCallIntegrityOptions } from './tool-call-integrity';
+} from './tool-call-integrity-middleware';
+export type {
+  IntegrityRule,
+  RuleContext,
+  ToolCallIntegrityOptions,
+} from './tool-call-integrity-middleware';
 export { guardrailMiddleware, createGuardrailMiddleware } from './guardrail-middleware';
 export type { GuardrailOptions, GuardrailBlockMode } from './guardrail-middleware';
 export { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
@@ -49,10 +53,10 @@ export {
   setTitleModelFactory,
   getTitleModelFactory,
   getPromptEnhanceModel,
-} from './title-middleware/title-middleware';
-export type { TitleModelFactory, TitleModelOptions } from './title-middleware/title-middleware';
-export { publishTitleUpdate, consumeTitleUpdate } from './title-middleware/title-bus';
-export type { TitleUpdatePayload } from './title-middleware/title-bus';
+} from './title-middleware';
+export type { TitleModelFactory, TitleModelOptions } from './title-middleware';
+export { publishTitleUpdate, consumeTitleUpdate } from './title-bus';
+export type { TitleUpdatePayload } from './title-bus';
 export { memoryMiddleware } from './memory-middleware';
 export { visionMiddleware } from '../../vision';
 export {
@@ -62,18 +66,18 @@ export {
 } from './subagent-limit-middleware';
 export { loopDetectionMiddleware } from './loop-detection-middleware';
 export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
-export { withCallLog, withCallLogAll } from './with-call-log';
+export { withCallLogAll } from './with-call-log';
 export type { WithCallLogOptions } from './with-call-log';
 
 import { threadDataMiddleware } from './thread-data-middleware';
 import { uploadsMiddleware } from './uploads-middleware';
 import { sandboxMiddleware } from './sandbox-middleware';
-import { toolCallIntegrityMiddleware } from './tool-call-integrity';
+import { toolCallIntegrityMiddleware } from './tool-call-integrity-middleware';
 import { guardrailMiddleware } from './guardrail-middleware';
 import { toolErrorHandlingMiddleware } from './tool-error-handling-middleware';
 import { summarizationMiddleware } from './summarization-middleware';
 import { todoMiddleware } from './todo-middleware';
-import { titleMiddleware } from './title-middleware/title-middleware';
+import { titleMiddleware } from './title-middleware';
 import { memoryMiddleware } from './memory-middleware';
 import { visionMiddleware } from '../../vision';
 // 引用模块级单例仅用于位序文档常量 ORDERED_MIDDLEWARES。

@@ -62,6 +62,8 @@ export const ERROR_STATUS: Record<string, number> = {
   // prompt enhance
   MODEL_UNAVAILABLE: 503,
   EMPTY_RESULT: 502,
+  // 停机中：优雅停机不再接受新 run，LB 依 503 摘除本实例
+  SERVER_DRAINING: 503,
   // 占位路由（auth/oauth）
   NOT_IMPLEMENTED: 501,
 };

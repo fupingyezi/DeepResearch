@@ -140,6 +140,11 @@ export class ConversationService {
     return this.deps.chatMessages.getLatestByRole(sessionId, role);
   }
 
+  /** recall 重放的原始提问：最近一条 user 消息（含 parts）。 */
+  getLatestUserMessageWithParts(sessionId: string) {
+    return this.deps.chatMessages.getLatestUserWithParts(sessionId);
+  }
+
   /** resume 续写的 seed：最近一条 assistant 消息的 id 与既有 parts。 */
   getLatestAssistantWithParts(
     sessionId: string,

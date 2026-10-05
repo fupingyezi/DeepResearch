@@ -88,10 +88,15 @@ export {
   resetSkillCache,
   createCustomSkill,
   buildSkillsSection,
-} from './skills';
+} from './extensions/skills';
 
 // MCP 子系统（端到端：配置→连接→工具注入）
-export { type McpToolsResult, loadMcpTools, getEnabledMcpSignature, resetMcpClient } from './mcp';
+export {
+  type McpToolsResult,
+  loadMcpTools,
+  getEnabledMcpSignature,
+  resetMcpClient,
+} from './extensions/mcp';
 
 // Memory 子系统
 export {
@@ -210,6 +215,8 @@ export {
   ClientAgentEventType,
   type ClientAgentEvent,
   type ClientAgentEventStream,
+  type SseStreamEvent,
+  type StampedClientAgentEvent,
 } from './runtime/sse';
 
 // Thread 系统（runtime + persistence）
@@ -224,15 +231,33 @@ export {
 } from './runtime/checkpointer';
 
 // runtime/context
-export { runWithContext, getContext, requireContext, type RuntimeContext } from './runtime/context';
+export { runWithContext, getContext, type RuntimeContext } from './runtime/context';
 
 // runtime/stream-bridge
-export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
+export { StreamBridge, ThreadChannel } from './runtime/stream-bridge';
+
+// runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）
+export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/coordination/contracts';
+export { InMemoryRunRegistry } from './runtime/coordination/run-registry/in-memory';
+export { RedisRunRegistry } from './runtime/coordination/run-registry/redis';
+export { InMemoryRunEventBus } from './runtime/coordination/event-bus/in-memory';
+export { RedisEventBus } from './runtime/coordination/event-bus/redis';
+
+// runtime/locks（互斥锁：进程内 / Redis 双实现）
+export {
+  getDistLock,
+  resetDistLock,
+  InMemoryDistLock,
+  RedisDistLock,
+  type DistLock,
+  type DistLockHandle,
+} from './runtime/locks/dist-lock';
 
 // runtime/service
 export {
   createThreadService,
   ThreadServiceError,
+  HEARTBEAT_INTERVAL_MS,
   type ThreadService,
   type ThreadServiceDeps,
   type CreateThreadInput,

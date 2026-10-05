@@ -65,8 +65,8 @@ LongMemEval 数据集需手动下载（官方 HuggingFace 源），详见
 
 - **token 是实测值**：agent 侧经模型工厂的 callback 累加（含 subagent、中间件与记忆抽取
   的调用），judge 侧就地读取响应的 `usage_metadata`。实现在
-  `src/deerflow-harness/runtime/usage-accounting.ts`。
-- **金额是估算**：单价取自 `src/deerflow-harness/runtime/pricing.json`（含 `asOf` 与官方
+  `src/deerflow-harness/runtime/usage/usage-accounting.ts`。
+- **金额是估算**：单价取自 `src/deerflow-harness/runtime/usage/pricing.json`（含 `asOf` 与官方
   URL）。价格变动只改这个文件，不动代码。**未知模型不给估算**，只列进 `unknownModels`。
 - **按角色拆分**：`agent`（作答）/ `judge`（评分）/ `ingest`（LongMemEval 的
   `--ingest` 记忆写入，成本大头）/ `memory`（记忆更新抽取）。`memory` 单独成角色是因为

@@ -162,10 +162,9 @@ function scoredSection(data: MemoryData, group: 'user' | 'history', slot: string
  * 两个独立回填各自 reload-merge-save 会互相制造「A 合并前 B 已 save → A 丢掉 B」
  * 的交错窗口，合并后单次 save 彻底消除这对竞态。
  *
- * 并发语义：嵌入期间 updater 可能落盘新内容，故 save 前重新 reload 并只合并
- * 「仍存在且 content / summary 未变」的条目（facts 按 id+content、sections 按
- * 槽位+summary 守卫）；残余竞态窗口由 FileMemoryStorage 原子写（tmp+rename）
- * 保证文件不损坏，由 updater 下一轮重写兜底收敛。
+ * 并发语义：嵌入在锁外进行，期间 updater 可能落盘新内容；落盘走 update 的锁内
+ * 合并，只合入「仍存在且 content / summary 未变」的条目（facts 按 id+content、
+ * sections 按槽位+summary 守卫），与 updater 的写互斥（同一 per-user 锁）。
  */
 export async function backfillMemoryEmbeddings(opts: {
   agentName?: string | null;
@@ -198,8 +197,6 @@ export async function backfillMemoryEmbeddings(opts: {
     ]);
     if (vectors.every((v) => v == null)) return; // 全部失败：等下次回填重试
 
-    // save 前重新读最新数据合并，避免覆盖嵌入期间 updater 的并发写入
-    const toSave = await storage.reload(scope);
     const vectorById = new Map<string, number[]>();
     const contentById = new Map<string, string>();
     missingFacts.forEach((f, i) => {
@@ -218,74 +215,78 @@ export async function backfillMemoryEmbeddings(opts: {
       }
     });
 
-    let dirty = false;
-    const next = { ...toSave };
+    // 锁内重读最新状态并重新执行合并：嵌入期间 updater 可能已落盘新内容，
+    // 只合入「仍存在且 content / summary 未变」的条目，与 updater 的写互斥。
+    await storage.update((fresh) => {
+      let dirty = false;
+      const next = { ...fresh };
 
-    const mergedFacts = toSave.facts.map((f: Fact) => {
-      const vector = vectorById.get(f.id);
-      if (vector == null) return f;
-      if (contentById.get(f.id) !== f.content) return f; // content 已变：旧向量作废
-      return { ...f, embedding: vector };
-    });
-    if (mergedFacts.some((f, i) => f !== toSave.facts[i])) {
-      next.facts = mergedFacts;
-      dirty = true;
-    }
+      const mergedFacts = fresh.facts.map((f: Fact) => {
+        const vector = vectorById.get(f.id);
+        if (vector == null) return f;
+        if (contentById.get(f.id) !== f.content) return f; // content 已变：旧向量作废
+        return { ...f, embedding: vector };
+      });
+      if (mergedFacts.some((f, i) => f !== fresh.facts[i])) {
+        next.facts = mergedFacts;
+        dirty = true;
+      }
 
-    // section 合并守卫：槽位 summary 未变（相对嵌入时）、且仍未被 updater 补齐才写；
-    // 整槽替换（不动 toSave 原对象，与 facts 侧同纪律）
-    const sectionVectorFor = (slotKey: string, currentSummary: string): number[] | null => {
-      const vector = sectionVectorBySlot.get(slotKey);
-      if (vector == null) return null;
-      if (sectionSummaryBySlot.get(slotKey) !== currentSummary) return null; // summary 已变
-      return vector;
-    };
-    const topOfMindVec = sectionVectorFor('user.topOfMind', next.user.topOfMind.summary);
-    if (topOfMindVec && !isCompatibleVector(next.user.topOfMind.embedding, topOfMindVec.length)) {
-      next.user = {
-        ...next.user,
-        topOfMind: { ...next.user.topOfMind, embedding: topOfMindVec },
+      // section 合并守卫：槽位 summary 未变（相对嵌入时）、且仍未被 updater 补齐才写；
+      // 整槽替换（不动 fresh 原对象，与 facts 侧同纪律）
+      const sectionVectorFor = (slotKey: string, currentSummary: string): number[] | null => {
+        const vector = sectionVectorBySlot.get(slotKey);
+        if (vector == null) return null;
+        if (sectionSummaryBySlot.get(slotKey) !== currentSummary) return null; // summary 已变
+        return vector;
       };
-      dirty = true;
-    }
-    const recentVec = sectionVectorFor('history.recentMonths', next.history.recentMonths.summary);
-    if (recentVec && !isCompatibleVector(next.history.recentMonths.embedding, recentVec.length)) {
-      next.history = {
-        ...next.history,
-        recentMonths: { ...next.history.recentMonths, embedding: recentVec },
-      };
-      dirty = true;
-    }
-    const earlierVec = sectionVectorFor(
-      'history.earlierContext',
-      next.history.earlierContext.summary,
-    );
-    if (
-      earlierVec &&
-      !isCompatibleVector(next.history.earlierContext.embedding, earlierVec.length)
-    ) {
-      next.history = {
-        ...next.history,
-        earlierContext: { ...next.history.earlierContext, embedding: earlierVec },
-      };
-      dirty = true;
-    }
-    const longTermVec = sectionVectorFor(
-      'history.longTermBackground',
-      next.history.longTermBackground.summary,
-    );
-    if (
-      longTermVec &&
-      !isCompatibleVector(next.history.longTermBackground.embedding, longTermVec.length)
-    ) {
-      next.history = {
-        ...next.history,
-        longTermBackground: { ...next.history.longTermBackground, embedding: longTermVec },
-      };
-      dirty = true;
-    }
+      const topOfMindVec = sectionVectorFor('user.topOfMind', next.user.topOfMind.summary);
+      if (topOfMindVec && !isCompatibleVector(next.user.topOfMind.embedding, topOfMindVec.length)) {
+        next.user = {
+          ...next.user,
+          topOfMind: { ...next.user.topOfMind, embedding: topOfMindVec },
+        };
+        dirty = true;
+      }
+      const recentVec = sectionVectorFor('history.recentMonths', next.history.recentMonths.summary);
+      if (recentVec && !isCompatibleVector(next.history.recentMonths.embedding, recentVec.length)) {
+        next.history = {
+          ...next.history,
+          recentMonths: { ...next.history.recentMonths, embedding: recentVec },
+        };
+        dirty = true;
+      }
+      const earlierVec = sectionVectorFor(
+        'history.earlierContext',
+        next.history.earlierContext.summary,
+      );
+      if (
+        earlierVec &&
+        !isCompatibleVector(next.history.earlierContext.embedding, earlierVec.length)
+      ) {
+        next.history = {
+          ...next.history,
+          earlierContext: { ...next.history.earlierContext, embedding: earlierVec },
+        };
+        dirty = true;
+      }
+      const longTermVec = sectionVectorFor(
+        'history.longTermBackground',
+        next.history.longTermBackground.summary,
+      );
+      if (
+        longTermVec &&
+        !isCompatibleVector(next.history.longTermBackground.embedding, longTermVec.length)
+      ) {
+        next.history = {
+          ...next.history,
+          longTermBackground: { ...next.history.longTermBackground, embedding: longTermVec },
+        };
+        dirty = true;
+      }
 
-    if (dirty) await storage.save(next, scope);
+      return dirty ? next : fresh;
+    }, scope);
   } catch (e) {
     if (!warnedBackfillFailure) {
       warnedBackfillFailure = true;

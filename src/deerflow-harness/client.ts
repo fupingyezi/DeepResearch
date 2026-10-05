@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { BaseCheckpointSaver, Command } from '@langchain/langgraph';
+import { BaseCheckpointSaver, Command, START } from '@langchain/langgraph';
 
 import { createChatModel, inferProvider } from './models';
 import { createBaseAgent } from './agents/factory';
@@ -18,8 +18,8 @@ import {
 } from './runtime/sse';
 import { buildThreadConfig } from './runtime/checkpointer';
 import { getContext } from './runtime/context';
-import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './mcp';
-import { getEnabledSkillsSignature } from './skills';
+import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './extensions/mcp';
+import { getEnabledSkillsSignature } from './extensions/skills';
 import { extractMessageContentText } from '@/utils/common';
 import {
   buildHumanMessageContent,
@@ -293,7 +293,7 @@ export class DeerFlowClient {
    *
    * 优先级（仅以下键支持运行期覆盖）：
    *   1. metadata.<key> (boolean) — 本次请求显式覆盖
-   *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
+   *   2. baseOptions.<key>        — 服务级默认（wiring 装配时注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
    * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。
@@ -387,16 +387,6 @@ export class DeerFlowClient {
   }
 
   /**
-   * 解析本轮要绑定到 agent 的工具集。
-   * - caller 显式传 tools → 始终使用 caller 的工具集
-   * - 否则 → 沿用 constructor 默认 tools（默认 [searchWebTool]）
-   * task 工具由 factory.assembleFromFeatures 始终注入。
-   */
-  private resolveTools(_opts: RuntimeRunOptions): StructuredToolInterface[] {
-    return this.defaultTools;
-  }
-
-  /**
    * 按 RuntimeRunOptions 获取或构建 agent 实例。
    * memoryEnabled=true 时不缓存（每轮 prompt 含最新 memory，必须重建）。
    *
@@ -428,7 +418,9 @@ export class DeerFlowClient {
 
     const model = createChatModel(this.modelConfig);
     const provider = inferProvider(this.modelConfig);
-    const effectiveTools = [...this.resolveTools(opts), ...mcpTools];
+    // mcpTools 在默认工具集之上追加（caller 预加载透传）；
+    // task 工具由 factory.assembleFromFeatures 始终注入。
+    const effectiveTools = [...this.defaultTools, ...mcpTools];
 
     const agent = createBaseAgent({
       model,
@@ -509,6 +501,32 @@ export class DeerFlowClient {
     signal?: AbortSignal,
   ): ClientAgentEventStream {
     yield* this.streamWithInput(new Command({ resume: decision }), threadId, metadata, signal);
+  }
+
+  /**
+   * recall / reEditCall 的 checkpoint 截断：把「最近一条 human 消息起至结尾」的全部
+   * 消息从 checkpoint 移除。模型看到的历史来自 checkpoint（DB 里的消息只决定 UI
+   * 显示），所以重跑前的截断必须落在 checkpoint 上，DB 截断只是同步。
+   *
+   * - updateState 以 START 哨兵写入：不带 asNode（或给真实节点名）会把更新经节点
+   *   写手路由到模型/中间件，等于多跑一轮；只有 START 是把 RemoveMessage 直接经
+   *   messages 通道 reducer 应用进新 checkpoint 的纯写入路径。
+   * - 每个被删消息一条 RemoveMessage：messagesStateReducer 只移除 id 精确命中的
+   *   那一条，没有「删到此为止」的批量语义；id 不存在会抛错，因此先 getState 找
+   *   锚点，没有 human 消息则整体跳过（返回 false，调用方不视为失败）。
+   */
+  async truncateHistoryBeforeLatestUserMessage(threadId: string): Promise<boolean> {
+    const agent = await this.ensureAgent('', this.resolveRuntimeOptions(undefined), []);
+    const config = { configurable: { thread_id: threadId } };
+    const state = (await agent.getState(config)) as
+      | { values?: { messages?: BaseMessage[] } }
+      | undefined;
+    const messages = Array.isArray(state?.values?.messages) ? state.values.messages : [];
+    const anchorIndex = messages.map((m) => m._getType()).lastIndexOf('human');
+    if (anchorIndex < 0) return false;
+    const removals = messages.slice(anchorIndex).map((m) => new RemoveMessage({ id: m.id! }));
+    await agent.updateState(config, { messages: removals }, START);
+    return true;
   }
 
   /**

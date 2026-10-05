@@ -35,4 +35,6 @@ export interface RunStore {
   setStatus(run_id: string, status: RunStatus, error?: string | null): Promise<void>;
   get(run_id: string): Promise<Run | null>;
   listByThread(thread_id: string, opts?: RunListOptions): Promise<Run[]>;
+  /** 全表按状态扫描（最新在前）：僵尸回收用它找 running 但 owner 已死的 run。 */
+  listByStatus(status: RunStatus, opts?: { limit?: number }): Promise<Run[]>;
 }

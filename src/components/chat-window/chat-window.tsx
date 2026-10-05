@@ -11,7 +11,7 @@ import {
   useModelStore,
 } from '@/store';
 import { useModelConfigStatus } from '@/hooks';
-import { useAgentEvent } from '@/runtime/context';
+import { useAgentEvent } from '@/events/context';
 import type { ModelPresetName } from '@/config/models';
 
 const ChatLayout: React.FC<ChatLayoutProps> = ({ content, footer }) => {

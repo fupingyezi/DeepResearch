@@ -20,7 +20,7 @@ import { useConversationStore } from '@/store';
 import { UUIDTypes } from 'uuid';
 import { formatYmd } from '@/utils/common';
 import { useOutsideClick } from '@/hooks';
-import { useAuth } from '@/runtime/context/auth-provider';
+import { useAuth } from '@/events/context/auth-provider';
 import { SettingsDialog } from '@/components/settings/settings-dialog';
 
 type SessionDialogMode = 'rename' | 'delete';
@@ -233,8 +233,7 @@ const SiderContent = () => {
       }
       setDialog(null);
     } catch (error) {
-      // 此前这条链路完全没有错误处理：请求失败时弹窗既不关也不提示，看起来就像
-      // 「点了没反应」。失败必须让用户看见。
+      // 失败必须让用户看见：否则弹窗既不关也不提示，看起来就像「点了没反应」。
       console.error(`${mode} session failed:`, error);
       message.error(mode === 'rename' ? '重命名失败，请稍后重试' : '删除失败，请稍后重试');
     } finally {

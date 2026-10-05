@@ -39,10 +39,7 @@ export interface UploadedFile {
 }
 
 /** Reducer for artifacts list - 合并并去重 */
-export function mergeArtifacts(
-  existing: string[] | undefined,
-  next: string[] | undefined,
-): string[] {
+function mergeArtifacts(existing: string[] | undefined, next: string[] | undefined): string[] {
   if (existing == null) return next ?? [];
   if (next == null) return existing;
   // 用 Set 去重，保持顺序
@@ -59,7 +56,7 @@ export function mergeArtifacts(
  * `vision/vision-middleware.ts` 扫描 messages 完成。保留该 channel 是因为
  * 删除 schema 字段收益为零、风险非零（checkpoint 里已可能存在该键）。
  */
-export function mergeViewedImages(
+function mergeViewedImages(
   existing: Record<string, ViewedImageData> | undefined,
   next: Record<string, ViewedImageData> | undefined,
 ): Record<string, ViewedImageData> {
@@ -93,15 +90,3 @@ export const ThreadStateAnnotation = Annotation.Root({
 });
 
 export type ThreadState = typeof ThreadStateAnnotation.State;
-export type ThreadStateUpdate = typeof ThreadStateAnnotation.Update;
-
-export const DEFAULT_STATE: ThreadState = {
-  messages: [],
-  sandbox: null,
-  threadData: null,
-  title: null,
-  artifacts: [],
-  todos: null,
-  uploadedFiles: null,
-  viewedImages: {},
-};
