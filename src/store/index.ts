@@ -1,6 +1,6 @@
 import useChatSessionStore from './chat-session-store';
 import useFileUploadStore from './file-upload-store';
-import { useModelStore } from './modelStore';
+import { useModelStore } from './model-store';
 import { useMemoryModeStore } from './memory-mode-store';
 
 import type { ChatSessionState } from './chat-session-store';
