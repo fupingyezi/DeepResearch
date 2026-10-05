@@ -70,7 +70,9 @@ services:
 
   postgres:
     logging: *default-logging
-    image: postgres:15
+    # pgvector 官方镜像 = postgres:15 + vector 扩展（记忆检索的向量列），
+    # 数据卷与 postgres:15 兼容；扩展创建失败时应用自动回落文件存储
+    image: pgvector/pgvector:pg15
     restart: unless-stopped
     # 多进程部署：连接数 = 每进程 pg 池上限 × 进程数 + 管理余量。
     # 官方镜像缺省 100，3 进程 × 默认池即可触顶（超限请求直接 5xx，表现为
