@@ -125,9 +125,13 @@ export {
   userMemoryFile,
   // storage
   type MemoryStorage,
+  type MemorySqlExecutor,
+  type VectorSearchResult,
   FileMemoryStorage,
+  PgMemoryStorage,
   getMemoryStorage,
   resetMemoryStorage,
+  setMemoryStorage,
   // prompt utilities
   countTokens,
   estimateTokensHeuristic,
@@ -172,14 +176,28 @@ export {
   resetMemoryEmbeddingsFactory,
   setMemoryEmbeddingsFactory,
   type MemoryEmbeddingsFactory,
+  // rerank（RAG 精排）
+  getMemoryRerankerFactory,
+  rerankWithFallback,
+  resetMemoryRerankerFactory,
+  setMemoryRerankerFactory,
+  type MemoryReranker,
+  type MemoryRerankerFactory,
   // facade
   buildMemoryContext,
   previewMemoryRetrieval,
   type BuildMemoryContextOptions,
   type MemoryRetrievalPreview,
-  // retrieval 明细（预览/调试）
-  previewFactScores,
+  // retrieval（RAG 管线：双路召回 → RRF → rerank；明细供预览/调试）
+  lexicalRecall,
+  overlapRatio,
+  retrieveMemory,
+  rrfFuse,
+  tokenize,
+  vectorRecallJs,
   type FactScoreDetail,
+  type RetrieveResult,
+  type SectionScoreDetail,
 } from './agents/memory';
 
 // vision（多模态：图片字节注入 + 多模态消息构造 + 历史图压缩）

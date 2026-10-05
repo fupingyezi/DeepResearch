@@ -1,7 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import type { VectorSearchResult } from '../storage';
 import type { Fact, MemoryData } from '../types';
-import { overlapRatio, previewFactScores, retrieveMemory, scoreFact, tokenize } from '../retrieval';
+import { overlapRatio, retrieveMemory, rrfFuse, tokenize, vectorRecallJs } from '../retrieval';
+
+const QUERY_VEC = [1, 0, 0, 0];
+
+/** 与 QUERY_VEC 余弦恰为 c 的单位向量。 */
+function unit(c: number): number[] {
+  return [c, Math.sqrt(1 - c * c), 0, 0];
+}
 
 function fact(content: string, confidence = 0.9, id = content, embedding?: number[]): Fact {
   return {
@@ -63,7 +71,7 @@ describe('tokenize', () => {
   });
 });
 
-describe('overlapRatio / scoreFact', () => {
+describe('overlapRatio', () => {
   it('完全重合时重叠率为 1', () => {
     const query = new Set(tokenize('量子计算'));
     expect(overlapRatio('量子计算', query)).toBe(1);
@@ -80,72 +88,112 @@ describe('overlapRatio / scoreFact', () => {
     const query = new Set(tokenize('烘焙面包'));
     expect(overlapRatio('量子计算', query)).toBe(0);
   });
+});
 
-  it('置信度越高得分越高（同文本）', () => {
-    const query = { queryTokens: new Set(tokenize('量子计算')) };
-    const high = scoreFact(fact('量子计算', 1.0), query);
-    const low = scoreFact(fact('量子计算', 0.5), query);
-    expect(high).toBeGreaterThan(low);
+describe('rrfFuse', () => {
+  it('两路排名融合：双路都命中的排最前，rrf 降序', () => {
+    const fused = rrfFuse(['a', 'b'], ['b', 'c']);
+    expect(fused.map((e) => e.ref)).toEqual(['b', 'a', 'c']);
+    expect(fused[0].rrf).toBeCloseTo(1 / 61 + 1 / 62, 10);
+    expect(fused[1].rrf).toBeCloseTo(1 / 61, 10);
+    expect(fused[2].rrf).toBeCloseTo(1 / 62, 10);
+  });
+
+  it('平分时路 A 条目在前（Map 插入序 + 稳定排序，tie 稳定）', () => {
+    // a 与 b 各得 1/61 + 1/62：分数相同，路 A 先入 Map 者在前
+    const fused = rrfFuse(['a', 'b'], ['b', 'a']);
+    expect(fused.map((e) => e.ref)).toEqual(['a', 'b']);
+    expect(fused[0].rrf).toBeCloseTo(fused[1].rrf, 10);
+  });
+
+  it('poolSize 截断', () => {
+    const fused = rrfFuse(['a', 'b', 'c', 'd'], [], 60, 2);
+    expect(fused.map((e) => e.ref)).toEqual(['a', 'b']);
+  });
+
+  it('k 可配（默认 60）', () => {
+    const [entry] = rrfFuse(['a'], [], 10);
+    expect(entry.rrf).toBeCloseTo(1 / 11, 10);
   });
 });
 
-describe('retrieveMemory', () => {
+describe('vectorRecallJs', () => {
+  it('余弦降序返回并受 limit 截断', () => {
+    const data = memory([
+      fact('a', 0.9, 'near', [1, 0, 0, 0]),
+      fact('b', 0.9, 'mid', [0, 1, 0, 0]),
+      fact('c', 0.9, 'far', [-1, 0, 0, 0]),
+    ]);
+    const hits = vectorRecallJs(data, QUERY_VEC, 2);
+    expect(hits.map((h) => h.refId)).toEqual(['near', 'mid']);
+    expect(hits[0].similarity).toBeCloseTo(1, 10);
+  });
+
+  it('维度不符的向量与空 summary 的 section 被跳过', () => {
+    const data = memory([fact('a', 0.9, 'f3', [1, 0, 0]), fact('b', 0.9, 'f4', [1, 0, 0, 0])], {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '', updatedAt: '', embedding: [1, 0, 0, 0] },
+      },
+    });
+    const hits = vectorRecallJs(data, QUERY_VEC, 10);
+    expect(hits.map((h) => h.refId)).toEqual(['f4']);
+  });
+});
+
+describe('retrieveMemory 词面召回', () => {
   const data = memory([
     fact('用户正在研究量子计算在药物研发中的应用'),
     fact('用户偏好用 TypeScript 写后端服务'),
     fact('用户住在深圳'),
   ]);
 
-  it('命中相关 fact，过滤无关 fact', () => {
-    const picked = retrieveMemory(data, '量子计算有什么新进展？');
-    expect(picked).not.toBeNull();
-    const contents = picked!.facts.map((f) => f.content);
+  it('命中相关 fact，过滤无关 fact', async () => {
+    const result = await retrieveMemory(data, '量子计算有什么新进展？');
+    expect(result).not.toBeNull();
+    const contents = result!.picked.facts.map((f) => f.content);
     expect(contents.some((c) => c.includes('量子计算'))).toBe(true);
     expect(contents.some((c) => c.includes('TypeScript'))).toBe(false);
   });
 
-  it('相关 fact 排在首位', () => {
-    const picked = retrieveMemory(data, '量子计算');
-    expect(picked!.facts[0].content).toContain('量子计算');
+  it('相关 fact 排在首位', async () => {
+    const result = await retrieveMemory(data, '量子计算');
+    expect(result!.picked.facts[0].content).toContain('量子计算');
   });
 
-  it('topK 截断（保留得分最高的 N 条）', () => {
+  it('topK 截断（保留得分最高的 N 条）', async () => {
     const many = memory([
       fact('量子计算 A'),
       fact('量子计算 B'),
       fact('量子计算 C'),
       fact('量子计算 D'),
     ]);
-    const picked = retrieveMemory(many, '量子计算', { topK: 2 });
-    expect(picked!.facts).toHaveLength(2);
+    const result = await retrieveMemory(many, '量子计算', { topK: 2 });
+    expect(result!.picked.facts).toHaveLength(2);
   });
 
-  it('空 query 返回 null（不注入）', () => {
-    expect(retrieveMemory(data, '')).toBeNull();
-    expect(retrieveMemory(data, '   ')).toBeNull();
+  it('空 query 返回 null（不注入）', async () => {
+    expect(await retrieveMemory(data, '')).toBeNull();
+    expect(await retrieveMemory(data, '   ')).toBeNull();
   });
 
-  it('全部无关时返回 null', () => {
-    expect(retrieveMemory(data, '如何制作提拉米苏')).toBeNull();
+  it('全部无关（双路全空）时返回 null', async () => {
+    expect(await retrieveMemory(data, '如何制作提拉米苏')).toBeNull();
   });
 
-  it('data 为 null/undefined 时返回 null', () => {
-    expect(retrieveMemory(null, '量子计算')).toBeNull();
-    expect(retrieveMemory(undefined, '量子计算')).toBeNull();
+  it('data 为 null/undefined 时返回 null', async () => {
+    expect(await retrieveMemory(null, '量子计算')).toBeNull();
+    expect(await retrieveMemory(undefined, '量子计算')).toBeNull();
   });
 
-  it('minScore 可过滤弱相关项', () => {
-    const picked = retrieveMemory(data, '量子计算', { minScore: 0.99 });
-    expect(picked).toBeNull();
-  });
-
-  it('中英混合 query 命中各自语种的事实', () => {
+  it('中英混合 query 命中各自语种的事实', async () => {
     const mixed = memory([fact('用户常用 LangChain 构建 agent'), fact('用户的导师姓王')]);
-    const picked = retrieveMemory(mixed, 'LangChain 怎么用');
-    expect(picked!.facts.map((f) => f.content).join()).toContain('LangChain');
+    const result = await retrieveMemory(mixed, 'LangChain 怎么用');
+    expect(result!.picked.facts.map((f) => f.content).join()).toContain('LangChain');
   });
 
-  it('history 段只保留最相关的一段', () => {
+  it('history 段只保留池内秩最优的一段', async () => {
     const withHistory = memory([], {
       history: {
         recentMonths: { summary: '最近在做量子计算相关的研究项目', updatedAt: '' },
@@ -153,267 +201,277 @@ describe('retrieveMemory', () => {
         longTermBackground: { summary: '长期关注开源社区', updatedAt: '' },
       },
     });
-    const picked = retrieveMemory(withHistory, '量子计算项目进展');
-    expect(picked!.history.recentMonths.summary).toContain('量子计算');
-    expect(picked!.history.earlierContext.summary).toBe('');
-    expect(picked!.history.longTermBackground.summary).toBe('');
+    const result = await retrieveMemory(withHistory, '量子计算项目进展');
+    expect(result!.picked.history.recentMonths.summary).toContain('量子计算');
+    expect(result!.picked.history.earlierContext.summary).toBe('');
+    expect(result!.picked.history.longTermBackground.summary).toBe('');
   });
 
-  it('workContext / personalContext 作为身份信息恒保留', () => {
-    const withUser = memory([], {
+  it('workContext / personalContext 作为身份信息恒保留（检索成功时）', async () => {
+    const withUser = memory([fact('用户在研究量子计算')], {
       user: {
         workContext: { summary: '在一家做量化交易的公司任后端工程师', updatedAt: '' },
         personalContext: { summary: '喜欢徒步', updatedAt: '' },
         topOfMind: { summary: '下周要交季度报告', updatedAt: '' },
       },
     });
-    const picked = retrieveMemory(withUser, '量化交易系统的架构怎么设计');
-    expect(picked!.user.workContext.summary).toContain('量化交易');
-    expect(picked!.user.personalContext.summary).toContain('徒步');
+    const result = await retrieveMemory(withUser, '量子计算');
+    expect(result!.picked.user.workContext.summary).toContain('量化交易');
+    expect(result!.picked.user.personalContext.summary).toContain('徒步');
   });
 
-  it('返回结构可直接喂 formatMemoryForInjection（version/lastUpdated 保留）', () => {
-    const picked = retrieveMemory(data, '量子计算')!;
-    expect(picked.version).toBe('1.0');
-    expect(picked.lastUpdated).toBe(data.lastUpdated);
-    expect(Array.isArray(picked.facts)).toBe(true);
+  it('topOfMind 进池才保留（词面命中 → 留；未命中 → 丢）', async () => {
+    const data2 = memory([fact('用户在研究量子计算')], {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '最近在准备婚礼', updatedAt: '' },
+      },
+    });
+    const miss = await retrieveMemory(data2, '量子计算');
+    expect(miss!.picked.user.topOfMind.summary).toBe('');
+
+    const hit = await retrieveMemory(data2, '婚礼准备得怎么样了');
+    expect(hit!.picked.user.topOfMind.summary).toContain('婚礼');
+  });
+
+  it('双路全空 → null，即使存在身份信息（身份信息随检索成功注入）', async () => {
+    const onlyUser = memory([], {
+      user: {
+        workContext: { summary: '在一家做量化交易的公司任后端工程师', updatedAt: '' },
+        personalContext: { summary: '喜欢徒步', updatedAt: '' },
+        topOfMind: { summary: '下周要交季度报告', updatedAt: '' },
+      },
+    });
+    expect(await retrieveMemory(onlyUser, '如何制作提拉米苏')).toBeNull();
+  });
+
+  it('返回结构可直接喂 formatMemoryForInjection（version/lastUpdated 保留）', async () => {
+    const result = await retrieveMemory(data, '量子计算');
+    expect(result!.picked.version).toBe('1.0');
+    expect(result!.picked.lastUpdated).toBe(data.lastUpdated);
+    expect(Array.isArray(result!.picked.facts)).toBe(true);
   });
 });
 
-describe('retrieveMemory 混合打分（queryEmbedding）', () => {
-  const QUERY_VEC = [1, 0, 0, 0];
-
-  it('语义相关但词面不重叠的 fact 排到词面命中之上', () => {
+describe('retrieveMemory 向量召回', () => {
+  it('语义相关但词面不重叠的 fact 排到词面命中之上', async () => {
     const hybrid = memory([
       fact('用户喜欢烘焙面包', 0.9, 'fact_semantic', QUERY_VEC), // 词面 0 分，语义 1.0
       fact('用户正在研究量子计算', 0.9, 'fact_lexical'), // 词面部分命中，无向量
     ]);
-    const picked = retrieveMemory(hybrid, '量子计算有什么进展', {
+    const result = await retrieveMemory(hybrid, '量子计算有什么进展', {
       queryEmbedding: QUERY_VEC,
     });
-    expect(picked).not.toBeNull();
-    expect(picked!.facts[0].id).toBe('fact_semantic'); // 0.7×1.0 > 0.3×词面
+    expect(result).not.toBeNull();
+    // 两路各 rank 0（rrf 平分），tie 稳定序路 A 在前
+    expect(result!.picked.facts[0].id).toBe('fact_semantic');
 
     // 不给向量时语义 fact 无词面信号，不应入选（回归对照）
-    const lexicalOnly = retrieveMemory(hybrid, '量子计算有什么进展');
-    expect(lexicalOnly!.facts.map((f) => f.id)).toEqual(['fact_lexical']);
+    const lexicalOnly = await retrieveMemory(hybrid, '量子计算有什么进展');
+    expect(lexicalOnly!.picked.facts.map((f) => f.id)).toEqual(['fact_lexical']);
   });
 
-  it('无向量的 fact 在向量供给时与纯词面行为一致（不被惩罚）', () => {
-    const f = fact('量子计算研究', 0.9);
-    const tokens = new Set(tokenize('量子计算'));
-    const withVec = scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC });
-    const withoutVec = scoreFact(f, { queryTokens: tokens });
-    expect(withVec).toBe(withoutVec);
-  });
-
-  it('维度不匹配的向量被忽略（回落词面）', () => {
-    const f = fact('量子计算研究', 0.9, 'f', [1, 0, 0]); // 3 维 vs query 4 维
-    const tokens = new Set(tokenize('量子计算'));
-    expect(scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC })).toBe(
-      scoreFact(f, { queryTokens: tokens }),
+  it('无向量的 fact 在向量供给时与纯词面行为一致（不被惩罚）', async () => {
+    const data = memory([fact('量子计算研究', 0.9)]);
+    const withVec = await retrieveMemory(data, '量子计算', { queryEmbedding: QUERY_VEC });
+    const withoutVec = await retrieveMemory(data, '量子计算');
+    expect(withVec!.picked.facts.map((f) => f.id)).toEqual(
+      withoutVec!.picked.facts.map((f) => f.id),
     );
   });
 
-  it('query 无有效 token 但有向量时不早退', () => {
-    const onlySemantic = memory([fact('用户偏爱简洁的代码风格', 0.9, 'f', QUERY_VEC)]);
-    const picked = retrieveMemory(onlySemantic, '', { queryEmbedding: QUERY_VEC });
-    expect(picked).not.toBeNull();
-    expect(picked!.facts[0].id).toBe('f');
-    // 无向量时空 query 仍返回 null（回归对照）
-    expect(retrieveMemory(onlySemantic, '')).toBeNull();
+  it('维度不匹配的向量被忽略（回落词面）', async () => {
+    const data = memory([fact('量子计算研究', 0.9, 'f', [1, 0, 0])]); // 3 维 vs query 4 维
+    const result = await retrieveMemory(data, '量子计算', { queryEmbedding: QUERY_VEC });
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
+    expect(result!.vectorLeg).toBe('js'); // 无向量路命中，词面路补上
   });
 
-  it('余弦低于语义地板不参与混合，弱相关不灌入 topK', () => {
-    // 与 QUERY_VEC 余弦恰为 0.3 的单位向量：[3, sqrt(91), 0, 0]/10
-    const weak = [3 / 10, Math.sqrt(91) / 10, 0, 0];
-    const noise = memory([fact('完全无关的内容', 0.9, 'f', weak)]);
-    expect(retrieveMemory(noise, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+  it('query 无有效 token 但有向量时不早退', async () => {
+    const onlySemantic = memory([fact('用户偏爱简洁的代码风格', 0.9, 'f', QUERY_VEC)]);
+    const result = await retrieveMemory(onlySemantic, '', { queryEmbedding: QUERY_VEC });
+    expect(result).not.toBeNull();
+    expect(result!.picked.facts[0].id).toBe('f');
+    // 无向量时空 query 仍返回 null（回归对照）
+    expect(await retrieveMemory(onlySemantic, '')).toBeNull();
   });
 
   /**
-   * 阈值边界按实测标定锁定（见 retrieval.ts SEMANTIC_MATCH_THRESHOLD 注释）：
+   * 门槛边界按实测标定锁定（见 retrieval.ts SEMANTIC_MATCH_THRESHOLD 注释）：
    * embedding-3 中文短文本的**无关基线**就在 0.44~0.55（如「今天天气不错适合出门散步」
-   * ↔「用户的猫叫豆豆」= 0.550），真相关 0.64~0.69。阈值必须落在两者之间。
+   * ↔「用户的猫叫豆豆」= 0.550），真相关 0.64~0.69。门槛必须落在两者之间。
    */
-  it('地板取 0.6：无关基线量级（0.55）被挡下，真相关量级（0.65）放行', () => {
-    // 与 QUERY_VEC 余弦恰为 c 的单位向量：[c, sqrt(1-c²), 0, 0]
-    const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
-
+  it('门槛取 0.6：无关基线量级（0.55）被挡下，真相关量级（0.65）放行', async () => {
     const baseline = memory([fact('完全无关的内容', 0.9, 'f', unit(0.55))]);
-    expect(retrieveMemory(baseline, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+    expect(await retrieveMemory(baseline, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
 
     const relevant = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
-    const picked = retrieveMemory(relevant, '随便聊聊', { queryEmbedding: QUERY_VEC });
-    expect(picked).not.toBeNull();
-    expect(picked!.facts.map((f) => f.id)).toEqual(['f']);
+    const result = await retrieveMemory(relevant, '随便聊聊', { queryEmbedding: QUERY_VEC });
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
   });
 
-  it('置信度加权仍作用在最外层（同向量同文本）', () => {
-    const tokens = new Set(tokenize('量子计算'));
-    const high = scoreFact(fact('量子计算', 1.0, 'h', QUERY_VEC), {
-      queryTokens: tokens,
-      queryEmbedding: QUERY_VEC,
-    });
-    const low = scoreFact(fact('量子计算', 0.5, 'l', QUERY_VEC), {
-      queryTokens: tokens,
-      queryEmbedding: QUERY_VEC,
-    });
-    expect(high).toBeGreaterThan(low);
-  });
-});
-
-describe('section 混合打分（queryEmbedding）', () => {
-  const QUERY_VEC = [1, 0, 0, 0];
-  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
-
-  it('history 段同义改写可凭语义命中（词面零重叠时选中有向量的那段）', () => {
-    const withVec = memory([], {
-      history: {
-        recentMonths: {
-          summary: '最近在做量子计算相关的研究项目',
-          updatedAt: '',
-          embedding: unit(0.65),
-        },
-        earlierContext: { summary: '早年从事烘焙行业', updatedAt: '' },
-        longTermBackground: { summary: '长期关注开源社区', updatedAt: '' },
-      },
-    });
-    // query 与三段 summary 均无词面重叠，仅 recentMonths 有过门槛的向量
-    const picked = retrieveMemory(withVec, '帮我写一个快速排序', { queryEmbedding: QUERY_VEC });
-    expect(picked).not.toBeNull();
-    expect(picked!.history.recentMonths.summary).toContain('量子计算');
-    expect(picked!.history.earlierContext.summary).toBe('');
-    expect(picked!.history.longTermBackground.summary).toBe('');
-
-    // 无向量时同 query 三段全零 → history 整体不注入（回归对照）
-    expect(retrieveMemory(withVec, '帮我写一个快速排序')).toBeNull();
-  });
-
-  it('topOfMind 词面不达标但语义过门槛时被保留', () => {
-    const data = memory([], {
-      user: {
-        workContext: { summary: '', updatedAt: '' },
-        personalContext: { summary: '', updatedAt: '' },
-        topOfMind: { summary: '最近在准备婚礼', updatedAt: '', embedding: unit(0.65) },
-      },
-    });
-    const picked = retrieveMemory(data, '怎么调试 Kubernetes 网络', { queryEmbedding: QUERY_VEC });
-    expect(picked).not.toBeNull();
-    expect(picked!.user.topOfMind.summary).toContain('婚礼');
-
-    // 无向量时词面 0 分 → topOfMind 被丢弃且整体无命中
-    expect(retrieveMemory(data, '怎么调试 Kubernetes 网络')).toBeNull();
-  });
-
-  it('维度不匹配的 section 向量被忽略（回落词面）', () => {
-    const data = memory([], {
-      history: {
-        recentMonths: {
-          summary: '最近在做量子计算相关的研究项目',
-          updatedAt: '',
-          embedding: [1, 0, 0],
-        },
-        earlierContext: { summary: '', updatedAt: '' },
-        longTermBackground: { summary: '', updatedAt: '' },
-      },
-    });
-    // 3 维向量 vs 4 维 query 向量：语义退出、词面零重叠 → history 不注入
-    expect(retrieveMemory(data, '帮我写一个快速排序', { queryEmbedding: QUERY_VEC })).toBeNull();
-  });
-});
-
-describe('语义门槛可配（semanticMatchThreshold）', () => {
-  const QUERY_VEC = [1, 0, 0, 0];
-  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
-
-  it('门槛调低后原被挡下的基线量级（0.55）参与混合并入选', () => {
+  it('门槛可配：调低放行 0.55，调高挡下 0.65', async () => {
     const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.55))]);
-    // 默认 0.6：挡下（与上方「地板取 0.6」用例同源）
-    expect(retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
-    // 门槛 0.5：0.55 过线，按 0.7×0.55 参与混合
-    const picked = retrieveMemory(data, '随便聊聊', {
+    expect(await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC })).toBeNull();
+    const low = await retrieveMemory(data, '随便聊聊', {
       queryEmbedding: QUERY_VEC,
       semanticMatchThreshold: 0.5,
     });
-    expect(picked!.facts.map((f) => f.id)).toEqual(['f']);
-  });
+    expect(low!.picked.facts.map((f) => f.id)).toEqual(['f']);
 
-  it('门槛调高后真相关量级（0.65）也被挡下', () => {
-    const data = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
+    const relevant = memory([fact('完全无关的内容', 0.9, 'f', unit(0.65))]);
     expect(
-      retrieveMemory(data, '随便聊聊', {
+      await retrieveMemory(relevant, '随便聊聊', {
         queryEmbedding: QUERY_VEC,
         semanticMatchThreshold: 0.7,
       }),
     ).toBeNull();
   });
 
-  it('预览明细的 semanticUsed 反映生效门槛', () => {
-    const data = memory([fact('无关内容', 0.9, 'f', unit(0.55))]);
-    const [detail] = previewFactScores(data, '随便聊聊', {
+  it('vectorRecall 正常返回 → vectorLeg=pg，召回结果被采纳', async () => {
+    const data = memory([fact('无关内容', 0.9, 'f_near', unit(0.8))]);
+    const recall = vi.fn(
+      async (): Promise<VectorSearchResult[]> => [
+        { kind: 'fact', refId: 'f_near', similarity: 0.8 },
+      ],
+    );
+    const result = await retrieveMemory(data, '随便聊聊', {
       queryEmbedding: QUERY_VEC,
-      semanticMatchThreshold: 0.5,
+      vectorRecall: recall,
     });
-    expect(detail.cosine).toBeCloseTo(0.55, 10);
-    expect(detail.semanticUsed).toBe(true);
-    expect(detail.base).toBeCloseTo(0.7 * 0.55, 10);
+    expect(result!.vectorLeg).toBe('pg');
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['f_near']);
+    expect(recall).toHaveBeenCalledWith(QUERY_VEC, 50);
+  });
+
+  it('vectorRecall 抛错 → warnOnce + JS 兜底（vectorLeg=js）且结果等价', async () => {
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.8))]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await retrieveMemory(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      vectorRecall: async () => {
+        throw new Error('pg down');
+      },
+    });
+    expect(result!.vectorLeg).toBe('js');
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('vectorRecall 缺省 → 直接 JS 扫描（vectorLeg=js）', async () => {
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.8))]);
+    const result = await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC });
+    expect(result!.vectorLeg).toBe('js');
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
+  });
+
+  it('pgvector top-50 被 facts 占满时，语义命中的 section 仍被并入', async () => {
+    const manyFacts = Array.from({ length: 50 }, (_, i) =>
+      fact(`内容${i}`, 0.9, `f${i}`, unit(0.7 + i * 0.0001)),
+    );
+    const data = memory(manyFacts, {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '最近在准备婚礼', updatedAt: '', embedding: QUERY_VEC },
+      },
+    });
+    // 模拟 pgvector：只回 50 条 facts，不含 section（top-50 被占满）
+    const recall = async (): Promise<VectorSearchResult[]> =>
+      manyFacts.map((f, i) => ({
+        kind: 'fact' as const,
+        refId: f.id,
+        similarity: 0.9 - i * 0.001,
+      }));
+    const result = await retrieveMemory(data, '怎么调试 Kubernetes 网络', {
+      queryEmbedding: QUERY_VEC,
+      vectorRecall: recall,
+    });
+    expect(result!.vectorLeg).toBe('pg');
+    expect(result!.picked.user.topOfMind.summary).toContain('婚礼');
+  });
+
+  it('明细同源：inVectorLeg / cosine / rrf 与真实管线一致', async () => {
+    const data = memory([
+      fact('语义命中', 0.9, 'f_sem', unit(0.65)),
+      fact('词面命中 量子计算', 0.9, 'f_lex'),
+    ]);
+    const result = await retrieveMemory(data, '量子计算', { queryEmbedding: QUERY_VEC });
+    const byId = new Map(result!.facts.map((d) => [d.id, d]));
+    expect(byId.get('f_sem')!.inVectorLeg).toBe(true);
+    expect(byId.get('f_sem')!.cosine).toBeCloseTo(0.65, 10);
+    expect(byId.get('f_sem')!.lexical).toBe(0);
+    expect(byId.get('f_lex')!.inVectorLeg).toBe(false);
+    expect(byId.get('f_lex')!.cosine).toBeNull();
+    expect(byId.get('f_lex')!.lexical).toBeGreaterThan(0);
   });
 });
 
-describe('previewFactScores（检索预览）', () => {
-  const QUERY_VEC = [1, 0, 0, 0];
-  const unit = (c: number) => [c, Math.sqrt(1 - c * c), 0, 0];
+describe('retrieveMemory rerank 精排', () => {
+  // 三条 fact 词面全命中（RRF 序 = 数据序 a < b < c）
+  const data = memory([
+    fact('用户做量子计算研究', 0.9, 'a'),
+    fact('用户研究量子计算的进展', 0.9, 'b'),
+    fact('量子计算是用户的研究方向', 0.9, 'c'),
+  ]);
 
-  it('明细的 score 与 scoreFact 完全一致（同一套公式，不会漂移）', () => {
-    const f = fact('量子计算进展', 0.8, 'a', unit(0.7));
-    const tokens = new Set(tokenize('量子计算'));
-    const [detail] = previewFactScores(memory([f]), '量子计算', { queryEmbedding: QUERY_VEC });
-    expect(detail.score).toBeCloseTo(
-      scoreFact(f, { queryTokens: tokens, queryEmbedding: QUERY_VEC }),
-      10,
-    );
-    expect(detail.lexical).toBeCloseTo(overlapRatio(f.content, tokens), 10);
-    expect(detail.cosine).toBeCloseTo(0.7, 10);
-    expect(detail.semanticUsed).toBe(true);
-  });
-
-  it('picked 取自真实 retrieveMemory：过阈值但被 topK 挤掉的标 false', () => {
-    const data = memory([
-      fact('甲内容', 0.9, 'top', unit(0.9)),
-      fact('乙内容', 0.9, 'cut', unit(0.7)),
+  it('rerank 分数重排池序（同 confidence 时以 rerank 分定序）', async () => {
+    const rerank = vi.fn(async () => [0.5, 0.9, 0.7]);
+    const result = await retrieveMemory(data, '量子计算', { rerank });
+    expect(result!.rerankUsed).toBe(true);
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['b', 'c', 'a']);
+    expect(rerank).toHaveBeenCalledWith('量子计算', [
+      data.facts[0].content,
+      data.facts[1].content,
+      data.facts[2].content,
     ]);
-    const details = previewFactScores(data, '无关查询', { queryEmbedding: QUERY_VEC, topK: 1 });
-
-    // 两条都过 0.6 阈值，但 topK=1 只留最高分那条
-    expect(details.map((d) => d.semanticUsed)).toEqual([true, true]);
-    expect(details.find((d) => d.id === 'top')?.picked).toBe(true);
-    expect(details.find((d) => d.id === 'cut')?.picked).toBe(false);
   });
 
-  it('未过语义阈值时如实标注：cosine 仍返回原值，semanticUsed=false', () => {
-    const data = memory([fact('无关内容', 0.9, 'f', unit(0.55))]);
-    const [detail] = previewFactScores(data, '随便聊聊', { queryEmbedding: QUERY_VEC });
-    expect(detail.cosine).toBeCloseTo(0.55, 10);
-    expect(detail.semanticUsed).toBe(false);
-    expect(detail.base).toBeCloseTo(detail.lexical, 10); // 回落词面
+  it('rerank 返回 null → 保持 RRF 序（rerankUsed=false）', async () => {
+    const result = await retrieveMemory(data, '量子计算', { rerank: async () => null });
+    expect(result!.rerankUsed).toBe(false);
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['a', 'b', 'c']);
   });
 
-  it('无向量的 fact：cosine 为 null、按词面打分', () => {
-    const data = memory([fact('量子计算研究', 0.9, 'novec')]);
-    const [detail] = previewFactScores(data, '量子计算', { queryEmbedding: QUERY_VEC });
-    expect(detail.cosine).toBeNull();
-    expect(detail.semanticUsed).toBe(false);
+  it('rerank 抛错 → warnOnce + 保持 RRF 序', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await retrieveMemory(data, '量子计算', {
+      rerank: async () => {
+        throw new Error('api down');
+      },
+    });
+    expect(result!.rerankUsed).toBe(false);
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['a', 'b', 'c']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
-  it('空 data / 无 facts → 空数组', () => {
-    expect(previewFactScores(null, 'x')).toEqual([]);
-    expect(previewFactScores(memory([]), 'x')).toEqual([]);
+  it('confidence 加权作用在 rerank 分上（同分高置信在前）', async () => {
+    const confData = memory([
+      fact('用户做量子计算研究', 0.5, 'low'),
+      fact('用户研究量子计算的进展', 0.9, 'high'),
+    ]);
+    const result = await retrieveMemory(confData, '量子计算', { rerank: async () => [0.9, 0.9] });
+    expect(result!.picked.facts.map((f) => f.id)).toEqual(['high', 'low']);
   });
 
-  it('明细按得分降序（便于直接看 top-K 边界）', () => {
-    const data = memory([fact('低分内容', 0.3, 'low'), fact('量子计算', 0.9, 'high')]);
-    const details = previewFactScores(data, '量子计算');
-    expect(details.map((d) => d.id)).toEqual(['high', 'low']);
+  it('rerankQuery 显式传入时用于调用（而非拼接的词面 query）', async () => {
+    const rerank = vi.fn(async () => [0.1, 0.2, 0.3]);
+    await retrieveMemory(data, '量子计算 有什么 进展', { rerank, rerankQuery: '量子计算' });
+    expect(rerank).toHaveBeenCalledWith('量子计算', expect.any(Array));
+  });
+
+  it('明细同源：rerank/final/picked 与真实管线一致', async () => {
+    const result = await retrieveMemory(data, '量子计算', { rerank: async () => [0.5, 0.9, 0.7] });
+    const byId = new Map(result!.facts.map((d) => [d.id, d]));
+    expect(byId.get('b')!.picked).toBe(true);
+    expect(byId.get('b')!.rerank).toBe(0.9);
+    expect(byId.get('b')!.final).toBeCloseTo(0.9 * 0.95, 10);
+    expect(byId.get('b')!.rrf).toBeCloseTo(1 / 62, 10);
+    expect(byId.get('b')!.lexical).toBe(1);
+    expect(byId.get('a')!.cosine).toBeNull();
+    expect(result!.poolSize).toBe(3);
   });
 });

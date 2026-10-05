@@ -34,12 +34,7 @@ export interface MemoryConfig {
   /** 检索模式注入 token 预算，100..4000。 */
   retrieveMaxTokens: number;
   /**
-   * 检索条目的最低得分，0..1。
-   * 仅剔除零分噪声；真正决定「留几条」的是 topK 与语义门槛。
-   */
-  retrieveMinScore: number;
-  /**
-   * 语义分量参与混合的余弦下限，0..1。
+   * 路 A（向量召回）的余弦门槛，0..1。
    * 标定依据见 retrieval.ts SEMANTIC_MATCH_THRESHOLD 注释：embedding-3 中文短文本
    * 无关基线 0.44~0.55、真相关 0.64~0.69，默认 0.6 落在两簇空隙。
    * 换 embedding 模型 / 语言后基线可能偏移，可经此调整。
@@ -49,8 +44,6 @@ export interface MemoryConfig {
   embeddingEnabled: boolean;
   /** 向量维度，256..2048（智谱 embedding-3 可配）。 */
   embeddingDimensions: number;
-  /** 混合分中余弦相似度权重，0..1（1=纯向量，0=纯词面）。 */
-  embeddingHybridWeight: number;
   /** 加载时是否异步回填缺失向量的旧 facts。 */
   embeddingBackfillOnLoad: boolean;
   /** 是否启用 rerank 精排（工厂缺失 / API 失败自动回落 RRF 序）。 */
@@ -69,11 +62,9 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   maxInjectionTokens: 2000,
   retrieveTopK: 8,
   retrieveMaxTokens: 800,
-  retrieveMinScore: 0.05,
   semanticMatchThreshold: 0.6,
   embeddingEnabled: true,
   embeddingDimensions: 1024,
-  embeddingHybridWeight: 0.7,
   embeddingBackfillOnLoad: true,
   rerankEnabled: true,
 };
@@ -123,8 +114,6 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   if (typeof m.retrieveTopK === 'number') out.retrieveTopK = m.retrieveTopK;
   if (typeof m.retrieve_max_tokens === 'number') out.retrieveMaxTokens = m.retrieve_max_tokens;
   if (typeof m.retrieveMaxTokens === 'number') out.retrieveMaxTokens = m.retrieveMaxTokens;
-  if (typeof m.retrieve_min_score === 'number') out.retrieveMinScore = m.retrieve_min_score;
-  if (typeof m.retrieveMinScore === 'number') out.retrieveMinScore = m.retrieveMinScore;
   if (typeof m.semantic_match_threshold === 'number') {
     out.semanticMatchThreshold = m.semantic_match_threshold;
   }
@@ -133,18 +122,12 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   }
   out.retrieveTopK = clamp(out.retrieveTopK, 1, 50);
   out.retrieveMaxTokens = clamp(out.retrieveMaxTokens, 100, 4000);
-  out.retrieveMinScore = clamp(out.retrieveMinScore, 0, 1);
   out.semanticMatchThreshold = clamp(out.semanticMatchThreshold, 0, 1);
 
   if (typeof m.embedding_enabled === 'boolean') out.embeddingEnabled = m.embedding_enabled;
   if (typeof m.embeddingEnabled === 'boolean') out.embeddingEnabled = m.embeddingEnabled;
   if (typeof m.embedding_dimensions === 'number') out.embeddingDimensions = m.embedding_dimensions;
   if (typeof m.embeddingDimensions === 'number') out.embeddingDimensions = m.embeddingDimensions;
-  if (typeof m.embedding_hybrid_weight === 'number') {
-    out.embeddingHybridWeight = m.embedding_hybrid_weight;
-  }
-  if (typeof m.embeddingHybridWeight === 'number')
-    out.embeddingHybridWeight = m.embeddingHybridWeight;
   if (typeof m.embedding_backfill_on_load === 'boolean') {
     out.embeddingBackfillOnLoad = m.embedding_backfill_on_load;
   }
@@ -154,7 +137,6 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   if (typeof m.rerank_enabled === 'boolean') out.rerankEnabled = m.rerank_enabled;
   if (typeof m.rerankEnabled === 'boolean') out.rerankEnabled = m.rerankEnabled;
   out.embeddingDimensions = clamp(out.embeddingDimensions, 256, 2048);
-  out.embeddingHybridWeight = clamp(out.embeddingHybridWeight, 0, 1);
 
   _config = out;
 }

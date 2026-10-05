@@ -30,8 +30,22 @@ export {
   userMemoryFile,
 } from './paths';
 
-export type { MemoryStorage } from './storage';
-export { FileMemoryStorage, getMemoryStorage, resetMemoryStorage } from './storage';
+export type { MemorySqlExecutor, MemoryStorage, VectorSearchResult } from './storage';
+export {
+  FileMemoryStorage,
+  getMemoryStorage,
+  resetMemoryStorage,
+  setMemoryStorage,
+} from './storage';
+export { PgMemoryStorage } from './pg-storage';
+
+export type { MemoryReranker, MemoryRerankerFactory } from './rerank';
+export {
+  getMemoryRerankerFactory,
+  rerankWithFallback,
+  resetMemoryRerankerFactory,
+  setMemoryRerankerFactory,
+} from './rerank';
 
 export {
   backfillMemoryEmbeddings,
@@ -41,6 +55,8 @@ export {
   embedTexts,
   getMemoryEmbeddingsFactory,
   isCompatibleVector,
+  isUnitVector,
+  normalizeVector,
   resetMemoryEmbeddingsFactory,
   SCORED_SECTION_SLOTS,
   setMemoryEmbeddingsFactory,
@@ -58,18 +74,18 @@ export {
 } from './prompt';
 
 export {
-  factScoreParts,
-  hybridScoreParts,
+  lexicalRecall,
   overlapRatio,
-  previewFactScores,
   retrieveMemory,
-  scoreFact,
-  scoreSection,
+  rrfFuse,
   tokenize,
+  vectorRecallJs,
   type FactScoreDetail,
-  type FactScoreParts,
-  type RetrievalOptions,
-  type ScoreContext,
+  type LexicalHit,
+  type RetrieveOptions,
+  type RetrieveResult,
+  type RrfEntry,
+  type SectionScoreDetail,
 } from './retrieval';
 
 export {
@@ -107,8 +123,16 @@ import { getMemoryConfig as _gmc } from './config';
 import { backfillMemoryEmbeddings as _backfill, embedQuery as _embedQuery } from './embeddings';
 import { getMemoryStorage as _gms } from './storage';
 import { formatMemoryForInjection as _fmt } from './prompt';
-import { previewFactScores, retrieveMemory, tokenize, type FactScoreDetail } from './retrieval';
+import { rerankWithFallback } from './rerank';
+import {
+  retrieveMemory,
+  tokenize,
+  type FactScoreDetail,
+  type RetrieveResult,
+  type SectionScoreDetail,
+} from './retrieval';
 import type { MemoryData } from './types';
+import type { VectorSearchResult } from './storage';
 
 export interface BuildMemoryContextOptions {
   agentName?: string | null;
@@ -133,6 +157,8 @@ interface RetrieveForInjectionOutcome {
   injectedText: string;
   /** 词面与语义双空（本轮无文本且无历史）——调用方据此回落全量注入。 */
   noQuery: boolean;
+  /** 管线全量产物（打分明细 / poolSize / rerankUsed / vectorLeg），供预览同源消费。 */
+  result: RetrieveResult | null;
 }
 
 /**
@@ -168,13 +194,26 @@ async function retrieveForInjection(
 
   const noQuery = tokenize(lexicalQuery).length === 0 && queryEmbedding == null;
 
-  const picked = retrieveMemory(data, lexicalQuery, {
+  // 管线 deps：vectorRecall 来自 storage 后端（PG 走 pgvector；文件后端无该方法，
+  // 管线内部回落 JS 扫描）；rerank 走 rerankWithFallback（工厂缺失 / API 失败
+  // 返回 null，管线保持 RRF 序）。rerankQuery 用本轮单句——拼串会稀释语义。
+  const storage = _gms();
+  const vectorSearch = storage.vectorSearch;
+  const vectorRecall: ((q: number[], n: number) => Promise<VectorSearchResult[]>) | null =
+    vectorSearch
+      ? (queryVector, limit) =>
+          vectorSearch({ agentName: opts.agentName, userId: opts.userId }, queryVector, limit)
+      : null;
+  const result = await retrieveMemory(data, lexicalQuery, {
     topK: config.retrieveTopK,
     queryEmbedding,
-    hybridWeight: config.embeddingHybridWeight,
-    minScore: config.retrieveMinScore,
     semanticMatchThreshold: config.semanticMatchThreshold,
+    vectorRecall,
+    rerank: config.rerankEnabled ? rerankWithFallback : null,
+    rerankQuery: opts.query.trim() ? opts.query : undefined,
   });
+
+  const picked = result?.picked ?? null;
   const pickedText = picked
     ? _fmt(picked, config.retrieveMaxTokens, { preserveFactOrder: true })
     : '';
@@ -183,6 +222,7 @@ async function retrieveForInjection(
     picked,
     injectedText: pickedText.trim() ? `<memory mode="retrieve">\n${pickedText}\n</memory>\n` : '',
     noQuery,
+    result,
   };
 }
 
@@ -193,29 +233,34 @@ export interface MemoryRetrievalPreview {
   config: {
     embeddingEnabled: boolean;
     embeddingDimensions: number;
-    embeddingHybridWeight: number;
     embeddingBackfillOnLoad: boolean;
     retrieveTopK: number;
     retrieveMaxTokens: number;
-    retrieveMinScore: number;
     semanticMatchThreshold: number;
+    rerankEnabled: boolean;
   };
-  /** 两个打分门槛的生效值（取自 MemoryConfig，便于解读打分明细）。 */
-  thresholds: { semanticMatch: number; minScore: number };
+  /** 路 A 召回门槛的生效值（取自 MemoryConfig，便于解读打分明细）。 */
+  thresholds: { semanticMatch: number };
   /** query 是否成功向量化（false = 无 Key / API 失败，本次为纯词面检索）。 */
   embedded: boolean;
   queryEmbeddingDim: number | null;
-  /** 逐条 fact 的打分明细（按得分降序，含未入选者）。 */
+  /** 向量路来源：pg / js（兜底扫描）/ null（无向量）。 */
+  vectorLeg: 'pg' | 'js' | null;
+  /** 本轮是否真的走了 rerank 精排。 */
+  rerankUsed: boolean;
+  /** RRF 融合后的候选池大小。 */
+  poolSize: number;
+  /** 逐条 fact 的打分明细（按 final 降序，含未入选者）。 */
   facts: FactScoreDetail[];
+  /** 4 个打分 section 的打分明细。 */
+  sections: SectionScoreDetail[];
   /** 实际会拼进 prompt 的文本；空串 = 本轮不注入。 */
   injectedText: string;
 }
 
 /**
- * 预览检索效果：走与真实注入完全相同的代码路径，返回逐条打分明细 + 最终注入文本。
- *
- * 让「哪些 fact 被选中、词面/余弦各占多少、为什么没选中」可直接观察
- * （见 /api/memory/retrieve）。
+ * 预览检索效果：走与真实注入完全相同的代码路径，明细直接取自 retrieveForInjection
+ * 的管线产物（构造性同源，不存在二次重算、不会漂移）。见 /api/memory/retrieve。
  */
 export async function previewMemoryRetrieval(opts: {
   agentName?: string | null;
@@ -238,27 +283,20 @@ export async function previewMemoryRetrieval(opts: {
     config: {
       embeddingEnabled: config.embeddingEnabled,
       embeddingDimensions: config.embeddingDimensions,
-      embeddingHybridWeight: config.embeddingHybridWeight,
       embeddingBackfillOnLoad: config.embeddingBackfillOnLoad,
       retrieveTopK: config.retrieveTopK,
       retrieveMaxTokens: config.retrieveMaxTokens,
-      retrieveMinScore: config.retrieveMinScore,
       semanticMatchThreshold: config.semanticMatchThreshold,
+      rerankEnabled: config.rerankEnabled,
     },
-    thresholds: {
-      semanticMatch: config.semanticMatchThreshold,
-      minScore: config.retrieveMinScore,
-    },
+    thresholds: { semanticMatch: config.semanticMatchThreshold },
     embedded: outcome.queryEmbedding != null,
     queryEmbeddingDim: outcome.queryEmbedding?.length ?? null,
-    // 与此处 retrieveForInjection 传参保持同一组 config 派生参数：预览与真实注入同源
-    facts: previewFactScores(data, opts.query, {
-      topK: config.retrieveTopK,
-      queryEmbedding: outcome.queryEmbedding,
-      hybridWeight: config.embeddingHybridWeight,
-      minScore: config.retrieveMinScore,
-      semanticMatchThreshold: config.semanticMatchThreshold,
-    }),
+    vectorLeg: outcome.result?.vectorLeg ?? null,
+    rerankUsed: outcome.result?.rerankUsed ?? false,
+    poolSize: outcome.result?.poolSize ?? 0,
+    facts: outcome.result?.facts ?? [],
+    sections: outcome.result?.sections ?? [],
     injectedText: outcome.injectedText,
   };
 }
