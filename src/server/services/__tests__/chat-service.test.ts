@@ -6,6 +6,7 @@ vi.mock('@/server/services/model-config-service', () => ({
 
 import type { ModelConfig, ThreadService } from '@/deerflow-harness';
 import type { MessagePart } from '@/types';
+import type { SavedFileMetadata } from '@/server/daos/file-metadata';
 import { resolveUserModelConfig } from '@/server/services/model-config-service';
 import type { ChatSessionRecord } from '@/server/daos/chat-session';
 import { ChatSessionAccessError } from '@/server/daos/chat-session';
@@ -18,6 +19,8 @@ import {
   pickFileIds,
   pickInputText,
   resolveRunMetadata,
+  toThreadImages,
+  userPartsToContents,
 } from '../chat-service';
 import type { ConversationService } from '../conversation-service';
 
@@ -47,6 +50,7 @@ function makeDeps() {
     resolveFilesByIds: vi.fn(async () => []),
     ensureSession: vi.fn(async () => SESSION),
     getLatestMessageByRole: vi.fn(async () => null),
+    getLatestUserMessageWithParts: vi.fn(async () => null),
     deleteMessagesAtOrAfter: vi.fn(async () => {}),
     saveUserMessage: vi.fn(async () => ({ messageId: 'um1' })),
     getLatestAssistantWithParts: vi.fn(async () => null),
@@ -57,6 +61,7 @@ function makeDeps() {
 
   const threadService = {
     createThread: vi.fn(async () => {}),
+    truncateHistory: vi.fn(async () => ({ truncated: true })),
     submitRun: vi.fn(async () => ({ run_id: 'r1' })),
     resume: vi.fn(async () => ({ run_id: 'r2' })),
     subscribe: vi.fn(() => (async function* () {})()),
@@ -130,6 +135,47 @@ describe('contentsToUserParts', () => {
     const content = (parts[0] as MessagePart & { content: Record<string, unknown> }).content;
     expect(content.fileId).toBe('i-missing');
     expect(content.filename).toBeUndefined();
+  });
+});
+
+describe('userPartsToContents', () => {
+  it('text/file/image part 按原顺序还原为 contents 块', () => {
+    const parts = [
+      { partId: 'p1', type: 'text', createdAt: 1, content: { text: '问题' } },
+      { partId: 'p2', type: 'file', createdAt: 1, content: { fileId: 'f1' } },
+      { partId: 'p3', type: 'image', createdAt: 1, content: { fileId: 'i1' } },
+    ];
+    expect(userPartsToContents(parts as MessagePart[])).toEqual([
+      { type: 'text', text: '问题' },
+      { type: 'file', fileId: 'f1' },
+      { type: 'image', fileId: 'i1' },
+    ]);
+  });
+
+  it('content 缺失或 fileId 非字符串的 part 跳过（不产出半截块）', () => {
+    const parts = [
+      { partId: 'p1', type: 'text', createdAt: 1 },
+      { partId: 'p2', type: 'file', createdAt: 1, content: { fileId: 123 } },
+    ];
+    expect(userPartsToContents(parts as MessagePart[])).toEqual([]);
+  });
+});
+
+describe('toThreadImages', () => {
+  it('仅 image/* 进入视觉引用，字段映射为 ThreadImageRef', () => {
+    const files: SavedFileMetadata[] = [
+      { fileId: 'i1', filename: 'p.png', mimeType: 'image/png', sizeBytes: 10, minioKey: 'k1' },
+      {
+        fileId: 'f1',
+        filename: 'r.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 20,
+        minioKey: 'k2',
+      },
+    ];
+    expect(toThreadImages(files)).toEqual([
+      { fileId: 'i1', filename: 'p.png', mimeType: 'image/png', minioKey: 'k1', sizeBytes: 10 },
+    ]);
   });
 });
 
@@ -292,6 +338,71 @@ describe('prepare', () => {
     expect(result.ok).toBe(true);
     expect(conversations.deleteMessagesAtOrAfter).toHaveBeenCalledWith('sess-1', createdAt);
     expect(conversations.saveUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('recall：输入覆盖为原始提问并重放其附件，先读原始提问再截断', async () => {
+    const { conversations, getThreadService, threadService } = makeDeps();
+    const createdAt = new Date('2026-01-01T00:00:00Z');
+    (conversations.getLatestUserMessageWithParts as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      {
+        id: 'u1',
+        createdAt,
+        parts: [
+          { partId: 'p1', type: 'text', createdAt: 1, content: { text: '原始问题' } },
+          { partId: 'p2', type: 'image', createdAt: 1, content: { fileId: 'img-1' } },
+        ],
+      },
+    );
+    (conversations.resolveFilesByIds as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        fileId: 'img-1',
+        filename: 'p.png',
+        mimeType: 'image/png',
+        sizeBytes: 10,
+        minioKey: 'k1',
+      },
+    ]);
+    (conversations.getLatestMessageByRole as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'a1',
+      role: 'assistant',
+      createdAt,
+    });
+
+    const svc = new ChatService({ conversations, getThreadService });
+    const result = await svc.prepare({
+      userId: 'u1',
+      body: makeBody({ sessionId: 'sess-1', operation: 'recall' }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 必须先读原始提问再截断：截断落在提问之后，读晚了数据就没了
+    expect(
+      (conversations.getLatestUserMessageWithParts as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      (conversations.deleteMessagesAtOrAfter as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0],
+    );
+    expect(conversations.deleteMessagesAtOrAfter).toHaveBeenCalledWith('sess-1', createdAt);
+    expect(conversations.saveUserMessage).not.toHaveBeenCalled();
+
+    // 请求体正文（回答原文）被原始提问覆盖；原始附件重放为视觉引用
+    await svc.submit(result.prepared);
+    expect(threadService.submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: '原始问题',
+        images: [
+          {
+            fileId: 'img-1',
+            filename: 'p.png',
+            mimeType: 'image/png',
+            minioKey: 'k1',
+            sizeBytes: 10,
+          },
+        ],
+      }),
+    );
   });
 
   it('reEditCall：截断自最近 user/assistant 中较早者', async () => {

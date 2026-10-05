@@ -113,6 +113,39 @@ export function pickEarlier(a: Date | undefined, b: Date | undefined): Date | un
 }
 
 /**
+ * user 消息 parts → 请求体 contents 块。recall 重放原始提问时用：
+ * 原提问可能带文件/图片附件，只有重放它们，模型重跑才能看到与首轮一致的输入。
+ * 非 text/file/image 的 part（user 消息不会出现）直接跳过。
+ */
+export function userPartsToContents(parts: MessagePart[]): ChatContentBlock[] {
+  const blocks: ChatContentBlock[] = [];
+  for (const part of parts) {
+    if (part.type === 'text' && typeof part.content?.text === 'string') {
+      blocks.push({ type: 'text', text: part.content.text });
+    } else if (
+      (part.type === 'file' || part.type === 'image') &&
+      typeof part.content?.fileId === 'string'
+    ) {
+      blocks.push({ type: part.type, fileId: part.content.fileId });
+    }
+  }
+  return blocks;
+}
+
+/** 已解析文件 → 本轮视觉图片引用（仅 image/* 参与多模态下发）。 */
+export function toThreadImages(files: SavedFileMetadata[]): ThreadImageRef[] {
+  return files
+    .filter((f) => f.mimeType.startsWith('image/'))
+    .map((f) => ({
+      fileId: f.fileId,
+      filename: f.filename,
+      mimeType: f.mimeType,
+      minioKey: f.minioKey,
+      sizeBytes: f.sizeBytes,
+    }));
+}
+
+/**
  * run 的 error 文本 → 「本轮被取消」标记文案；不是取消则返回 null。
  *
  * 文案与 harness 侧 ThreadService 写入的取消原因一一对应（runtime/service.ts 的
@@ -218,7 +251,8 @@ export class ChatService {
     const shouldPersistMessages = !isResume;
 
     const contents = body.message.contents;
-    const inputText = pickInputText(contents);
+    // recall / reEditCall 会在截断分支用「原始提问」覆盖输入（见下），故用 let。
+    let inputText = pickInputText(contents);
     if (!inputText) {
       return {
         ok: false,
@@ -241,15 +275,8 @@ export class ChatService {
     // （metadata 会被 `...metadata` 展开进每个事件载荷，塞图片引用会污染前端协议）。
     // 是否真的以多模态下发由 client.stream 按 modelConfig.supportsVision 二次判定 ——
     // 此处不做视觉能力判断，避免第二个真相源。
-    const images: ThreadImageRef[] = resolvedFiles
-      .filter((f) => f.mimeType.startsWith('image/'))
-      .map((f) => ({
-        fileId: f.fileId,
-        filename: f.filename,
-        mimeType: f.mimeType,
-        minioKey: f.minioKey,
-        sizeBytes: f.sizeBytes,
-      }));
+    // recall 分支会用原始提问的附件覆盖 images（见下），故用 let。
+    let images: ThreadImageRef[] = toThreadImages(resolvedFiles);
 
     // —— 模型与 Key 解析（前置守卫，置于建会话之前以避免产生空会话） ——
     const modelResolution = await resolveUserModelConfig(userId, body.configuration ?? undefined);
@@ -322,6 +349,27 @@ export class ChatService {
     if (shouldPersistMessages && (isRecall || isReEdit)) {
       try {
         if (isRecall) {
+          // recall 的输入不是请求体文本：前端把「复制 / 下载 / recall」共用的回答正文
+          // 当作 inputValue 传回来，正文不是新提问。真正的输入是「被重新生成的那条
+          // 回答对应的原始提问」——连同其文件/图片附件一起重放，模型重跑才能看到与
+          // 首轮一致的输入。必须先读再删：截断落在提问之后，读晚了数据就没了。
+          const original = await this.deps.conversations.getLatestUserMessageWithParts(threadId);
+          if (original) {
+            const originalContents = userPartsToContents(original.parts);
+            const originalText = pickInputText(originalContents);
+            if (originalText) inputText = originalText;
+            const originalFileIds = pickFileIds(originalContents);
+            if (originalFileIds.length > 0) {
+              try {
+                const files = await this.deps.conversations.resolveFilesByIds(originalFileIds);
+                images = toThreadImages(files);
+              } catch (e) {
+                console.error('[POST /api/v3/chat] recall re-attach files failed:', e, {
+                  originalFileIds,
+                });
+              }
+            }
+          }
           const lastAssistant = await this.deps.conversations.getLatestMessageByRole(
             threadId,
             'assistant',
