@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RunRegistry, RunEventBus } from '../../contracts';
+import type { RunRegistry, RunEventBus } from '../../coordination/contracts';
 import {
   ClientAgentEventType,
   createClientAgentEvent,

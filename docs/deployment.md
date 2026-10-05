@@ -200,8 +200,8 @@ owner 进程被 kill -9（或整机断电）时，PG 里 `runs.status='running'`
 僵尸——用户刷新看到永远转圈。判死与回收机制：
 
 - 执行体心跳（15s）持续续租 Redis owner 键（TTL 45s = 3 个心跳窗口，见
-  `runtime/liveness.ts`）；键到期 = owner 已死（`ownerOf` 返回 null）
-- 新进程启动时对账（`runtime/zombie-reconciler.ts`，启动 + 60s 两轮：覆盖
+  `runtime/lifecycle/liveness.ts`）；键到期 = owner 已死（`ownerOf` 返回 null）
+- 新进程启动时对账（`runtime/lifecycle/zombie-reconciler.ts`，启动 + 60s 两轮：覆盖
   owner 键尚未到期的窗口）：running 且 owner 为空的 run → `failed` +
   `cancelled: process died`，线程状态带出 running
 - 回收同时归还该 run 的全局并发名额（per-run 槽键释放）：kill -9 的 run 走不到

@@ -236,12 +236,12 @@ export { runWithContext, getContext, requireContext, type RuntimeContext } from 
 // runtime/stream-bridge
 export { streamBridge, StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
-// runtime/contracts + 双实现（进程内 / Redis 跨进程）
-export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/contracts';
-export { InMemoryRunRegistry } from './runtime/run-registry/in-memory';
-export { RedisRunRegistry } from './runtime/run-registry/redis';
-export { InMemoryRunEventBus } from './runtime/event-bus/in-memory';
-export { RedisEventBus } from './runtime/event-bus/redis';
+// runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）
+export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/coordination/contracts';
+export { InMemoryRunRegistry } from './runtime/coordination/run-registry/in-memory';
+export { RedisRunRegistry } from './runtime/coordination/run-registry/redis';
+export { InMemoryRunEventBus } from './runtime/coordination/event-bus/in-memory';
+export { RedisEventBus } from './runtime/coordination/event-bus/redis';
 
 // runtime/locks（互斥锁：进程内 / Redis 双实现）
 export {

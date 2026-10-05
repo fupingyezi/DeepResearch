@@ -6,7 +6,7 @@ import {
   createClientAgentEvent,
   type ClientAgentEvent,
   type StampedClientAgentEvent,
-} from '../../sse/client-event';
+} from '../../../sse/client-event';
 
 /**
  * InMemoryRunEventBus 实现语义（契约之外的游标 / 墓碑行为）：

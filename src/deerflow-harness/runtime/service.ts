@@ -28,16 +28,16 @@ import type { ThreadImageRef } from '../vision';
 
 import { buildThreadConfig } from './checkpointer';
 import { runWithContext, type RuntimeContext } from './context';
-import { getRunConcurrencyGate } from './run-concurrency-gate';
+import { getRunConcurrencyGate } from './lifecycle/run-concurrency-gate';
 import { getSandboxProvider } from '../sandbox';
 import { getSandboxCoordinator } from '../sandbox/docker/docker-coordinator';
 import { getDistLock, type DistLockHandle } from './locks/dist-lock';
-import type { RunRegistry, RunEventBus } from './contracts';
-import { InMemoryRunRegistry } from './run-registry/in-memory';
-import { InMemoryRunEventBus } from './event-bus/in-memory';
-import { getInstanceOwner } from './instance-id';
-import { HEARTBEAT_INTERVAL_MS } from './liveness';
-import { reconcileZombieRuns } from './zombie-reconciler';
+import type { RunRegistry, RunEventBus } from './coordination/contracts';
+import { InMemoryRunRegistry } from './coordination/run-registry/in-memory';
+import { InMemoryRunEventBus } from './coordination/event-bus/in-memory';
+import { getInstanceOwner } from './lifecycle/instance-id';
+import { HEARTBEAT_INTERVAL_MS } from './lifecycle/liveness';
+import { reconcileZombieRuns } from './lifecycle/zombie-reconciler';
 
 const LOG = '[thread-service]';
 
@@ -72,7 +72,7 @@ const RUN_CANCELLED_DRAINING = 'cancelled: server draining';
 const EVENT_RELEASE_GRACE_MS = 5 * 60_000;
 
 /** 心跳间隔与死亡阈值的唯一定义（重连守卫 / owner 登记续租共用，见 liveness.ts）。 */
-export { HEARTBEAT_INTERVAL_MS } from './liveness';
+export { HEARTBEAT_INTERVAL_MS } from './lifecycle/liveness';
 
 /**
  * 等 registry 里该 thread 的在跑 run 清空，最多 ms 毫秒。

@@ -25,7 +25,7 @@ vi.mock('../../sandbox/docker/docker-coordinator', () => ({
   }),
 }));
 
-import { getRunConcurrencyGate } from '../run-concurrency-gate';
+import { getRunConcurrencyGate } from '../lifecycle/run-concurrency-gate';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 

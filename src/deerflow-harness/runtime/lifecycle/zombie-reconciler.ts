@@ -18,9 +18,9 @@
  * 过滤兜底。
  */
 
-import type { RunStore } from '../persistence/runs';
-import type { ThreadMetaStore } from '../persistence/thread-meta';
-import type { RunRegistry } from './contracts';
+import type { RunStore } from '../../persistence/runs';
+import type { ThreadMetaStore } from '../../persistence/thread-meta';
+import type { RunRegistry } from '../coordination/contracts';
 import { HEARTBEAT_INTERVAL_MS } from './liveness';
 
 const LOG = '[zombie-reconciler]';

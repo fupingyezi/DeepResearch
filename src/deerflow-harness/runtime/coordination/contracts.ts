@@ -11,7 +11,7 @@
  * 模式——降级必须可见，不能静默变成单进程语义。
  */
 
-import type { ClientAgentEvent, StampedClientAgentEvent } from './sse/client-event';
+import type { ClientAgentEvent, StampedClientAgentEvent } from '../sse/client-event';
 
 export interface RunOwnerInfo {
   runId: string;

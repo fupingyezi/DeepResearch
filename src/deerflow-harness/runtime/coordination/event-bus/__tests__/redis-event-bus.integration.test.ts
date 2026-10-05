@@ -2,13 +2,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisEventBus } from '../redis';
-import { describeRunEventBusContract } from '../../__tests__/helpers/contract-cases';
+import { describeRunEventBusContract } from '../../../__tests__/helpers/contract-cases';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
   type ClientAgentEvent,
   type StampedClientAgentEvent,
-} from '../../sse/client-event';
+} from '../../../sse/client-event';
 
 /**
  * RedisEventBus 集成套件：需要本机 Redis（REDIS_URL 可达），否则整组跳过。

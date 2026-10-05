@@ -36,7 +36,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
 import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
 import { getMemoryUpdateStats } from '../../src/deerflow-harness/agents/memory/updater';
-import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/pricing';
+import { computeRunCost, type UsageCost } from '../../src/deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
   mergeRunUsage,
@@ -44,7 +44,7 @@ import {
   withUsageAccounting,
   type RunUsage,
   type TokenUsage,
-} from '../../src/deerflow-harness/runtime/usage-accounting';
+} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
 import {
   loadLongMemDataset,
   printStats,

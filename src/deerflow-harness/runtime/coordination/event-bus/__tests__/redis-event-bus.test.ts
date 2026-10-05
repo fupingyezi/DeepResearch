@@ -7,7 +7,7 @@ import {
   createClientAgentEvent,
   type ClientAgentEvent,
   type StampedClientAgentEvent,
-} from '../../sse/client-event';
+} from '../../../sse/client-event';
 
 /**
  * RedisEventBus 单元测试：注入假客户端，锁 XADD/TRIM/EXPIRE、XREAD BLOCK 续读、

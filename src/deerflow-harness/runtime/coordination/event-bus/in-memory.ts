@@ -10,8 +10,8 @@
  *   channel 上；终态补齐由重连路由按 runs 状态合成
  */
 
-import type { ClientAgentEvent, StampedClientAgentEvent } from '../sse/client-event';
-import { StreamBridge } from '../stream-bridge';
+import type { ClientAgentEvent, StampedClientAgentEvent } from '../../sse/client-event';
+import { StreamBridge } from '../../stream-bridge';
 import type { RunEventBus } from '../contracts';
 
 const keyOf = (threadId: string, runId: string): string => `${threadId}:${runId}`;

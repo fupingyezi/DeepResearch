@@ -13,7 +13,7 @@
  * 对话仍可先思考，执行体延迟启动，符合「立即返回 run_id」的不变量。
  */
 
-import { getSandboxCoordinator } from '../sandbox/docker/docker-coordinator';
+import { getSandboxCoordinator } from '../../sandbox/docker/docker-coordinator';
 
 /** 跨进程占位失败时的本地轮询重试间隔（毫秒）。 */
 const RESERVE_RETRY_INTERVAL_MS = 500;

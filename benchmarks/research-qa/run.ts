@@ -21,13 +21,13 @@ import path from 'path';
 
 import { Client } from 'langsmith';
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
-import { computeRunCost } from '../../src/deerflow-harness/runtime/pricing';
+import { computeRunCost } from '../../src/deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
   mergeRunUsage,
   type RunUsage,
   type TokenUsage,
-} from '../../src/deerflow-harness/runtime/usage-accounting';
+} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
 import { DATASET_V1, toJSONL, toLangSmithFormat } from './dataset';
 import { createBenchmarkAgent, type AgentRunResult, type PerformanceMetrics } from './agent';
 import {

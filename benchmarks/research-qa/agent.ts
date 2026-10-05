@@ -21,7 +21,7 @@ import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
 import {
   withUsageAccounting,
   type RunUsage,
-} from '../../src/deerflow-harness/runtime/usage-accounting';
+} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
 
 export interface AgentRunResult {
   /** Agent 最终输出文本（完整回答） */

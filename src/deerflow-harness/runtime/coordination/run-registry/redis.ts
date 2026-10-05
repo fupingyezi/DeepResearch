@@ -24,8 +24,8 @@ import { createClient } from 'redis';
 
 import type { RunOwnerInfo, RunRegistry } from '../contracts';
 import { InMemoryRunRegistry } from './in-memory';
-import { getInstanceOwner } from '../instance-id';
-import { OWNER_DEAD_AFTER_MS } from '../liveness';
+import { getInstanceOwner } from '../../lifecycle/instance-id';
+import { OWNER_DEAD_AFTER_MS } from '../../lifecycle/liveness';
 
 type RedisClient = ReturnType<typeof createClient>;
 

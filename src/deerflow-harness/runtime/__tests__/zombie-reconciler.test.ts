@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Run, RunStatus } from '../../persistence/runs';
-import { reconcileZombieRuns, ZOMBIE_ERROR, type ZombieReconcileDeps } from '../zombie-reconciler';
+import {
+  reconcileZombieRuns,
+  ZOMBIE_ERROR,
+  type ZombieReconcileDeps,
+} from '../lifecycle/zombie-reconciler';
 
 /**
  * 僵尸回收判定：只回收「running 且 owner 已死」的 run——owner 键存活即跳过；

@@ -23,7 +23,7 @@ import {
   ClientAgentEventType,
   type ClientAgentEvent,
   type StampedClientAgentEvent,
-} from '../sse/client-event';
+} from '../../sse/client-event';
 import type { RunEventBus } from '../contracts';
 import { InMemoryRunEventBus } from './in-memory';
 
