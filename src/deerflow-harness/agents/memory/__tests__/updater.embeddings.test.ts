@@ -1,7 +1,3 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { Embeddings } from '@langchain/core/embeddings';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,13 +8,15 @@ import {
   resetMemoryEmbeddingsFactory,
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
-import { getMemoryStorage, resetMemoryStorage } from '../storage';
+import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import {
   createMemoryFact,
   MemoryUpdater,
   setMemoryModelFactory,
   updateMemoryFact,
 } from '../updater';
+import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 
@@ -52,28 +50,22 @@ function fakeEmbeddings(behavior: (texts: string[]) => Promise<number[][]>): Emb
 }
 
 describe('updater 写侧嵌入', () => {
-  let tmpFile: string;
   const prompts: string[] = [];
 
-  beforeEach(async () => {
-    tmpFile = path.join(
-      await fs.mkdtemp(path.join(os.tmpdir(), 'memory-upd-test-')),
-      'memory.json',
-    );
-    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, storagePath: tmpFile, embeddingDimensions: DIMS });
-    resetMemoryStorage();
+  beforeEach(() => {
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
+    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
     prompts.length = 0;
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     setMemoryModelFactory(null);
     resetMemoryEmbeddingsFactory();
     resetMemoryStorage();
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
     vi.restoreAllMocks();
-    await fs.rm(path.dirname(tmpFile), { recursive: true, force: true }).catch(() => {});
   });
 
   it('LLM 更新的 newFacts 落盘时带向量', async () => {

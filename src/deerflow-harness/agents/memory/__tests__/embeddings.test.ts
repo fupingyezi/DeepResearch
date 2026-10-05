@@ -1,7 +1,3 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Embeddings } from '@langchain/core/embeddings';
 
@@ -18,8 +14,10 @@ import {
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
-import { getMemoryStorage, resetMemoryStorage } from '../storage';
+import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact } from '../types';
+import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 
@@ -206,22 +204,15 @@ describe('embedQuery / embedTexts', () => {
 });
 
 describe('backfillMemoryEmbeddings', () => {
-  let tmpFile: string;
-
-  beforeEach(async () => {
-    tmpFile = path.join(
-      await fs.mkdtemp(path.join(os.tmpdir(), 'memory-emb-test-')),
-      'memory.json',
-    );
-    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, storagePath: tmpFile, embeddingDimensions: DIMS });
-    resetMemoryStorage();
+  beforeEach(() => {
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
+    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetMemoryEmbeddingsFactory();
     resetMemoryStorage();
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
-    await fs.rm(path.dirname(tmpFile), { recursive: true, force: true }).catch(() => {});
   });
 
   it('只补缺失项，已有合法向量的 fact 不重嵌', async () => {
@@ -311,14 +302,14 @@ describe('backfillMemoryEmbeddings', () => {
   });
 
   it('embeddingEnabled=false 时直接跳过', async () => {
-    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, storagePath: tmpFile, embeddingEnabled: false });
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingEnabled: false });
     const fake = fakeEmbeddings(async (batch) => batch.map(() => vec(1)));
     setMemoryEmbeddingsFactory(() => fake as unknown as Embeddings);
     await backfillMemoryEmbeddings({ agentName: null, userId: null });
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('section 缺向量时补齐打分槽位（topOfMind + history），恒保留段不嵌', async () => {
+  it('section 缺向量时补齐召回槽位（topOfMind + history），恒保留段不嵌', async () => {
     const scope = { agentName: null, userId: null };
     const base = emptyMemory();
     await getMemoryStorage().save(

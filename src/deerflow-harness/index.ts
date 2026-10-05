@@ -117,17 +117,10 @@ export {
   getMemoryConfig,
   loadMemoryConfigFromDict,
   setMemoryConfig,
-  // paths
-  agentMemoryFile,
-  getBaseDir,
-  memoryFile,
-  userAgentMemoryFile,
-  userMemoryFile,
   // storage
   type MemoryStorage,
   type MemorySqlExecutor,
   type VectorSearchResult,
-  FileMemoryStorage,
   PgMemoryStorage,
   getMemoryStorage,
   resetMemoryStorage,

@@ -11,7 +11,6 @@ import { formatMemoryForInjection } from './prompt';
 import { rerankWithFallback } from './rerank';
 import {
   retrieveMemory,
-  tokenize,
   type FactScoreDetail,
   type RetrieveResult,
   type SectionScoreDetail,
@@ -36,12 +35,8 @@ export interface BuildMemoryContextOptions {
 
 interface RetrieveForInjectionOutcome {
   queryEmbedding: number[] | null;
-  /** 检索命中的子集；未命中（query 空 / 全部落空）为 null。 */
-  picked: MemoryData | null;
   /** 真正会拼进 system prompt 的整段文本；空串 = 不注入。 */
   injectedText: string;
-  /** 词面与语义双空（本轮无文本且无历史）——调用方据此回落全量注入。 */
-  noQuery: boolean;
   /** 管线全量产物（打分明细 / poolSize / rerankUsed / vectorLeg），供预览同源消费。 */
   result: RetrieveResult | null;
 }
@@ -77,9 +72,7 @@ async function retrieveForInjection(
     }
   }
 
-  const noQuery = tokenize(lexicalQuery).length === 0 && queryEmbedding == null;
-
-  // 管线 deps：vectorRecall 来自 storage 后端（PG 走 pgvector；文件后端无该方法，
+  // 管线 deps：vectorRecall 来自 storage 后端（PG 走 pgvector；无后端时
   // 管线内部回落 JS 扫描）；rerank 走 rerankWithFallback（工厂缺失 / API 失败
   // 返回 null，管线保持 RRF 序）。rerankQuery 用本轮单句——拼串会稀释语义。
   const storage = getMemoryStorage();
@@ -98,15 +91,14 @@ async function retrieveForInjection(
     rerankQuery: opts.query.trim() ? opts.query : undefined,
   });
 
-  const picked = result?.picked ?? null;
-  const pickedText = picked
-    ? formatMemoryForInjection(picked, config.retrieveMaxTokens, { preserveFactOrder: true })
+  const pickedText = result
+    ? formatMemoryForInjection(result.picked, config.retrieveMaxTokens, {
+        preserveFactOrder: true,
+      })
     : '';
   return {
     queryEmbedding,
-    picked,
     injectedText: pickedText.trim() ? `<memory mode="retrieve">\n${pickedText}\n</memory>\n` : '',
-    noQuery,
     result,
   };
 }
@@ -203,7 +195,7 @@ export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): 
     });
 
     // retrieve 模式：先按 query 收敛出相关子集，再用更小的预算格式化。
-    // query 有信号但全部落空 → 不注入，避免无关记忆干扰模型。
+    // query 无信号或全部落空 → 不注入，避免无关记忆干扰模型。
     if (opts.mode === 'retrieve') {
       const outcome = await retrieveForInjection(data, {
         agentName: opts.agentName ?? null,
@@ -211,12 +203,6 @@ export async function buildMemoryContext(opts: BuildMemoryContextOptions = {}): 
         query: opts.query ?? '',
         recentQueries: opts.recentQueries,
       });
-      // 词面与语义双空（本轮无文本且 checkpoint 无历史，如首轮 resume）→ 无可检索的
-      // 信号，退而为全量注入，而不是让本轮彻底失去记忆
-      if (outcome.noQuery) {
-        const text = formatMemoryForInjection(data, config.maxInjectionTokens);
-        return text.trim() ? `<memory>\n${text}\n</memory>\n` : '';
-      }
       return outcome.injectedText;
     }
 

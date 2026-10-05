@@ -8,15 +8,6 @@
 export interface MemoryConfig {
   /** 总开关。 */
   enabled: boolean;
-  /**
-   * 自定义存储路径。
-   * - 空：使用默认 `{base_dir}/users/{user_id}/memory.json`（per-user）。
-   * - 绝对路径：所有 user 共享该文件（opt-out per-user）。
-   * - 相对路径：解析为 `{base_dir}/<relative>`。
-   */
-  storagePath: string;
-  /** 存储后端类路径（保留字段，TS 端目前只用 File 后端）。 */
-  storageClass: string;
   /** debounce 等待秒数，1..300。 */
   debounceSeconds: number;
   /** 用于 memory 总结的 LLM 模型名（null=用默认）。 */
@@ -52,8 +43,6 @@ export interface MemoryConfig {
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   enabled: true,
-  storagePath: '',
-  storageClass: 'deerflow.agents.memory.storage.FileMemoryStorage',
   debounceSeconds: 30,
   modelName: null,
   maxFacts: 100,
@@ -85,10 +74,6 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   const m = dict as Record<string, any>;
 
   if (typeof m.enabled === 'boolean') out.enabled = m.enabled;
-  if (typeof m.storage_path === 'string') out.storagePath = m.storage_path;
-  if (typeof m.storagePath === 'string') out.storagePath = m.storagePath;
-  if (typeof m.storage_class === 'string') out.storageClass = m.storage_class;
-  if (typeof m.storageClass === 'string') out.storageClass = m.storageClass;
   if (typeof m.debounce_seconds === 'number') out.debounceSeconds = m.debounce_seconds;
   if (typeof m.debounceSeconds === 'number') out.debounceSeconds = m.debounceSeconds;
   if (typeof m.model_name === 'string' || m.model_name === null) out.modelName = m.model_name;

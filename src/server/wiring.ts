@@ -235,11 +235,10 @@ const globalForMemoryStorage = globalThis as unknown as {
 let memoryStorageReady = false;
 
 /**
- * 记忆存储后端装配：pgvector 可用（initialMemoryDb 成功）→ 切换 PgMemoryStorage；
- * 否则 warnOnce 保留默认的 FileMemoryStorage（记忆功能不损，仅失去 PG 收益）。
+ * 记忆存储后端装配：pgvector 可用（initialMemoryDb 成功）→ 注入 PgMemoryStorage；
+ * 否则 warnOnce 保持 Noop 后端（记忆功能关闭，聊天不阻断）。
  * 幂等 + dev 下 globalThis 缓存 init promise（HMR 重新求值模块不重复建连）。
- * 导出供 memory-service 在 threadService 尚未初始化时也能提前装配，
- * 消除「先写了文件、后注册 PG」的夹缝窗口。
+ * 导出供 memory-service 在 threadService 尚未初始化时也能提前装配。
  */
 export async function ensureMemoryStorage(): Promise<void> {
   if (memoryStorageReady) return;
@@ -257,7 +256,7 @@ export async function ensureMemoryStorage(): Promise<void> {
       if (init.ok) {
         setMemoryStorage(new PgMemoryStorage(makeMemorySqlExecutor()));
       } else {
-        console.warn(`[wiring] pgvector unavailable, keeping file-backed memory: ${init.reason}`);
+        console.warn(`[wiring] pgvector unavailable, memory disabled: ${init.reason}`);
       }
       memoryStorageReady = true;
     })();

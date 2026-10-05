@@ -4,18 +4,15 @@
  * 关键设计：
  * - **真相源在 PG**：memory_state.data（jsonb，不含 embedding）+ memory_vectors
  *   （vector 列，kind='fact'|'section'，ref_id = fact id / `<group>.<slot>`）。
- *   文件后端降为测试 / pgvector 不可用时的降级路径，不再回写文件。
- * - **懒迁移**：scope 行不存在时尝试读旧 memory.json，读到则插入行 + 向量
- *   （ON CONFLICT DO NOTHING，跨进程并发只有一个赢家），只读不删旧文件。
  * - **update = 单事务行锁 RMW**：SELECT ... FOR UPDATE → 水合向量 → mutator →
- *   剥离 embedding 写 jsonb → DELETE+INSERT 重建向量 → COMMIT。行锁取代文件
- *   后端的 Redis 分布式锁：锁粒度与并发语义一致（per-scope 串行），且与
+ *   剥离 embedding 写 jsonb → DELETE+INSERT 重建向量 → COMMIT。行锁的锁粒度与
+ *   并发语义一致（per-scope 串行），且与
  *   数据同生命周期（进程崩溃锁自动随事务消失）。
  * - **水合是硬约束**：mutator 之前必须把 vectors 塞回 current——updater 的
  *   embedMissingFacts/Sections 靠读 current 里的 embedding 判缺（updater.ts），
  *   jsonb 里没有 embedding，不水合则每轮更新都会全量重嵌。
  * - 无 mtime 缓存：单行 SELECT 亚毫秒，且缓存语义在跨进程下天然一致
- *   （文件后端的 mtime 缓存是进程内优化，PG 不需要）。
+ *   （进程内缓存需 mtime 失效，PG 不需要）。
  */
 
 import { getMemoryConfig } from './config';
@@ -25,9 +22,15 @@ import {
   normalizeVector,
   RECALL_SECTION_SLOTS,
 } from './embeddings';
-import { mergeWithEmpty, readLegacyMemoryFile, resolveLegacyFilePath } from './legacy-file';
 import type { MemorySqlExecutor, MemoryStorage, VectorSearchResult } from './storage';
-import { createEmptyMemory, Fact, MemoryData, SectionData, utcNowIsoZ } from './types';
+import {
+  createEmptyMemory,
+  Fact,
+  MemoryData,
+  mergeWithEmpty,
+  SectionData,
+  utcNowIsoZ,
+} from './types';
 
 interface Scope {
   key: string;
@@ -46,11 +49,6 @@ class MutatorError extends Error {
 
 const SELECT_STATE = `SELECT data FROM memory_state WHERE scope_key = $1`;
 
-const INSERT_STATE = `
-  INSERT INTO memory_state (scope_key, user_id, agent_name, data, updated_at)
-  VALUES ($1, $2, $3, $4::jsonb, now())
-  ON CONFLICT (scope_key) DO NOTHING`;
-
 const UPSERT_STATE = `
   INSERT INTO memory_state (scope_key, user_id, agent_name, data, updated_at)
   VALUES ($1, $2, $3, $4::jsonb, now())
@@ -63,8 +61,6 @@ const UPSERT_STATE = `
 export class PgMemoryStorage implements MemoryStorage {
   constructor(private readonly sql: MemorySqlExecutor) {}
 
-  /** 懒迁移的进程内去重（跨进程由 ON CONFLICT DO NOTHING 兜底）。 */
-  private migrations = new Map<string, Promise<void>>();
   private warnedLoadFailure = false;
 
   private toScope(opts: { agentName?: string | null; userId?: string | null }): Scope {
@@ -154,7 +150,7 @@ export class PgMemoryStorage implements MemoryStorage {
 
   /**
    * 写入向量行（始终 ON CONFLICT DO NOTHING）：update 重建前已 DELETE 同 scope
-   * 全部行、冲突不可能发生；懒迁移路径则靠它保证跨进程并发只有一个赢家的行生效。
+   * 全部行、冲突不可能发生；ON CONFLICT 只兜底极端并发下的主键残留。
    */
   private async insertVectors(
     sql: MemorySqlExecutor,
@@ -178,54 +174,19 @@ export class PgMemoryStorage implements MemoryStorage {
     );
   }
 
-  /** SELECT 未命中时的懒迁移：读旧文件 → 插入 state + vectors。 */
-  private async migrateIfNeeded(sql: MemorySqlExecutor, scope: Scope): Promise<void> {
-    let pending = this.migrations.get(scope.key);
-    if (!pending) {
-      pending = (async () => {
-        try {
-          const legacy = await readLegacyMemoryFile(
-            resolveLegacyFilePath(scope.agentName, scope.userId),
-          );
-          if (!legacy.exists) return;
-          const inserted = await sql.query(INSERT_STATE, [
-            scope.key,
-            scope.userId,
-            scope.agentName,
-            JSON.stringify(legacy.data),
-          ]);
-          // rowCount 0 = 已被其它进程抢先迁移：行归赢家，本侧跳过向量插入
-          if ((inserted.rowCount ?? 0) === 1) {
-            await this.insertVectors(sql, scope, legacy.data);
-          }
-        } catch (e) {
-          console.warn('[memory/pg-storage] lazy migration failed:', e);
-        } finally {
-          this.migrations.delete(scope.key);
-        }
-      })();
-      this.migrations.set(scope.key, pending);
-    }
-    await pending;
-  }
-
   private async readData(opts: {
     agentName?: string | null;
     userId?: string | null;
   }): Promise<MemoryData> {
     const scope = this.toScope(opts);
     try {
-      let result = await this.sql.query(SELECT_STATE, [scope.key]);
-      if (result.rows.length === 0) {
-        await this.migrateIfNeeded(this.sql, scope);
-        result = await this.sql.query(SELECT_STATE, [scope.key]);
-        if (result.rows.length === 0) return createEmptyMemory();
-      }
+      const result = await this.sql.query(SELECT_STATE, [scope.key]);
+      if (result.rows.length === 0) return createEmptyMemory();
       const data = this.parseStoredData(result.rows[0].data);
       await this.hydrateVectors(this.sql, scope.key, data);
       return data;
     } catch (e) {
-      // PG 故障回落空 schema（与文件后端 IO 失败同口径：记忆功能不损，仅内容暂空）。
+      // PG 故障回落空 schema（记忆功能不损，仅内容暂空）。
       // 只告警一次：中断期每轮聊天都走这里，逐次告警会刷屏。
       if (!this.warnedLoadFailure) {
         this.warnedLoadFailure = true;
@@ -244,7 +205,7 @@ export class PgMemoryStorage implements MemoryStorage {
   async reload(
     opts: { agentName?: string | null; userId?: string | null } = {},
   ): Promise<MemoryData> {
-    // 无进程内缓存：load 与 reload 语义相同（文件后端靠 reload 绕 mtime 缓存）
+    // 无进程内缓存：load 与 reload 语义相同
     return this.readData(opts);
   }
 
@@ -264,7 +225,7 @@ export class PgMemoryStorage implements MemoryStorage {
     const scope = this.toScope(opts);
     try {
       return await this.sql.transaction(async (tx) => {
-        const current = await this.readLockedOrMigrate(tx, scope);
+        const current = await this.readLocked(tx, scope);
 
         // 先水合向量到 current（硬约束，见文件头注释），再交 mutator
         await this.hydrateVectors(tx, scope.key, current);
@@ -300,30 +261,11 @@ export class PgMemoryStorage implements MemoryStorage {
     }
   }
 
-  /**
-   * 行锁读：SELECT ... FOR UPDATE。行不存在时在事务内做懒迁移——
-   * 插入行即获得行锁；若 ON CONFLICT 说明并发方已抢先（跨进程窗口），
-   * 改用赢家的行为 current，保证 mutator 基于最新状态。
-   */
-  private async readLockedOrMigrate(tx: MemorySqlExecutor, scope: Scope): Promise<MemoryData> {
+  /** 行锁读：SELECT ... FOR UPDATE；行不存在（scope 尚无数据）返回空 schema，
+   *  后续 UPSERT 会创建行。 */
+  private async readLocked(tx: MemorySqlExecutor, scope: Scope): Promise<MemoryData> {
     const result = await tx.query(`${SELECT_STATE} FOR UPDATE`, [scope.key]);
-    if (result.rows.length > 0) return this.parseStoredData(result.rows[0].data);
-
-    const legacy = await readLegacyMemoryFile(resolveLegacyFilePath(scope.agentName, scope.userId));
-    if (!legacy.exists) return createEmptyMemory();
-
-    const inserted = await tx.query(INSERT_STATE, [
-      scope.key,
-      scope.userId,
-      scope.agentName,
-      JSON.stringify(legacy.data),
-    ]);
-    if ((inserted.rowCount ?? 0) === 1) {
-      await this.insertVectors(tx, scope, legacy.data);
-      return legacy.data;
-    }
-    const winner = await tx.query(`${SELECT_STATE} FOR UPDATE`, [scope.key]);
-    return winner.rows.length > 0 ? this.parseStoredData(winner.rows[0].data) : createEmptyMemory();
+    return result.rows.length > 0 ? this.parseStoredData(result.rows[0].data) : createEmptyMemory();
   }
 
   async vectorSearch(
@@ -354,7 +296,7 @@ function getEmbeddingDimensions(): number {
   return getMemoryConfig().embeddingDimensions;
 }
 
-/** 非单位向量先归一（懒迁移导入的旧文件向量、importMemoryData 的原始向量）。 */
+/** 非单位向量先归一（importMemoryData 导入的原始向量等）。 */
 function toUnitVector(v: number[]): number[] {
   return isUnitVector(v) ? v : normalizeVector(v);
 }

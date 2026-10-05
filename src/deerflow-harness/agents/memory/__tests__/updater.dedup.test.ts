@@ -1,13 +1,11 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
-import { getMemoryStorage, resetMemoryStorage } from '../storage';
+import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import { createMemoryFact, MemoryUpdater, setMemoryModelFactory } from '../updater';
+import { FakeSql } from './fake-sql';
 
 /** formatConversationForUpdate 依赖 _getType 识别 human/ai 角色。 */
 function humanMsg(content: string) {
@@ -26,26 +24,18 @@ function fakeModelWithFact(content: string): BaseChatModel {
 }
 
 describe('updater fact 去重键（casefold）', () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-dedup-test-'));
-    setMemoryConfig({
-      ...DEFAULT_MEMORY_CONFIG,
-      storagePath: path.join(tmpDir, 'memory.json'),
-      embeddingEnabled: false,
-    });
-    resetMemoryStorage();
+  beforeEach(() => {
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingEnabled: false });
+    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     setMemoryModelFactory(null);
     resetMemoryStorage();
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
     vi.restoreAllMocks();
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
   /** 预置一条 fact，再让 LLM 返回 incoming，返回更新后的 facts。 */

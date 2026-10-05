@@ -99,8 +99,8 @@ export interface MemoryDbInitResult {
  *
  * 必须独立于 initialDB、绝不抛出：initialDB 是单条 multi-statement（PG 按一个隐式
  * 事务整体执行），CREATE EXTENSION 若因镜像/权限失败会连带 users 等核心表 bootstrap
- * 全量回滚；这里 own try/catch，任何失败只返回 { ok: false }，由调用方（wiring）回落
- * FileMemoryStorage——记忆功能不损，仅失去 pgvector 收益。
+ * 全量回滚；这里 own try/catch，任何失败只返回 { ok: false }，由调用方（wiring）
+ * 关闭记忆功能（Noop 后端），聊天不阻断。
  *
  * embeddingDimensions 由调用方从 MemoryConfig 取（clamp 后的整数内插进 DDL，无注入面）。
  * 列维度与请求不一致时先 DELETE 再 ALTER TYPE：pgvector 的 vector(m)→vector(n) 强转

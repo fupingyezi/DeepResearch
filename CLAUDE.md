@@ -266,7 +266,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 **文件：** `src/deerflow-harness/agents/memory/`
 
 - **结构 `MemoryData`**：`user.workContext/personalContext/topOfMind` + `history.recentMonths/earlierContext/longTermBackground`（各带 summary + updatedAt）+ `facts[]`（id/category/confidence/source/embedding）
-- **存储（PG 双表真相源 + 文件降级）**：`PgMemoryStorage`（`memory_state` jsonb 存结构不含 embedding、`memory_vectors` pgvector 列存向量，`scope_key = ${userId}::${agentName}`；update = 单事务行锁 RMW，行锁取代文件后端的 Redis 分布式锁；**mutator 前必须水合向量**——updater 的 embedMissingFacts/Sections 靠读 current 里的 embedding 判缺，不水合会每轮更新全量重嵌）；`FileMemoryStorage`（`{DEERFLOW_DATA_DIR|~/.deer-flow}/users/{userId}/memory.json`）降为测试 / pgvector 不可用时的降级后端。wiring `ensureMemoryStorage()`：`initialMemoryDb`（CREATE EXTENSION + 建表 + 维度变更先清空再 ALTER 列）成功 → 切 PG，失败 warnOnce 保留文件后端。**懒迁移**：scope 行缺失时读旧 memory.json 插行 + 建向量（ON CONFLICT DO NOTHING，跨进程并发只有一个赢家），只读不删旧文件；迁移后 PG 增量不回写文件
+- **存储（PG 双表，唯一后端）**：`PgMemoryStorage`（`memory_state` jsonb 存结构不含 embedding、`memory_vectors` pgvector 列存向量，`scope_key = ${userId}::${agentName}`；update = 单事务行锁 RMW（行锁即 per-scope 串行锁，跨进程语义一致）；**mutator 前必须水合向量**——updater 的 embedMissingFacts/Sections 靠读 current 里的 embedding 判缺，不水合会每轮更新全量重嵌）。**NoopMemoryStorage 是注册表默认**（load/reload 返回空 schema、save false、update null）：wiring `ensureMemoryStorage()` 的 `initialMemoryDb`（CREATE EXTENSION + 建表 + 维度变更先清空再 ALTER 列）成功 → 切 PG，失败 warnOnce 保持 Noop（**记忆功能关闭，聊天不阻断**）。旧文件数据迁移是一次性脚本 `scripts/migrate-memory-to-pg.mjs`（读旧 memory.json → scope 行缺失才插入，只读不删旧文件，跑完可删；步骤见 `docs/deploy-runbook.md`）
 - **LLM 驱动更新（MemoryUpdater）**：加载 → 拼 prompt（注入当前 memory + 对话 + 校正/强化提示）→ LLM invoke（**关键：显式 `callbacks: []`**，切断与外层 SSE handler 的回调链，防止向已关闭的 ReadableStream 写入触发 ERR_INVALID_STATE）→ JSON 解析（含 tryRecoverJson 修复 Qwen maxTokens 触顶的尾部截断）→ applyUpdates（confidence 过滤 + casefold 去重 + maxFacts 截断）→ stripUploadMentions 清洗文件引用 → 落盘
 - **注入模式**：`inject`（默认，全量：所有 section + facts 按 confidence 降序，2000 token 预算）/ `retrieve`（RAG 管线检索 top-K facts + 最相关一段 history，800 token 预算）。由 `configuration.memoryMode` 切换
 - **检索管线**（`retrieval.ts`，双路召回 → RRF 融合 → rerank 精排 → 组装）：路 A 向量召回——pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底，`vectorLeg` 记来源），余弦 ≥ 门槛才进 RRF；4 个打分 section 单独 JS 过门槛并入（pgvector top-50 可能被 facts 占满，section 不能因此丢）。路 B 词面召回——overlapRatio > 0 的 facts + 4 section，top-50。RRF(k=60) 按**排名**融合（向量分与词面分不同量纲，排名天然可比；路 A 先入 Map 保 tie 稳定序）→ 候选池（rerank 时 max(topK, 20)）→ rerank 精排池头（≤20 条，池尾按 RRF 序衔接；未注册 / 失败 → warnOnce 保持 RRF 序）→ 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）取 topK(8)。query 分工：词面用近 3 轮用户输入拼接（省略式提问「它呢？」命中上轮实体），语义与 rerank 只用本轮单句（拼串稀释向量语义）。双路全空 → 不注入（即使存在身份信息）；workContext/personalContext 恒保留、history 三段留池内最优一段、topOfMind 进池才留
@@ -352,7 +352,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - 启动时控制台打印 `[agent] tools bound to LLM (N): ...`
 - 手动测 SSE：先登录存 cookie（`curl -c cookies.txt`），请求带 `Accept: text/event-stream --no-buffer`；切模型用 `sessionId` + `configuration.model.value`（MODEL_PRESETS 预设键，如 `deepseek-v4-pro`）
 - 查库：`psql $DATABASE_URL -c "SELECT id, status, display_name, created_at FROM threads ORDER BY created_at DESC LIMIT 20;"`
-- 记忆文件：`~/.deer-flow/`（或 `$DEERFLOW_DATA_DIR`）下 `users/{userId}/memory.json`；记忆检索观察 `GET /api/memory/retrieve?q=`
+- 记忆存储：`psql $DATABASE_URL -c "SELECT scope_key, jsonb_array_length(data->'facts') AS facts, updated_at FROM memory_state;"`；记忆检索观察 `GET /api/memory/retrieve?q=`
 
 ### 13. 关键文件索引
 

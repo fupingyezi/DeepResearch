@@ -2,7 +2,7 @@
  * 记忆域服务：fact CRUD / 检索预览 / 注入模式偏好。
  *
  * 约定（与注入侧、异步写入侧一致）：全部操作走「跨 agent 全局 per-user」
- * 记忆（agentName=null → users/{userId}/memory.json），对齐 deer-flow 2.0
+ * 记忆（agentName=null，PG 双表，scope_key=${userId}::），对齐 deer-flow 2.0
  * 默认对话 agent_name=None 行为。
  *
  * 行为冻结点：

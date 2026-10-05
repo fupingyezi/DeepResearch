@@ -1,7 +1,3 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -107,7 +103,6 @@ describe.skipIf(!hasPg)('PgMemoryStorage · 真实 PG', () => {
   let storage: PgMemoryStorage;
   let secondStorage: PgMemoryStorage;
   let userId: string;
-  let tmpDir: string;
 
   beforeAll(() => {
     pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
@@ -145,19 +140,13 @@ describe.skipIf(!hasPg)('PgMemoryStorage · 真实 PG', () => {
     secondStorage = new PgMemoryStorage(executor);
   });
 
-  beforeEach(async () => {
+  beforeEach(() => {
     userId = `it:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-pg-it-'));
-    setMemoryConfig({
-      ...DEFAULT_MEMORY_CONFIG,
-      storagePath: path.join(tmpDir, 'memory.json'),
-      embeddingDimensions: DIMS,
-    });
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
   });
 
   afterEach(async () => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     await pool
       .query('DELETE FROM memory_state WHERE scope_key = $1', [`${userId}::`])
       .catch(() => {});
@@ -218,25 +207,6 @@ describe.skipIf(!hasPg)('PgMemoryStorage · 真实 PG', () => {
     const viaOther = await secondStorage.load(scope);
     expect(viaOther.facts.map((f) => f.content)).toEqual(['a', 'b']);
     expect(viaOther.facts[1]?.embedding).toEqual(unitVec(2));
-  });
-
-  it('懒迁移：旧文件内容进入 PG（含向量），文件保留', async () => {
-    const scope = { agentName: null, userId };
-    const legacy = memory([fact('f_legacy', '旧文件事实', unitVec(5))]);
-    await fs.writeFile(path.join(tmpDir, 'memory.json'), JSON.stringify(legacy), 'utf-8');
-
-    const loaded = await storage.load(scope);
-
-    expect(loaded.facts[0]?.content).toBe('旧文件事实');
-    expect(loaded.facts[0]?.embedding).toEqual(unitVec(5));
-    await expect(fs.readFile(path.join(tmpDir, 'memory.json'), 'utf-8')).resolves.toContain(
-      '旧文件事实',
-    );
-
-    // 已迁移后不再受文件影响：改文件再 load 仍是 PG 内容
-    await fs.writeFile(path.join(tmpDir, 'memory.json'), JSON.stringify(memory([])), 'utf-8');
-    const reloaded = await storage.reload(scope);
-    expect(reloaded.facts[0]?.content).toBe('旧文件事实');
   });
 
   it('并发 update 串行化：两次 update 不丢写（行锁语义）', async () => {

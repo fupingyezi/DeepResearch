@@ -22,21 +22,8 @@ export {
   setMemoryConfig,
 } from './config';
 
-export {
-  agentMemoryFile,
-  getBaseDir,
-  memoryFile,
-  userAgentMemoryFile,
-  userMemoryFile,
-} from './paths';
-
 export type { MemorySqlExecutor, MemoryStorage, VectorSearchResult } from './storage';
-export {
-  FileMemoryStorage,
-  getMemoryStorage,
-  resetMemoryStorage,
-  setMemoryStorage,
-} from './storage';
+export { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from './storage';
 export { PgMemoryStorage } from './pg-storage';
 
 export type { MemoryReranker, MemoryRerankerFactory } from './rerank';
