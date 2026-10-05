@@ -1,11 +1,13 @@
 /**
  * ThreadService —— Thread 系统对外门面
  *
- * 装配：DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + StreamBridge + ALS Context
+ * 装配：DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore
+ *      + RunRegistry / RunEventBus（进程内或跨进程实现）+ ALS Context
  *
  * 关键不变量：
  * - submitRun 立即返回 run_id，执行体 fire-and-forget
- * - 执行体 try/finally 兜底 publish END，并收敛 status（succeeded/failed → idle/error）
+ * - 执行体 try/catch/finally 三重收敛：成功 succeeded + idle；失败 ERROR 事件 → failed；
+ *   兜底 finally 始终 publish END
  * - 事件载荷复用 ClientAgentEvent，subscribe 返回带续读游标的 AsyncIterable<StampedClientAgentEvent>
  */
 
@@ -673,8 +675,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         }
 
         // 单次请求模型切换：带 modelConfig 且注入了工厂时解析对应 client，
-        // 否则用装配时的默认 client。统一走「submitRun → channel」单路径，
-        // 不再有 route 层 dynamicClient 直连分支。
+        // 否则用装配时的默认 client。统一走「submitRun → channel」单路径。
         const runClient =
           modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
 

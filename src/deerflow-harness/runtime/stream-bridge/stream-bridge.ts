@@ -7,8 +7,8 @@
  *   `ClientAgentEvent`（与前端 handler 签名统一）
  * - 事件分发语义（buffer 回放 / close 终止 / 关键帧保护）由 ThreadChannel 在
  *   EventEmitter 之上维护：`subscribe()` 返回 AsyncIterable，晚订阅可拿历史
- * - `close()` 用私有符号事件唤醒挂起的 `next()`，不再合成假的 system END 帧——
- *   内部唤醒信号不能以真实协议帧的形态漏给消费者
+ * - `close()` 用私有符号事件唤醒挂起的 `next()`：内部唤醒信号不进 buffer、
+ *   不对外，不能以真实协议帧的形态漏给消费者
  * - 载荷类型参数化（裸事件 / 带游标事件皆可）：裁剪与终止判定只依赖事件名提取器
  *
  * 跨进程的事件面（Redis Stream 回放）在 RunEventBus 的 Redis 实现里，本桥

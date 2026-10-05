@@ -21,7 +21,7 @@ import { publishTitleUpdate } from './title-bus';
  *      user 文本前 15 字截断）。
  *
  * LLM 模型：
- * - 通过 `setTitleModelFactory` 注入（同 memory 子系统模式）。上层（_service.ts）
+ * - 通过 `setTitleModelFactory` 注入（同 memory 子系统模式）。app 层（src/server/wiring.ts）
  *   调用一次 `setTitleModelFactory(modelName => createChatModel(buildModelConfigFromPreset(...)))`，
  * - `TITLE_MODEL` env 用作"模型名 hint"传给 factory（factory 自行决定如何映射，
  *   通常是 preset key 或 modelName）；缺省时 factory 走默认 preset。
@@ -43,7 +43,7 @@ interface TitleConfigRow {
 
 /**
  * 采样参数覆盖：同一条副链路工厂按用途差异化（标题短文本 vs 提示词增强长文本）。
- * 缺省值由 factory 注册方决定（_service.ts 里标题场景为 maxTokens 64 / temp 0.3）。
+ * 缺省值由 factory 注册方决定（wiring.ts 里标题场景为 maxTokens 64 / temp 0.3）。
  */
 export interface TitleModelOptions {
   maxTokens?: number;

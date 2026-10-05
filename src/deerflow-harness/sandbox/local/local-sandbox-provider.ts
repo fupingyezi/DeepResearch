@@ -4,8 +4,8 @@
  * LocalSandbox 以单例形式复用（id 固定为 "local"）：跨线程共享同一实例，线程隔离
  * 由各工具按虚拟路径映射到不同 thread 目录实现，无需为每线程新建沙箱。
  *
- * 进程级单例工厂 getSandboxProvider() 迁移至 provider-factory.ts，以支持按 env
- * 选择 local / docker 后端且避免与 docker 实现形成循环依赖。
+ * 进程级单例工厂 getSandboxProvider() 在 provider-factory.ts（按 env 选择
+ * local / docker 后端）；工厂独立于本实现，避免与 docker 实现形成循环依赖。
  */
 
 import { Sandbox } from '../sandbox';

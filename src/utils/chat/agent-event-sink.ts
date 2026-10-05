@@ -3,8 +3,7 @@
  *
  * SessionStreamSink 注册表 —— 泵事件的 store 写入者（EventBus 的一等通配订阅者）。
  *
- * 旧链路里 SSE 消费者（StreamChatHandler）直接 for-await 写 zustand，EventBus 是死代码。
- * 泵化后职责反转：泵（AgentEventProvider）只负责 fetch + emit，本模块作为订阅者把
+ * 职责反转：泵（AgentEventProvider）只负责 fetch + emit，本模块作为订阅者把
  * 事件聚合成 store 数据（占位消息、START id 迁移、rAF 合帧 commit、错误兜底）。
  * sink 与泵通过「初始 sessionId + streamId」配对：
  *
@@ -12,7 +11,7 @@
  * - streamId 单调递增防串：同 session 重跑时，旧泵残留迟到事件 streamId 不匹配当前
  *   sink 直接丢弃（被丢弃旧 run 的取消标记由服务端落库侧 waitRunError 兜底）
  * - sink 另存 storeSid（store 写回键）：START 回传真实 id 后切过去
- *   （migrateSessionRuntime 语义与旧 handler 一致）
+ *   （经 store 的 migrateSessionRuntime）
  *
  * 停止按钮不变量之一落在 startSessionSink：泵的 AbortController 必须经
  * setSessionAbortController 注册进 store 桶 —— 停止按钮 abort 的正是它。

@@ -53,7 +53,10 @@ function makeErrorEvent(
  *
  * @example
  * ```ts
- * const stream = createAgentEventStream({ endpoint: "/api/v3/chat/${threadId}", body: { input } });
+ * const stream = createAgentEventStream({
+ *   endpoint: '/api/v3/chat',
+ *   body: { sessionId: '<缺省则新建会话>', message: { contents: [{ type: 'text', text: '你好' }] } },
+ * });
  * for await (const frame of stream) {
  *   if (frame.event.eventType === ClientAgentEventType.STREAM_CHUNK) {
  *     console.log(frame.event.payload.text);

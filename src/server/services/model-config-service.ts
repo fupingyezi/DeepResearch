@@ -23,7 +23,7 @@ export type UserModelResolution =
  *  2. 取该预设 provider 的用户加密 Key 并解密。
  *  3. 无预设 → NO_MODEL；无 Key → NO_KEY（携带 provider 供前端提示）。
  *
- * 不再使用环境变量默认 Key —— 体现「不再内置默认 Key、由用户自带 Key」。
+ * 本链路不读环境变量默认 Key：用户自带 Key（环境 Key 仅供副链路兜底）。
  */
 export async function resolveUserModelConfig(
   userId: string,

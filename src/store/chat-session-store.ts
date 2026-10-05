@@ -158,9 +158,8 @@ const useChatSessionStore = create<ChatSessionState>()(
           delete state.sessionRuntimes[String(chatSession.id)];
 
           // 本分支**只能改 draft、不能 return 新对象**：immer 禁止「既修改 draft 又
-          // 返回新值」（produce 会把 return 值当成整份新 state，二者只能有一个）。
-          // 之前这里两者都做了，导致删除一执行就抛 Immer 错误 —— 请求成功、列表却
-          // 纹丝不动。见 chat-session-store.test.ts。
+          // 返回新值」（produce 会把 return 值当成整份新 state，二者只能有一个），
+          // 违者执行即抛 Immer 错误（请求成功、列表却纹丝不动）。见 chat-session-store.test.ts。
           return;
         }
         return {};

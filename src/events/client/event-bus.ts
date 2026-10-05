@@ -36,7 +36,7 @@ export class EventBus {
   private readonly wrapped = new Map<string, Map<AgentEventHandler, AgentEventHandler>>();
 
   constructor() {
-    // 订阅面不设上限（与旧 Map 实现一致）
+    // 订阅面不设上限
     this.emitter.setMaxListeners(0);
     // 'error' 是白名单事件名，撞 EventEmitter 内建语义（无监听者时 emit 抛异常）。
     // 常驻 no-op 保证「只有通配订阅者」时派发 ERROR 也不抛。
@@ -77,8 +77,7 @@ export class EventBus {
    * 单个 handler 抛错不影响其他订阅者。
    */
   emit(event: RoutedClientAgentEvent): void {
-    // EventEmitter 内部 emit 先拷贝监听器快照再调用，派发期间的订阅变更
-    // 不影响本轮（与旧实现 `[...set]` 语义等价）。
+    // EventEmitter 内部 emit 先拷贝监听器快照再调用，派发期间的订阅变更不影响本轮。
     this.emitter.emit(event.eventType, event);
     this.emitter.emit('*', event);
   }

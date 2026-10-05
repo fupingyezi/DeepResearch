@@ -15,8 +15,8 @@
  * 11. SubagentLimitMiddleware           (始终启用)
  * 12. LoopDetectionMiddleware           (始终启用)
  *
- * 澄清追问已改用 LangGraph 原生 interrupt（ask_clarification 工具 + Command resume），
- * 不再依赖中间件短路，详见 tools/builtins/clarification-tool.ts。
+ * 澄清追问走 LangGraph 原生 interrupt（ask_clarification 工具 + Command resume），
+ * 不经中间件短路，详见 tools/builtins/clarification-tool.ts。
  *
  * 关键顺序约束：
  * - ToolCallIntegrity (3) **先于** ToolErrorHandling (5)：在到达 ToolNode

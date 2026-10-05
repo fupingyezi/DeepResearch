@@ -39,13 +39,13 @@ export const MODEL_PRESETS: Record<ModelPresetName, ModelPreset> = {
     key: 'deepseek-v4-flash',
     label: 'DeepSeek v4 Flash',
     provider: 'deepseek',
-    // 预置 key 保留旧名（selectedModel 落库，改名会让存量用户回落 NO_MODEL），
+    // 预置 key 名与 selectedModel 落库值绑定，改名会让存量用户回落 NO_MODEL；
     // 但发给 API 的 modelName 必须是官方名：GET /models 只返回 deepseek-flash
     // 与 deepseek-v4-pro，deepseek-chat / deepseek-reasoner 已不在清单内。
     modelName: 'deepseek-flash',
     description: 'DeepSeek V4.1 Flash，支持图片理解',
-    // 实测（2026-09，8x8 纯色 PNG 经 image_url 直答颜色）：deepseek-flash 答出
-    // 「红色」。漏标此字段时图片像素根本不会发给模型，只能靠 OCR 文本兜底。
+    // 漏标此字段时图片像素根本不会发给模型，只能靠 OCR 文本兜底
+    // （8x8 纯色 PNG 经 image_url 直答颜色，deepseek-flash 答出「红色」）。
     supportsVision: true,
   },
   'deepseek-v4-pro': {
@@ -212,7 +212,7 @@ export function buildModelConfigFromPreset(presetKey: ModelPresetName): ModelCon
  * 用「当前用户的解密 API Key」构建主聊天链路的 ModelConfig。
  *
  * baseUrl 与采样参数沿用预设默认；apiKey 由调用方（v3/chat route）从用户加密存储中
- * 解密后传入，覆盖任何环境变量默认值，从而实现「不再内置默认 Key、由用户自带 Key」。
+ * 解密后传入，覆盖任何环境变量默认值——主链路用户自带 Key，不读环境默认 Key。
  */
 export function buildModelConfigForUser(presetKey: ModelPresetName, apiKey: string): ModelConfig {
   const config = buildModelConfigFromPreset(presetKey);

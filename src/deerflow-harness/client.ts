@@ -293,7 +293,7 @@ export class DeerFlowClient {
    *
    * 优先级（仅以下键支持运行期覆盖）：
    *   1. metadata.<key> (boolean) — 本次请求显式覆盖
-   *   2. baseOptions.<key>        — 服务级默认（_service.ts 注入）
+   *   2. baseOptions.<key>        — 服务级默认（wiring 装配时注入）
    *
    * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
    * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。

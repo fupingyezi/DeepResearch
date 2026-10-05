@@ -298,8 +298,8 @@ export class ChatService {
     // —— sessionId 分流 ——
     // 无论有没有传 sessionId，都先「确保会话行存在」：传进来的 id 未必真的落过库 ——
     // 前端首个请求失败（没收到 START）时不会重置本地状态，下一轮会把本地生成的临时 UUID
-    // 当「已有会话」发过来。旧实现只在「没传 sessionId」时建行，于是这种情况会先建成
-    // threads_meta 孤儿，紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
+    // 当「已有会话」发过来。缺了这步，临时 id 会先落下 threads_meta 孤儿，
+    // 紧接着 chat_message 插入撞 session_id 外键 500，run 永远起不来。
     const incomingSessionId =
       typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : null;
 
@@ -520,9 +520,8 @@ export class ChatService {
       thread_id: prepared.threadId,
       sessionId: prepared.threadId,
     };
-    // 总是回传会话记录：正常新建时前端要把它加进侧栏；「临时 id 首次落库」那种续聊也
-    // 需要（此前这类对话因为没落库、永远不进侧栏）；真正的续聊则被 store 的 addChatSession
-    // 按同 id 幂等跳过，重复下发无副作用。
+    // 总是回传会话记录：新建会话前端要把它加进侧栏，「临时 id 首次落库」的续聊同样
+    // 需要；真正的续聊则被 store 的 addChatSession 按同 id 幂等跳过，重复下发无副作用。
     if (prepared.chatSession) startPayload.chatSession = prepared.chatSession;
     if (typeof prepared.userMessageId === 'string')
       startPayload.userMessageId = prepared.userMessageId;

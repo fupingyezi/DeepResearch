@@ -173,7 +173,7 @@ export function assembleFromFeatures(
   chain.push(toolCallIntegrityMiddleware);
 
   // (4) 可选：规则式护栏。features.guardrail=true 走默认实现（createGuardrailMiddleware），
-  // 或传入自定义中间件实例。默认关闭（库级安全默认），服务级由 _service.ts 开启。
+  // 或传入自定义中间件实例。默认关闭（库级安全默认），服务级由 wiring.ts 开启。
   const guardrailFeat = features.guardrail;
   if (guardrailFeat === true) {
     chain.push(createGuardrailMiddleware());

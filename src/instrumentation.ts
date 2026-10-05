@@ -10,8 +10,7 @@
  *   修正为 failed（判死语义见 harness 的 zombie-reconciler）。第二轮覆盖启动时
  *   owner 键尚未到期的窗口
  *
- * 顺带把 threadService 初始化提前到启动期：首次请求不再承担建池 / 建 checkpointer
- * 的开销，也让停机与对账在无流量时同样可用。
+ * threadService 在启动期初始化（建池 / 建 checkpointer）：停机与对账在无流量时同样可用。
  */
 
 import { getMemoryQueue, type ThreadService } from '@/deerflow-harness';

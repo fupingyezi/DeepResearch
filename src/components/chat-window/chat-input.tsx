@@ -70,9 +70,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // 停止优先于一切守卫：正在跑就必须能停下来。此前 disabled 分支在前，而聊天中
-    // disabled 恒为 true（chat-window 传的是 isChating || guardDisabled），于是「停止」
-    // 成了一个点了完全没反应的死按钮 —— 不 abort、运行态不变、按钮也不变回发送。
+    // 停止优先于一切守卫：正在跑就必须能停下来。聊天中 disabled 恒为 true
+    // （chat-window 传的是 isChating || guardDisabled），此分支必须先行，否则
+    // 「停止」变成不 abort、运行态不变、按钮也不变回发送的死按钮。
     if (isChating) {
       handleStop();
       return;
