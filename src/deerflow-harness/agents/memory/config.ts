@@ -53,6 +53,8 @@ export interface MemoryConfig {
   embeddingHybridWeight: number;
   /** 加载时是否异步回填缺失向量的旧 facts。 */
   embeddingBackfillOnLoad: boolean;
+  /** 是否启用 rerank 精排（工厂缺失 / API 失败自动回落 RRF 序）。 */
+  rerankEnabled: boolean;
 }
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
@@ -73,6 +75,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   embeddingDimensions: 1024,
   embeddingHybridWeight: 0.7,
   embeddingBackfillOnLoad: true,
+  rerankEnabled: true,
 };
 
 let _config: MemoryConfig = { ...DEFAULT_MEMORY_CONFIG };
@@ -148,6 +151,8 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   if (typeof m.embeddingBackfillOnLoad === 'boolean') {
     out.embeddingBackfillOnLoad = m.embeddingBackfillOnLoad;
   }
+  if (typeof m.rerank_enabled === 'boolean') out.rerankEnabled = m.rerank_enabled;
+  if (typeof m.rerankEnabled === 'boolean') out.rerankEnabled = m.rerankEnabled;
   out.embeddingDimensions = clamp(out.embeddingDimensions, 256, 2048);
   out.embeddingHybridWeight = clamp(out.embeddingHybridWeight, 0, 1);
 

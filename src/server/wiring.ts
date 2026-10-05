@@ -25,6 +25,7 @@ import {
   setMemoryConfig,
   setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
+  setMemoryRerankerFactory,
   setMemoryStorage,
   setParentHistoryProvider,
   setThreadImageFetcher,
@@ -36,6 +37,7 @@ import {
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { getClient, initialMemoryDb, query } from '@/lib/db';
 import { getFile, getMimeType } from '@/lib/storage';
+import { createZhipuReranker } from '@/lib/zhipu-rerank';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,
@@ -60,6 +62,7 @@ let initPromise: Promise<ThreadService> | null =
 let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
 let embeddingsFactoryRegistered = false;
+let rerankerFactoryRegistered = false;
 let imageFetcherRegistered = false;
 let parentHistoryProviderRegistered = false;
 
@@ -157,6 +160,32 @@ export function ensureMemoryEmbeddingsFactory(): void {
       embeddingDimensions: Math.min(2048, Math.max(256, Math.round(dims))),
     });
   }
+}
+
+/**
+ * 把智谱 rerank 客户端注入给 memory 子系统（RAG 精排）。
+ * DEERFLOW_RERANK_ENABLED='0' 显式关：工厂返回 null 并把 config 关掉（检索保持 RRF 序）；
+ * 无 DEERFLOW_RERANK_API_KEY / ZHIPU_API_KEY 时工厂返回 null（同 embedding 口径，
+ * 检索保持 RRF 序继续）。导出供 memory-service 预览接口在 threadService 尚未
+ * 初始化时也能提前注册。
+ */
+export function ensureMemoryRerankerFactory(): void {
+  if (rerankerFactoryRegistered) return;
+  rerankerFactoryRegistered = true;
+  if (process.env.DEERFLOW_RERANK_ENABLED === '0') {
+    setMemoryConfig({ ...getMemoryConfig(), rerankEnabled: false });
+    setMemoryRerankerFactory(() => null);
+    return;
+  }
+  setMemoryRerankerFactory(() => {
+    const apiKey = process.env.DEERFLOW_RERANK_API_KEY || process.env.ZHIPU_API_KEY;
+    if (!apiKey) return null;
+    return createZhipuReranker({
+      apiKey,
+      model: process.env.DEERFLOW_RERANK_MODEL || 'rerank',
+      baseUrl: process.env.DEERFLOW_RERANK_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+    });
+  });
 }
 
 /**
@@ -317,6 +346,7 @@ async function build(): Promise<ThreadService> {
   ensureMemoryModelFactory();
   ensureTitleModelFactory();
   ensureMemoryEmbeddingsFactory();
+  ensureMemoryRerankerFactory();
   ensureThreadImageFetcher();
   ensureParentHistoryProvider(checkpointer);
 
