@@ -254,16 +254,13 @@ export interface LexicalHit {
 }
 
 /**
- * 路 B 词面召回：语料 = facts + 4 个召回 section（与向量路可召回集合一致），
- * query 时现算 corpus 统计并逐篇 BM25 打分，> 0 者按分降序取 top-N。
+ * 全量语料词面打分（不截断）：召回与预览明细共用同一份分数。
+ * 语料 = facts + 4 个召回 section（与向量路可召回集合一致），query 时现算
+ * corpus 统计并逐篇 BM25 打分，> 0 者按分降序返回全量。
  * 多轮拼接的词面 query 会带出上轮实体（省略式提问「它呢？」命中），
  * BM25 按唯一 query term 求和、未命中词不计分，长 query 不稀释命中权重。
  */
-export function lexicalRecall(
-  data: MemoryData,
-  queryTokens: Set<string>,
-  limit: number,
-): LexicalHit[] {
+function scoreAllLexical(data: MemoryData, queryTokens: Set<string>): LexicalHit[] {
   const docs: Array<{ ref: string; tokens: string[] }> = [];
   for (const f of data.facts ?? []) docs.push({ ref: factRef(f.id), tokens: tokenize(f.content) });
   for (const [group, slot] of RECALL_SECTION_SLOTS) {
@@ -275,8 +272,16 @@ export function lexicalRecall(
   return docs
     .map((d) => ({ ref: d.ref, bm25: bm25Score(d.tokens, queryTokens, stats) }))
     .filter((h) => h.bm25 > 0)
-    .sort((a, b) => b.bm25 - a.bm25)
-    .slice(0, limit);
+    .sort((a, b) => b.bm25 - a.bm25);
+}
+
+/** 路 B 词面召回：全量打分后取 top-N。 */
+export function lexicalRecall(
+  data: MemoryData,
+  queryTokens: Set<string>,
+  limit: number,
+): LexicalHit[] {
+  return scoreAllLexical(data, queryTokens).slice(0, limit);
 }
 
 /**
@@ -659,8 +664,11 @@ export async function retrieveMemory(
   }
 
   // ---- 路 B：词面召回 ----
-  const lexicalHits = lexicalRecall(data, queryTokens, RECALL_EACH);
-  const bm25ByRef = new Map(lexicalHits.map((h) => [h.ref, h.bm25]));
+  const allLexical = scoreAllLexical(data, queryTokens);
+  const lexicalHits = allLexical.slice(0, RECALL_EACH);
+  // 明细用全量分数：top-50 截断只作用于召回，未进召回者的 bm25 若显示 0，
+  // 调参预览会把「词面有分但排在 50 名外」误读成「词面完全不匹配」
+  const bm25ByRef = new Map(allLexical.map((h) => [h.ref, h.bm25]));
 
   // ---- RRF 融合 → 候选池 ----
   // 路 A 按真实相似度重排（PG 结果已降序，JS 并入的 section 需归位）再进 RRF；

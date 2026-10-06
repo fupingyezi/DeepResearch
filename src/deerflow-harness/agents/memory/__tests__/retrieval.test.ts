@@ -322,6 +322,17 @@ describe('retrieveMemory 词面召回', () => {
     expect(Array.isArray(result!.picked.facts)).toBe(true);
   });
 
+  it('预览明细的 bm25 覆盖全量语料：未进 top-50 召回者也有真实分', async () => {
+    // 55 条高 tf 条目把 target 挤出 top-50 召回（RECALL_EACH=50），
+    // 但明细应显示其真实词面分而非 0——0 会被误读成「词面完全不匹配」
+    const strong = Array.from({ length: 55 }, (_, i) => fact('婚礼婚礼婚礼婚礼', 0.9, `s${i}`));
+    const data = memory([...strong, fact('这件事与婚礼有关', 0.9, 'target')]);
+    const result = await retrieveMemory(data, '婚礼', { topK: 1 });
+    const detail = result!.facts.find((d) => d.id === 'target')!;
+    expect(detail.bm25).toBeGreaterThan(0);
+    expect(detail.picked).toBe(false);
+  });
+
   it('不 rerank 时池宽仍 ≥ 20：section 不挤占 fact 名额、topK 取满', async () => {
     // 4 个 section 与 12 条 fact 都命中 query，section 的 tf 更高 → RRF 序里
     // section 占前 4。池宽若 = topK(8)，池里只剩 4 个 fact 名额、topK 取不满
