@@ -321,6 +321,27 @@ describe('retrieveMemory 词面召回', () => {
     expect(result!.picked.lastUpdated).toBe(data.lastUpdated);
     expect(Array.isArray(result!.picked.facts)).toBe(true);
   });
+
+  it('不 rerank 时池宽仍 ≥ 20：section 不挤占 fact 名额、topK 取满', async () => {
+    // 4 个 section 与 12 条 fact 都命中 query，section 的 tf 更高 → RRF 序里
+    // section 占前 4。池宽若 = topK(8)，池里只剩 4 个 fact 名额、topK 取不满
+    const facts = Array.from({ length: 12 }, (_, i) => fact(`事实${i} 婚礼`, 0.9, `f${i}`));
+    const data = memory(facts, {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '婚礼婚礼婚礼', updatedAt: '' },
+      },
+      history: {
+        recentMonths: { summary: '婚礼婚礼婚礼', updatedAt: '' },
+        earlierContext: { summary: '婚礼婚礼婚礼', updatedAt: '' },
+        longTermBackground: { summary: '婚礼婚礼婚礼', updatedAt: '' },
+      },
+    });
+    const result = await retrieveMemory(data, '婚礼', { topK: 8 });
+    expect(result!.picked.facts).toHaveLength(8); // 修复前只有 4
+    expect(result!.poolSize).toBe(16); // 池宽上限 20，语料命中 16 条全进池
+  });
 });
 
 describe('retrieveMemory 向量召回', () => {

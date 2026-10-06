@@ -13,7 +13,9 @@
  *   （缩写 / 标识符）的命中比向量路更直接；与 obsidian-rag 的 FTS5 BM25 同语义
  *   （那里语料在 SQLite，这里 ≤104 篇全在内存，现算零成本）；
  * - RRF(k=60) 按**排名**融合——向量分与 BM25 分不同量纲，排名天然可比；
- * - rerank 精排池头（≤20 条），池尾按 RRF 序衔接；未注册 / 失败 → warnOnce
+ * - 候选池宽 = max(topK, 20)（池窄时 4 个召回 section 会挤占 fact 名额、topK
+ *   取不满；池只是候选空间，最终组装仍按 final 取 topK，注入条数不变）；
+ * - rerank 精排池头 20 条，池尾按 RRF 序衔接；未注册 / 失败 → 状态切换告警 +
  *   保持 RRF 序（本项目惯例静默降级，与 obsidian-rag fail-fast 的刻意差异点）；
  * - 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）取 topK；
  *   workContext/personalContext 恒保留（身份信息）；history 三段留池内最优一段；
@@ -30,7 +32,7 @@ import type { VectorSearchResult } from './storage';
 import type { Fact, FactCategory, MemoryData, SectionData } from './types';
 
 const RECALL_EACH = 50; // 双路召回各取 50（facts 上限 100，足够宽）
-const RERANK_CANDIDATES = 20; // RRF 候选池宽 / rerank 精排宽度
+const RERANK_CANDIDATES = 20; // rerank 精排头宽，同时是候选池宽下限
 const RRF_K = 60; // RRF 常数 k
 const DEFAULT_TOP_K = 8;
 
@@ -641,7 +643,10 @@ export async function retrieveMemory(
   // 路 A 按真实相似度重排（PG 结果已降序，JS 并入的 section 需归位）再进 RRF；
   // Map 插入序保证平分时路 A 条目在前（tie 稳定）。
   const routeA = [...vectorHits.entries()].sort((x, y) => y[1] - x[1]).map(([ref]) => ref);
-  const poolSize = options.rerank ? Math.max(topK, RERANK_CANDIDATES) : topK;
+  // 池宽与 topK 解耦、恒 ≥ RERANK_CANDIDATES：池宽 = topK（默认 8）时 4 个
+  // 召回 section 会挤占 fact 名额、topK 取不满；池只是候选空间，组装仍按
+  // final 取 topK，不改变注入条数
+  const poolSize = Math.max(topK, RERANK_CANDIDATES);
   const fused = rrfFuse(
     routeA,
     lexicalHits.map((h) => h.ref),
