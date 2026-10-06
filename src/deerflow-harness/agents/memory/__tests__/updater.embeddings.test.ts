@@ -333,6 +333,26 @@ describe('updater 写侧嵌入', () => {
     expect(fake.calls.some((c) => c.trim().startsWith('DELETE FROM memory_vectors'))).toBe(false);
   });
 
+  it('存储写失败（update 返回 null）计入 failed，attempted = succeeded + failed', async () => {
+    const base = new PgMemoryStorage(new FakeSql());
+    const failingStorage: MemoryStorage = {
+      load: (o) => base.load(o),
+      reload: (o) => base.reload(o),
+      save: (d, o) => base.save(d, o),
+      update: async () => null,
+    };
+    setMemoryStorage(failingStorage);
+    setMemoryModelFactory(() => fakeModel(JSON.stringify({ newFacts: [] }), prompts));
+
+    const before = getMemoryUpdateStats();
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('你好')], { userId: 'wf1' });
+    expect(ok).toBe(false);
+    const after = getMemoryUpdateStats();
+    expect(after.attempted).toBe(before.attempted + 1);
+    expect(after.failed).toBe(before.failed + 1);
+    expect(after.succeeded).toBe(before.succeeded);
+  });
+
   it('嵌入 HTTP 在 update 事务（mutator）之外发起', async () => {
     // 包一层 storage 记录「embed 调用是否发生在 mutator 执行期间」：
     // 修复前 embedMissing* 在 mutator 内 await（持行锁调 HTTP），标记会为 true

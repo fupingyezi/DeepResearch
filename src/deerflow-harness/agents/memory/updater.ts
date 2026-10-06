@@ -689,7 +689,10 @@ export class MemoryUpdater {
         },
         { agentName, userId },
       );
+      // saved === null（存储写失败）是独立于「抛错」的失败形态，必须计入 failed，
+      // 否则 attempted ≠ succeeded + failed，写失败会从计数器里静默消失
       if (saved) memoryUpdateStats.succeeded += 1;
+      else memoryUpdateStats.failed += 1;
       return !!saved;
     } catch (e) {
       // 超时是独立故障形态（LLM 挂起被 signal 打断）：单独告警便于区分
