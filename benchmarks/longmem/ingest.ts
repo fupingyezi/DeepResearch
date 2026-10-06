@@ -3,12 +3,13 @@
  *
  * 与 prefix 模式（把全部历史直接拼进 prompt）不同，这里真正走长期记忆系统：
  *   逐个 haystack session → 交给 MemoryUpdater 用 LLM 抽取事实/摘要 → 落盘到
- *   users/{userId}/memory.json。提问阶段不再注入历史，而是让 lead-agent 从
- *   存储的记忆里检索作答，从而端到端考察「记忆写入 → 存储 → 跨 session 检索」能力。
+ *   PG memory_state（scope = userId::agentName，经 run.ts 的 ensureMemoryStorage
+ *   装配）。提问阶段不再注入历史，而是让 lead-agent 从存储的记忆里检索作答，
+ *   从而端到端考察「记忆写入 → 存储 → 跨 session 检索」能力。
  *
  * 关键约束：
- *   - 每个 example 用独立 userId → 独立记忆文件 → 题目之间互不污染。
- *   - 同一 example 的多个 session 必须「串行」写入（共享同一文件，读-改-写不能并发）。
+ *   - 每个 example 用独立 userId → 独立 PG scope → 题目之间互不污染。
+ *   - 同一 example 的多个 session 写同一 scope（读-改-写由 PG 行锁串行化）。
  *   - 需先注入 memory model factory，否则 MemoryUpdater 是空操作（no-op）。
  */
 
