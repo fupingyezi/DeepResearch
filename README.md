@@ -546,7 +546,7 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 
 ### 长期记忆
 
-记忆按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（根目录可由 `DEERFLOW_DATA_DIR` 覆盖），包含：
+记忆按用户持久化到 PostgreSQL（`memory_state` jsonb 存结构 + `memory_vectors` pgvector 存向量，按 `userId::agentName` scope 隔离；pgvector 不可用时记忆功能静默关闭、聊天不阻断），包含：
 
 - `user.workContext / personalContext / topOfMind`
 - `history.recentMonths / earlierContext / longTermBackground`
@@ -626,7 +626,6 @@ MEMORY_DEBUG=1 pnpm dev
 其它运行期可调环境变量：
 
 - `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认 2000；超限丢弃最旧非关键帧，`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
-- `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
 - `DEERFLOW_SANDBOX_DIR` —— 沙箱工作区根目录（默认 `{cwd}/.sandbox`；local 后端用）
 - `DEERFLOW_SKILLS_DIR` —— 技能目录（默认 `{cwd}/skills`）
@@ -681,7 +680,7 @@ pnpm bench:longmem
 1. StreamBridge 与 **run 取消**均为**进程内**语义（取消句柄挂在 ThreadService 闭包里）：多实例水平扩展时，SSE 回放与停止请求都必须落到跑该 run 的那个进程，需与 StreamBridge 一起换成 Redis 协调
 2. 单次请求只能使用一个模型
 3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配、防递归、护栏规则、记忆检索与向量、run 取消语义、checkpoint 行为约束、remote 沙箱等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
-4. 记忆向量**无向量库 / 无 ANN 索引**：向量随 facts 存在 `memory.json` 里，检索即内存线性扫描，受 `maxFacts`（默认 100）约束；facts 规模显著增长后需另接向量存储
+4. 记忆检索为 pgvector **精确扫描**（B-tree 按 scope 过滤 + 精确 `<=>` 排序，无 ANN 索引）：单 scope 向量数超 ~5k 再评估 HNSW；facts 上限 100 不变
 5. remote 沙箱并发上限按进程独立计（多进程部署时实际连接数 = 上限 × 进程数）
 6. `view_image` 只支持**本会话上传的图片**（按文件名查找）；沙箱产物图片（如 matplotlib 输出）暂不支持
 7. 上传的文件对象在「删除对话」时才清理；未发送就放弃的上传（没有关联到任何消息）会在 MinIO 里留下未引用的对象

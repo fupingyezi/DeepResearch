@@ -86,8 +86,9 @@ export function createLongMemAgent(options: {
     query: string;
     formattedHistory?: string;
     /**
-     * 隔离用 userId。设置后 lead-agent 会从 users/{userId}/memory.json 读取并
-     * 注入长期记忆——这是 two-phase（--ingest）模式下「记忆检索作答」的关键。
+     * 隔离用 userId。设置后 lead-agent 会从 PG 记忆存储读取并注入该 scope
+     * （userId::agentName）的长期记忆——这是 two-phase（--ingest）模式下
+     * 「记忆检索作答」的关键。
      */
     userId?: string;
   }): Promise<LongMemAgentResult> => {
@@ -118,7 +119,7 @@ export function createLongMemAgent(options: {
         threadDataEnabled: false,
         uploadsEnabled: false,
         sandboxEnabled: false,
-        // userId 决定记忆注入的作用域文件（per-user 隔离）
+        // userId 决定记忆注入的 scope（per-user 隔离）
         userId: input.userId,
         // 默认关闭 websearch：测试纯记忆能力，避免消耗搜索 API 额度
         tools: webSearchEnabled ? undefined : [],
