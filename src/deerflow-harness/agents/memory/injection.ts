@@ -67,7 +67,7 @@ async function retrieveForInjection(
   let queryEmbedding: number[] | null = null;
   if (config.embeddingEnabled) {
     queryEmbedding = await embedQuery(opts.query);
-    if (queryEmbedding && config.embeddingBackfillOnLoad) {
+    if (queryEmbedding && config.embeddingBackfillEnabled) {
       void backfillMemoryEmbeddings({ agentName: opts.agentName, userId: opts.userId });
     }
   }
@@ -110,7 +110,7 @@ export interface MemoryRetrievalPreview {
   config: {
     embeddingEnabled: boolean;
     embeddingDimensions: number;
-    embeddingBackfillOnLoad: boolean;
+    embeddingBackfillEnabled: boolean;
     retrieveTopK: number;
     retrieveMaxTokens: number;
     semanticMatchThreshold: number;
@@ -160,7 +160,7 @@ export async function previewMemoryRetrieval(opts: {
     config: {
       embeddingEnabled: config.embeddingEnabled,
       embeddingDimensions: config.embeddingDimensions,
-      embeddingBackfillOnLoad: config.embeddingBackfillOnLoad,
+      embeddingBackfillEnabled: config.embeddingBackfillEnabled,
       retrieveTopK: config.retrieveTopK,
       retrieveMaxTokens: config.retrieveMaxTokens,
       semanticMatchThreshold: config.semanticMatchThreshold,

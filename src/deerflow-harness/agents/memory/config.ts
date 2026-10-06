@@ -35,8 +35,8 @@ export interface MemoryConfig {
   embeddingEnabled: boolean;
   /** 向量维度，256..2048（智谱 embedding-3 可配）。 */
   embeddingDimensions: number;
-  /** 加载时是否异步回填缺失向量的旧 facts。 */
-  embeddingBackfillOnLoad: boolean;
+  /** 检索时（query 向量化成功后）是否异步回填缺失向量的旧 facts。 */
+  embeddingBackfillEnabled: boolean;
   /** 是否启用 rerank 精排（工厂缺失 / API 失败自动回落 RRF 序）。 */
   rerankEnabled: boolean;
   /** 记忆更新 LLM 调用超时（ms）：挂起会永久占住队列的 processing 标记。 */
@@ -56,7 +56,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   semanticMatchThreshold: 0.6,
   embeddingEnabled: true,
   embeddingDimensions: 1024,
-  embeddingBackfillOnLoad: true,
+  embeddingBackfillEnabled: true,
   rerankEnabled: true,
   updateTimeoutMs: 60000,
 };
@@ -116,11 +116,12 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   if (typeof m.embeddingEnabled === 'boolean') out.embeddingEnabled = m.embeddingEnabled;
   if (typeof m.embedding_dimensions === 'number') out.embeddingDimensions = m.embedding_dimensions;
   if (typeof m.embeddingDimensions === 'number') out.embeddingDimensions = m.embeddingDimensions;
+  // dict 蛇形键 embedding_backfill_on_load 保留兼容（历史配置文件的键名）
   if (typeof m.embedding_backfill_on_load === 'boolean') {
-    out.embeddingBackfillOnLoad = m.embedding_backfill_on_load;
+    out.embeddingBackfillEnabled = m.embedding_backfill_on_load;
   }
-  if (typeof m.embeddingBackfillOnLoad === 'boolean') {
-    out.embeddingBackfillOnLoad = m.embeddingBackfillOnLoad;
+  if (typeof m.embeddingBackfillEnabled === 'boolean') {
+    out.embeddingBackfillEnabled = m.embeddingBackfillEnabled;
   }
   if (typeof m.rerank_enabled === 'boolean') out.rerankEnabled = m.rerank_enabled;
   if (typeof m.rerankEnabled === 'boolean') out.rerankEnabled = m.rerankEnabled;
