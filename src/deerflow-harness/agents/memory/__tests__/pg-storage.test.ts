@@ -88,6 +88,24 @@ describe('PgMemoryStorage', () => {
     expect(loaded.user.topOfMind.embedding).toEqual(vec(3));
   });
 
+  it('load 是单语句快照读：jsonb 与向量聚合在同一条 SELECT 里取回', async () => {
+    await storage.save(
+      memory([fact('f1', '带向量', vec(1))], { summary: 's', embedding: vec(3) }),
+      scope,
+    );
+    sql.calls.length = 0;
+
+    const loaded = await storage.load(scope);
+    expect(loaded.facts.find((f) => f.id === 'f1')?.embedding).toEqual(vec(1));
+    expect(loaded.user.topOfMind.embedding).toEqual(vec(3));
+
+    // 拆成两条独立查询会读到「新 jsonb + 旧 vectors」的跨快照错位，
+    // 单语句（jsonb_agg 标量子查询聚合）保证同一快照
+    const selects = sql.calls.filter((t) => t.trim().startsWith('SELECT'));
+    expect(selects).toHaveLength(1);
+    expect(selects[0]).toContain('jsonb_agg');
+  });
+
   it('无行 → 返回空 schema，且不插入行', async () => {
     const loaded = await storage.load(scope);
     expect(loaded.facts).toEqual([]);

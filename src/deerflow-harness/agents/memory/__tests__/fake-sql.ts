@@ -37,6 +37,21 @@ export class FakeSql implements MemorySqlExecutor {
       return { rows: row ? [{ data: row.data }] : [], rowCount: null };
     }
 
+    // load 的单语句快照读：state + 该 scope 全部向量聚合（真实 PG 里是
+    // jsonb_agg 标量子查询，这里拼出同构的 vectors 数组）
+    if (t.startsWith('SELECT m.data')) {
+      const scope = String(params[0]);
+      const row = this.state.get(scope);
+      if (!row) return { rows: [], rowCount: null };
+      const vectors = [...this.vectors.entries()]
+        .filter(([k]) => k.startsWith(`${scope}|`))
+        .map(([k, v]) => {
+          const [, kind, ref] = k.split('|');
+          return { kind, ref_id: ref, embedding: JSON.stringify(v) };
+        });
+      return { rows: [{ data: row.data, vectors }], rowCount: 1 };
+    }
+
     if (t.startsWith('INSERT INTO memory_state')) {
       const key = String(params[0]);
       if (t.includes('DO NOTHING') && this.state.has(key)) {

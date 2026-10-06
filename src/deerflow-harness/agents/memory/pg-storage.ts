@@ -50,6 +50,26 @@ class MutatorError extends Error {
 
 const SELECT_STATE = `SELECT data FROM memory_state WHERE scope_key = $1`;
 
+/** load 路径的单语句快照读：state 与 vectors 在同一语句内取回（标量子查询
+ *  聚合该 scope 全部向量行）。READ COMMITTED 下单语句读到同一快照——拆成两条
+ *  独立查询会拿到「新 jsonb + 旧 vectors」的跨快照错位，向量水合对不上结构。 */
+const SELECT_STATE_WITH_VECTORS = `
+  SELECT m.data,
+         COALESCE(
+           (SELECT jsonb_agg(
+                     jsonb_build_object(
+                       'kind', v.kind,
+                       'ref_id', v.ref_id,
+                       'embedding', v.embedding::text
+                     )
+                   )
+            FROM memory_vectors v
+            WHERE v.scope_key = m.scope_key),
+           '[]'::jsonb
+         ) AS vectors
+  FROM memory_state m
+  WHERE m.scope_key = $1`;
+
 const UPSERT_STATE = `
   INSERT INTO memory_state (scope_key, user_id, agent_name, data, updated_at)
   VALUES ($1, $2, $3, $4::jsonb, now())
@@ -92,8 +112,14 @@ export class PgMemoryStorage implements MemoryStorage {
        FROM memory_vectors WHERE scope_key = $1`,
       [scopeKey],
     );
+    this.applyVectorRows(result.rows, data);
+  }
+
+  /** 逐行应用向量（update 事务内水合 / load 快照水合共用同一套解析）。 */
+  private applyVectorRows(rows: unknown, data: MemoryData): void {
+    if (!Array.isArray(rows)) return;
     const byFactId = new Map(data.facts.map((f) => [f.id, f]));
-    for (const row of result.rows) {
+    for (const row of rows as Record<string, unknown>[]) {
       let vector: number[];
       try {
         const parsed: unknown = JSON.parse(String(row.embedding));
@@ -181,10 +207,12 @@ export class PgMemoryStorage implements MemoryStorage {
   }): Promise<MemoryData> {
     const scope = this.toScope(opts);
     try {
-      const result = await this.sql.query(SELECT_STATE, [scope.key]);
+      // 单语句快照读：state 与 vectors 同一快照（见 SELECT_STATE_WITH_VECTORS），
+      // 不先读 jsonb 再补一条向量查询——两条查询间并发写提交会读出错位组合
+      const result = await this.sql.query(SELECT_STATE_WITH_VECTORS, [scope.key]);
       if (result.rows.length === 0) return createEmptyMemory();
       const data = this.parseStoredData(result.rows[0].data);
-      await this.hydrateVectors(this.sql, scope.key, data);
+      this.applyVectorRows(result.rows[0].vectors, data);
       return data;
     } catch (e) {
       // PG 故障回落空 schema（记忆功能不损，仅内容暂空）。
