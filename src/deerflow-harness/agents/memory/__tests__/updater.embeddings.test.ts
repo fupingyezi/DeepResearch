@@ -173,6 +173,73 @@ describe('updater 写侧嵌入', () => {
     expect(target.confidence).toBe(0.95);
   });
 
+  it('updateMemoryFact 相同 content 不删向量（内容未变不重嵌）', async () => {
+    setMemoryEmbeddingsFactory(() => fakeEmbeddings(async (texts) => texts.map(() => vec(7))));
+    const created = await createMemoryFact('稳定内容', 'context', 0.8, null, 'u10');
+    const factId = created.facts[0].id;
+
+    const updated = await updateMemoryFact(factId, { content: '稳定内容' }, null, 'u10');
+    const target = updated.facts.find((f) => f.id === factId)!;
+    expect(target.content).toBe('稳定内容');
+    expect(target.embedding).toEqual(vec(7)); // 未变：原向量保留（旧实现无条件 delete）
+  });
+
+  it('updateMemoryFact 预嵌失败：content 已更新、向量清空（回填兜底）', async () => {
+    setMemoryEmbeddingsFactory(() => fakeEmbeddings(async (texts) => texts.map(() => vec(7))));
+    const created = await createMemoryFact('原始内容', 'context', 0.8, null, 'u11');
+    const factId = created.facts[0].id;
+
+    setMemoryEmbeddingsFactory(() =>
+      fakeEmbeddings(async () => {
+        throw new Error('embed api down');
+      }),
+    );
+    const updated = await updateMemoryFact(factId, { content: '新的内容' }, null, 'u11');
+    const target = updated.facts.find((f) => f.id === factId)!;
+    expect(target.content).toBe('新的内容');
+    expect(target.embedding).toBeUndefined(); // 预嵌失败：无向量落盘，回填重试
+  });
+
+  it('updateMemoryFact 的嵌入在 update 事务（mutator）之外发起', async () => {
+    // 记录 embed 调用是否发生在 mutator 执行期间：修复前在 mutator 内 await embedQuery
+    // （持行锁调 HTTP），标记会为 true
+    const base = new PgMemoryStorage(new FakeSql());
+    let inMutator = false;
+    const embedDuringMutator: boolean[] = [];
+    const trackingStorage: MemoryStorage = {
+      load: (o) => base.load(o),
+      reload: (o) => base.reload(o),
+      save: (d, o) => base.save(d, o),
+      update: async (mutator, o) =>
+        base.update(async (fresh) => {
+          inMutator = true;
+          try {
+            return await mutator(fresh);
+          } finally {
+            inMutator = false;
+          }
+        }, o),
+    };
+    setMemoryStorage(trackingStorage);
+    setMemoryEmbeddingsFactory(() =>
+      fakeEmbeddings(async (texts) => {
+        embedDuringMutator.push(inMutator);
+        return texts.map(() => vec(3));
+      }),
+    );
+
+    const created = await createMemoryFact('初始内容', 'context', 0.8, null, 'u12');
+    const factId = created.facts[0].id;
+    embedDuringMutator.length = 0; // 只看 updateMemoryFact 这一次的嵌入时机
+
+    const updated = await updateMemoryFact(factId, { content: '改写内容' }, null, 'u12');
+    const target = updated.facts.find((f) => f.id === factId)!;
+    expect(target.embedding).toEqual(vec(3));
+    // 嵌入确实发生，且没有一次发生在 mutator（行锁持有期）内
+    expect(embedDuringMutator.length).toBeGreaterThan(0);
+    expect(embedDuringMutator.every((during) => !during)).toBe(true);
+  });
+
   it('LLM 重写 section 时旧向量作废并重嵌；未触碰的 section 旧向量保留', async () => {
     const scope = { agentName: null, userId: 'u7' };
     const preset = {

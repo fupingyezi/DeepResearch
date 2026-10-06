@@ -231,10 +231,18 @@ export async function updateMemoryFact(
   agentName: string | null = null,
   userId: string | null = null,
 ): Promise<MemoryData> {
-  // 整个 patch + 重向量化在 mutator 内完成：content 是否真的变了要在锁内最新数据上
-  // 判定，否则「变更即重嵌」可能基于过期内容，写入的向量对不上落盘的新 content。
+  // 锁外预嵌：embedQuery 是外部 HTTP，在 mutator 里 await 会让行锁跨网络往返持有，
+  // 同 scope 的并发写全被卡在网络上。patch.content 是本写的唯一内容来源，预嵌向量
+  // 与锁内写出的 content 天然同源，无需像 updateMemory 那样按 content key 守卫。
+  let preVector: number[] | null = null;
+  if (getMemoryConfig().embeddingEnabled && patch.content != null) {
+    const c = String(patch.content).trim();
+    if (c) preVector = await embedQuery(c);
+  }
+  // content 是否真的变了在锁内最新数据上判定（mutator 保持同步，无 await）；
+  // 失败保持无向量，交由回填重试
   const result = await getMemoryStorage().update(
-    async (data) => {
+    (data) => {
       const next: Fact[] = [];
       let found = false;
       let contentChanged = false;
@@ -248,9 +256,11 @@ export async function updateMemoryFact(
         if (patch.content != null) {
           const c = String(patch.content).trim();
           if (!c) throw new Error('content must be non-empty');
-          if (c !== u.content) contentChanged = true;
-          u.content = c;
-          delete u.embedding; // 旧向量对新 content 失效
+          if (c !== u.content) {
+            contentChanged = true;
+            u.content = c;
+            delete u.embedding; // 旧向量对新 content 失效
+          }
         }
         if (patch.category != null) {
           u.category = (String(patch.category).trim() || 'context') as FactCategory;
@@ -261,13 +271,9 @@ export async function updateMemoryFact(
         next.push(u);
       }
       if (!found) throw new Error(`fact not found: ${factId}`);
-      // content 变更后重新向量化（失败保持无向量，交由回填重试）
-      if (contentChanged && getMemoryConfig().embeddingEnabled) {
+      if (contentChanged && preVector) {
         const target = next.find((f) => f.id === factId);
-        if (target) {
-          const vector = await embedQuery(target.content);
-          if (vector) target.embedding = vector;
-        }
+        if (target) target.embedding = preVector;
       }
       return { ...data, facts: next };
     },

@@ -147,6 +147,9 @@ export function ensureMemoryEmbeddingsFactory(): void {
       // float 数组 —— 结果是数组被当字节流重解释，得到 256 个（原 1024）无意义数值，
       // 余弦算成 NaN，语义检索静默退回词面检索。指定后 SDK 原样返回，实测维度与语义均正确。
       encodingFormat: 'float',
+      // SDK 缺省超时 10 分钟：单请求挂起会拖住整条记忆链路，与 LLM 调用的
+      // AbortSignal.timeout(updateTimeoutMs) 同口径兜底
+      timeout: getMemoryConfig().updateTimeoutMs,
       configuration: {
         baseURL: process.env.DEERFLOW_EMBEDDING_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
       },
