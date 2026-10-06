@@ -4,7 +4,8 @@
  * 关键设计：
  * - **真相源在 PG**：memory_state.data（jsonb，不含 embedding）+ memory_vectors
  *   （vector 列，kind='fact'|'section'，ref_id = fact id / `<group>.<slot>`）。
- * - **update = 单事务行锁 RMW**：SELECT ... FOR UPDATE → 水合向量 → mutator →
+ * - **update = 单事务行锁 RMW**：INSERT ... ON CONFLICT DO NOTHING 造行（首写
+ *   FOR UPDATE 锁不住不存在的行）→ SELECT ... FOR UPDATE → 水合向量 → mutator →
  *   剥离 embedding 写 jsonb → DELETE+INSERT 重建向量 → COMMIT。行锁的锁粒度与
  *   并发语义一致（per-scope 串行），且与
  *   数据同生命周期（进程崩溃锁自动随事务消失）。
@@ -261,9 +262,19 @@ export class PgMemoryStorage implements MemoryStorage {
     }
   }
 
-  /** 行锁读：SELECT ... FOR UPDATE；行不存在（scope 尚无数据）返回空 schema，
-   *  后续 UPSERT 会创建行。 */
+  /** 行锁读：先 INSERT ... ON CONFLICT DO NOTHING 造行再 SELECT ... FOR UPDATE。
+   *  FOR UPDATE 锁不住不存在的行——两个进程并发首写同一 scope 时会同时读空、
+   *  各自 UPSERT，后提交者覆盖先提交者（lost update）。先造行让随后的
+   *  FOR UPDATE 真正串行化首写（后到的 INSERT 撞唯一索引阻塞至先者提交，
+   *  再走 DO NOTHING 读到对方已提交的数据）。mutator 返回未变更 / 抛错时
+   *  整事务回滚，不残留空行；提交后空行与无行观测等价。 */
   private async readLocked(tx: MemorySqlExecutor, scope: Scope): Promise<MemoryData> {
+    await tx.query(
+      `INSERT INTO memory_state (scope_key, user_id, agent_name, data, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, now())
+       ON CONFLICT (scope_key) DO NOTHING`,
+      [scope.key, scope.userId, scope.agentName, JSON.stringify(createEmptyMemory())],
+    );
     const result = await tx.query(`${SELECT_STATE} FOR UPDATE`, [scope.key]);
     return result.rows.length > 0 ? this.parseStoredData(result.rows[0].data) : createEmptyMemory();
   }

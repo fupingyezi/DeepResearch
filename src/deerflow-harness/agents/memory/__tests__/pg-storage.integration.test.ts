@@ -222,4 +222,19 @@ describe.skipIf(!hasPg)('PgMemoryStorage · 真实 PG', () => {
     const final = await storage.load(scope);
     expect(final.facts.map((f) => f.content).sort()).toEqual(['a', 'f2', 'f3']);
   });
+
+  it('并发首写同一 scope 不丢更新（readLocked 先造行再 FOR UPDATE）', async () => {
+    // 首写场景：scope 行不存在。FOR UPDATE 锁不住不存在的行，两个事务会同时
+    // 读空、各自 UPSERT，后提交者覆盖先提交者——去掉「先造行」这一步，
+    // 最终只会有其中一条 fact。
+    const scope = { agentName: null, userId };
+    const add = (id: string) =>
+      storage.update((current) => ({ ...current, facts: [...current.facts, fact(id, id)] }), scope);
+    const [r1, r2] = await Promise.all([add('f1'), add('f2')]);
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+
+    const final = await storage.load(scope);
+    expect(final.facts.map((f) => f.content).sort()).toEqual(['f1', 'f2']);
+  });
 });

@@ -96,6 +96,22 @@ describe('PgMemoryStorage', () => {
     expect(sql.vectors.size).toBe(0);
   });
 
+  it('update 首写无行 scope：先 INSERT 造行再 SELECT FOR UPDATE（防并发首写丢更新）', async () => {
+    const result = await storage.update(
+      (current) => ({ ...current, facts: [...current.facts, fact('f1', '首写')] }),
+      scope,
+    );
+    expect(result).not.toBeNull();
+    expect(result?.facts.map((f) => f.content)).toEqual(['首写']);
+
+    // readLocked 必须先造行再行锁读：直接 FOR UPDATE 时行不存在、锁不住，
+    // 两个进程并发首写会同时读空、各自 UPSERT，后提交者覆盖先提交者
+    const insertIdx = sql.calls.findIndex((t) => t.trim().startsWith('INSERT INTO memory_state'));
+    const forUpdateIdx = sql.calls.findIndex((t) => t.includes('FOR UPDATE'));
+    expect(insertIdx).toBeGreaterThanOrEqual(0);
+    expect(forUpdateIdx).toBeGreaterThan(insertIdx);
+  });
+
   it('update 的 mutator 前已水合向量：靠 current 里的 embedding 判缺的调用方不会误判', async () => {
     await storage.save(memory([fact('f1', '已有向量', vec(1))]), scope);
 
