@@ -312,6 +312,27 @@ describe('updater 写侧嵌入', () => {
     expect(getMemoryUpdateStats().failed).toBe(failedBefore + 1);
   });
 
+  it('无变更轮次返回原引用：跳过落盘写（无 UPSERT / 向量重建）', async () => {
+    // applyUpdates/stripUploadMentions 无变更时返回原引用，pg-storage.update
+    // 的 `next === current` 判等生效——否则每轮无变更更新也会全量重写
+    const fake = new FakeSql();
+    setMemoryStorage(new PgMemoryStorage(fake));
+    setMemoryModelFactory(() =>
+      fakeModel(JSON.stringify({ newFacts: [], user: {}, history: {} }), prompts),
+    );
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('随便聊聊')], {
+      userId: 'nc1',
+    });
+    expect(ok).toBe(true);
+
+    // 仅剩 readLocked 的造行 INSERT（DO NOTHING）；UPSERT 与向量重建都没发生
+    const stateInserts = fake.calls.filter((c) => c.trim().startsWith('INSERT INTO memory_state'));
+    expect(stateInserts).toHaveLength(1);
+    expect(stateInserts[0]).toContain('DO NOTHING');
+    expect(fake.calls.some((c) => c.trim().startsWith('DELETE FROM memory_vectors'))).toBe(false);
+  });
+
   it('嵌入 HTTP 在 update 事务（mutator）之外发起', async () => {
     // 包一层 storage 记录「embed 调用是否发生在 mutator 执行期间」：
     // 修复前 embedMissing* 在 mutator 内 await（持行锁调 HTTP），标记会为 true

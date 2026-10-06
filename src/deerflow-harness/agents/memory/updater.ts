@@ -283,7 +283,9 @@ const UPLOAD_SENTENCE_RE =
   /[^.!?]*\b(?:upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
 
 function stripUploadMentions(memory: MemoryData): MemoryData {
-  const out: MemoryData = JSON.parse(JSON.stringify(memory));
+  // 惰性拷贝：无变更时返回原引用——pg-storage.update 以 `next === current`
+  // 判等跳过落盘写，无条件深拷贝会让每轮无变更更新也全量重写
+  let out: MemoryData = memory;
   for (const sec of ['user', 'history'] as const) {
     // UserSection / HistorySection 的字段是字面量 key 而非索引签名，TS 不允许
     // 直接断言为 Record<string, SectionData>，需要先经 unknown 中转。
@@ -293,16 +295,23 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
       if (v && typeof v.summary === 'string') {
         const next = v.summary.replace(UPLOAD_SENTENCE_RE, '').replace(/  +/g, ' ').trim();
         if (next !== v.summary) {
-          v.summary = next;
-          delete v.embedding; // 文本变了，旧向量失效，由 embedMissingSections / 回填重嵌
+          if (out === memory) out = JSON.parse(JSON.stringify(memory));
+          const copySection = out[sec] as unknown as Record<string, SectionData>;
+          copySection[k].summary = next;
+          // 文本变了，旧向量失效，由 embedMissingSections / 回填重嵌
+          delete copySection[k].embedding;
         }
       }
     }
   }
   if (Array.isArray(out.facts)) {
-    out.facts = out.facts.filter((f) => !UPLOAD_SENTENCE_RE.test(f.content ?? ''));
+    const kept = out.facts.filter((f) => !UPLOAD_SENTENCE_RE.test(f.content ?? ''));
     // 重置 lastIndex（全局 regex test 副作用）
     UPLOAD_SENTENCE_RE.lastIndex = 0;
+    if (kept.length !== out.facts.length) {
+      if (out === memory) out = JSON.parse(JSON.stringify(memory));
+      out.facts = kept;
+    }
   }
   return out;
 }
@@ -319,7 +328,13 @@ function factContentKey(content: any): string | null {
 function applyUpdates(current: MemoryData, update: any, threadId: string | null): MemoryData {
   const config = getMemoryConfig();
   const now = utcNowIsoZ();
-  const out: MemoryData = JSON.parse(JSON.stringify(current));
+  // 惰性拷贝：全部无变更时返回 current 本身（见 stripUploadMentions 同款注释）
+  let out: MemoryData = current;
+  const copy = (): MemoryData => {
+    if (out !== current) return out;
+    out = JSON.parse(JSON.stringify(current));
+    return out;
+  };
 
   // user sections：summary 未变（trim 后相等）保留原槽——连带旧向量与 updatedAt，
   // 避免无谓重嵌；重写则整槽替换，旧向量随新对象自然丢弃，由 embedMissingSections 重嵌
@@ -328,7 +343,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     const sec = userUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
       if (sec.summary.trim() === out.user[key].summary?.trim()) continue;
-      out.user[key] = { summary: sec.summary, updatedAt: now };
+      copy().user[key] = { summary: sec.summary, updatedAt: now };
     }
   }
 
@@ -338,7 +353,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     const sec = histUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
       if (sec.summary.trim() === out.history[key].summary?.trim()) continue;
-      out.history[key] = { summary: sec.summary, updatedAt: now };
+      copy().history[key] = { summary: sec.summary, updatedAt: now };
     }
   }
 
@@ -349,7 +364,10 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
       : [],
   );
   if (removeIds.size > 0) {
-    out.facts = out.facts.filter((f) => !removeIds.has(f.id));
+    const kept = out.facts.filter((f) => !removeIds.has(f.id));
+    if (kept.length !== out.facts.length) {
+      copy().facts = kept;
+    }
   }
 
   // add new facts
@@ -359,6 +377,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     if (k) existingKeys.add(k);
   }
   const newFacts: any[] = Array.isArray(update?.newFacts) ? update.newFacts : [];
+  const toAdd: Fact[] = [];
   for (const f of newFacts) {
     const conf = typeof f?.confidence === 'number' ? f.confidence : 0.5;
     if (conf < config.factConfidenceThreshold) continue;
@@ -380,13 +399,16 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
       const se = f.sourceError.trim();
       if (se) entry.sourceError = se;
     }
-    out.facts.push(entry);
+    toAdd.push(entry);
     existingKeys.add(key);
+  }
+  if (toAdd.length > 0) {
+    copy().facts.push(...toAdd);
   }
 
   // enforce max_facts
   if (out.facts.length > config.maxFacts) {
-    out.facts = out.facts
+    copy().facts = out.facts
       .slice()
       .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
       .slice(0, config.maxFacts);
