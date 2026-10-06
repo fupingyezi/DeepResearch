@@ -39,6 +39,8 @@ export interface MemoryConfig {
   embeddingBackfillOnLoad: boolean;
   /** 是否启用 rerank 精排（工厂缺失 / API 失败自动回落 RRF 序）。 */
   rerankEnabled: boolean;
+  /** 记忆更新 LLM 调用超时（ms）：挂起会永久占住队列的 processing 标记。 */
+  updateTimeoutMs: number;
 }
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
@@ -56,6 +58,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   embeddingDimensions: 1024,
   embeddingBackfillOnLoad: true,
   rerankEnabled: true,
+  updateTimeoutMs: 60000,
 };
 
 let _config: MemoryConfig = { ...DEFAULT_MEMORY_CONFIG };
@@ -121,7 +124,10 @@ export function loadMemoryConfigFromDict(dict: Partial<Record<string, any>>): vo
   }
   if (typeof m.rerank_enabled === 'boolean') out.rerankEnabled = m.rerank_enabled;
   if (typeof m.rerankEnabled === 'boolean') out.rerankEnabled = m.rerankEnabled;
+  if (typeof m.update_timeout_ms === 'number') out.updateTimeoutMs = m.update_timeout_ms;
+  if (typeof m.updateTimeoutMs === 'number') out.updateTimeoutMs = m.updateTimeoutMs;
   out.embeddingDimensions = clamp(out.embeddingDimensions, 256, 2048);
+  out.updateTimeoutMs = clamp(out.updateTimeoutMs, 5000, 600000);
 
   _config = out;
 }

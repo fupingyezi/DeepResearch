@@ -17,6 +17,7 @@ import {
 } from '../storage';
 import {
   createMemoryFact,
+  getMemoryUpdateStats,
   MemoryUpdater,
   setMemoryModelFactory,
   updateMemoryFact,
@@ -287,6 +288,28 @@ describe('updater 写侧嵌入', () => {
     expect(saved.history.recentMonths.embedding).toEqual(vec(summary.length));
     // 未被 strip 的 section 不受影响
     expect(saved.user.topOfMind.embedding).toEqual(vec(9));
+  });
+
+  it('LLM 调用超时被 signal 打断：本轮记失败，队列不卡', async () => {
+    // updateTimeoutMs=50：invoke 返回的 Promise 尊重 signal，abort 时 reject
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS, updateTimeoutMs: 50 });
+    setMemoryModelFactory(() => {
+      return {
+        invoke: (_prompt: unknown, opts?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('The operation timed out', 'TimeoutError')),
+              { once: true },
+            );
+          }),
+      } as unknown as BaseChatModel;
+    });
+
+    const failedBefore = getMemoryUpdateStats().failed;
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('你好')], { userId: 'timeout1' });
+    expect(ok).toBe(false);
+    expect(getMemoryUpdateStats().failed).toBe(failedBefore + 1);
   });
 
   it('嵌入 HTTP 在 update 事务（mutator）之外发起', async () => {

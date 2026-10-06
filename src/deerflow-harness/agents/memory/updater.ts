@@ -592,10 +592,13 @@ export class MemoryUpdater {
       // 关键：显式 callbacks: [] 切断与外层（HTTP SSE）的 callback handler 链。
       // 防止LLM 调用把 token 推到主请求那条已关闭的 ReadableStream，
       // 触发 `ERR_INVALID_STATE: Controller is already closed`。
+      // signal 给 LLM 调用加超时：挂起会永久占住队列的 processing 标记、
+      // 后续所有线程的记忆更新全部堆积（ChatOpenAI 透传 AbortSignal 到 SDK）。
       const response = await model.invoke(prompt, {
         runName: 'memory_agent',
         callbacks: [],
         tags: ['memory-updater'],
+        signal: AbortSignal.timeout(getMemoryConfig().updateTimeoutMs),
       });
       const responseContent = response.content;
       let text = extractMessageContentText(responseContent).trim();
@@ -667,7 +670,15 @@ export class MemoryUpdater {
       if (saved) memoryUpdateStats.succeeded += 1;
       return !!saved;
     } catch (e) {
-      console.error('[memory/updater] Memory update failed:', e);
+      // 超时是独立故障形态（LLM 挂起被 signal 打断）：单独告警便于区分
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        console.warn(
+          `[memory/updater] LLM update timed out after ${getMemoryConfig().updateTimeoutMs}ms, skipping this round:`,
+          e,
+        );
+      } else {
+        console.error('[memory/updater] Memory update failed:', e);
+      }
       return fail();
     }
   }
