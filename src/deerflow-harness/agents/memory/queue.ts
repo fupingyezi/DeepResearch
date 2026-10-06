@@ -127,7 +127,9 @@ export class MemoryUpdateQueue {
     this.queue = [];
     this.timer = null;
 
-    console.log(`[memory/queue] processing ${contexts.length} queued memory updates`);
+    if (memoryDebug()) {
+      console.log(`[memory/queue] processing ${contexts.length} queued memory updates`);
+    }
 
     try {
       const updater = new MemoryUpdater();
