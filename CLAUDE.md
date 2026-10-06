@@ -403,3 +403,4 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 7. `view_image` 仅支持本会话上传的图片（按文件名）；沙箱产物图片（如 matplotlib 输出）未支持——Sandbox 基类只有文本 readFile，要支持需为 local/docker/remote 三个后端各加二进制读取
 8. 智谱 `glm-5.3-flash` 是**推理模型**：reasoning 计入 completion_tokens，`max_tokens` 过小（实测 32）会让 content 为空。副链路（标题生成 maxTokens 默认 64）若被指定为该模型需注意；主聊天链路不设 maxTokens，走 provider 默认值，不受影响
 9. 上传的文件对象在「删除对话」时才清理；未发送就放弃的上传（未关联任何消息）会在 MinIO 留下未引用对象
+10. 改 `embeddingDimensions`（256..2048）是一次性全量代价：启动时比对列维度不一致会 `DELETE FROM memory_vectors` 清空全部 scope 向量再 `ALTER`（pgvector 强转会静默截断，必须先清空），之后靠检索时的异步回填补向量——存量向量不保留、也不需手动迁移
