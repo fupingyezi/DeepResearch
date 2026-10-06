@@ -8,7 +8,7 @@
 
 - 🤖 **单一 lead-agent，自主决策**：lead-agent 内置 `task("general-purpose", ...)` 能力，由模型自行判断是否拆解任务并调度 subagent 并行检索/汇总，无需前端切换"普通 / 联网 / 深度研究"模式。
 - 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离；模型 API Key 由各用户在「设置-模型管理」自行配置，加密存库（`MODEL_KEY_ENC_SECRET`），主聊天链路不读服务端环境变量里的模型 Key。
-- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 PostgreSQL（`memory_state` jsonb + `memory_vectors` pgvector）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为 RAG 管线：pgvector 向量召回 + 词面召回双路 → RRF 融合 → 智谱 rerank 精排（智谱 `embedding-3` 出向量）；无 Key 时静默降级为纯词面检索。
+- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 PostgreSQL（`memory_state` jsonb + `memory_vectors` pgvector）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为 RAG 管线：pgvector 向量召回 + BM25 词面召回双路 → RRF 融合 → 智谱 rerank 精排（智谱 `embedding-3` 出向量）；无 Key 时静默降级为纯 BM25 词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 是每 run 一个的 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
@@ -403,7 +403,7 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/memory/facts`                           | POST          | 新建记忆事实（来源标记 manual）                                                   |
 | `/api/memory/facts/[id]`                      | PUT/DELETE    | 更新 / 删除记忆事实                                                               |
 | `/api/memory/mode`                            | GET/PUT       | 记忆注入模式（`inject` 全量注入 / `retrieve` 按需检索）                           |
-| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的词面 / 余弦 / RRF / rerank 分 / 最终注入文本                |
+| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的 BM25 / 余弦 / RRF / rerank 分 / 最终注入文本               |
 | `/api/model-keys`                             | GET/PUT/PATCH | 已配置的模型 Key（仅掩码）/ 保存 Key（加密存储）+ 选择模型                        |
 | `/api/model-keys/[provider]`                  | DELETE        | 删除某 provider 的 Key                                                            |
 | `/api/prompt/enhance`                         | POST          | 输入框「提示词增强」                                                              |
@@ -492,7 +492,7 @@ StreamBridge（进程内 typed EventEmitter 总线）
 - 可插拔沙箱后端（local / docker / remote）、Docker 容器生命周期与多对话并行编排（双层背压 + 跨进程协调）
 - run 取消语义（`cancelRun` / `deleteThread` / `submitRun` 抢占三条路径共用同一套 abort + 等收尾机制）
 - 图片多模态链路（OCR 上传解析 → `image_url` content blocks → 历史图片压缩 → `view_image` 回看）
-- 记忆检索（词面 + embedding 余弦混合打分、阈值标定、无 Key 降级）与注入模式
+- 记忆检索（BM25 / pgvector 双路召回 → RRF → rerank、阈值标定、无 Key 降级）与注入模式
 
 沙箱实现细节见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)。
 架构对齐计划见 [`docs/deerflow-alignment-plan.md`](./docs/deerflow-alignment-plan.md)。
@@ -559,7 +559,7 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 - `inject`（默认）：所有 section + facts 按 confidence 降序，在 token 预算内截断后全量注入；
 - `retrieve`：按本轮输入检索 top-K facts 与最相关的一段历史，注入预算更小。
 
-检索为「词面重叠率」与「embedding 余弦」的混合打分（智谱 `embedding-3`，余弦低于阈值不参与），同义改写也能召回；未配置 `ZHIPU_API_KEY`（或调用失败）时静默退回纯词面检索。想观察检索效果可调 `GET /api/memory/retrieve?q=...`，它逐条列出词面分 / 余弦 / 是否过阈值 / 最终得分与最终注入文本。注意记忆与提问需**同语言**：跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 仅 0.33~0.49，全部低于阈值），因此 `MEMORY_UPDATE_PROMPT` 要求用对话语言书写 summary 与 facts。
+检索为 RAG 管线：BM25 词面召回与 pgvector 向量召回（智谱 `embedding-3`，余弦低于阈值不参与）双路 → RRF 排名融合 → 智谱 rerank 精排，同义改写也能召回；未配置 `ZHIPU_API_KEY`（或调用失败）时静默退回纯 BM25 词面检索。想观察检索效果可调 `GET /api/memory/retrieve?q=...`，它逐条列出 BM25 分 / 余弦 / RRF 分 / rerank 分与最终注入文本。注意记忆与提问需**同语言**：跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 仅 0.33~0.49，全部低于阈值），因此 `MEMORY_UPDATE_PROMPT` 要求用对话语言书写 summary 与 facts。
 
 ### MCP 扩展
 

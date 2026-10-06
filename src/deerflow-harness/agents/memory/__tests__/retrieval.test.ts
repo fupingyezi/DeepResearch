@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { VectorSearchResult } from '../storage';
 import type { Fact, MemoryData } from '../types';
-import { overlapRatio, retrieveMemory, rrfFuse, tokenize, vectorRecallJs } from '../retrieval';
+import {
+  bm25Score,
+  buildBm25Stats,
+  lexicalRecall,
+  retrieveMemory,
+  rrfFuse,
+  tokenize,
+  vectorRecallJs,
+} from '../retrieval';
 
 const QUERY_VEC = [1, 0, 0, 0];
 
@@ -71,22 +79,81 @@ describe('tokenize', () => {
   });
 });
 
-describe('overlapRatio', () => {
-  it('完全重合时重叠率为 1', () => {
-    const query = new Set(tokenize('量子计算'));
-    expect(overlapRatio('量子计算', query)).toBe(1);
+describe('buildBm25Stats / bm25Score', () => {
+  it('无重合为 0', () => {
+    const stats = buildBm25Stats([tokenize('烘焙面包'), tokenize('住在深圳')]);
+    expect(bm25Score(tokenize('烘焙面包'), new Set(['量子']), stats)).toBe(0);
   });
 
-  it('部分重合时重叠率介于 0 与 1 之间', () => {
-    const query = new Set(tokenize('量子计算 进展'));
-    const ratio = overlapRatio('量子计算', query);
-    expect(ratio).toBeGreaterThan(0);
-    expect(ratio).toBeLessThan(1);
+  it('稀有词 idf 高于语料高频词：同文档同 tf 下稀有词得分更高', () => {
+    const docs = [tokenize('量子计算'), tokenize('量子力学'), tokenize('住在深圳')];
+    const stats = buildBm25Stats(docs);
+    const doc = tokenize('量子计算');
+    // 「计算」只出现在 1/3 文档，「量子」出现在 2/3
+    const rare = bm25Score(doc, new Set(['计算']), stats);
+    const common = bm25Score(doc, new Set(['量子']), stats);
+    expect(rare).toBeGreaterThan(common);
   });
 
-  it('无重合时为 0', () => {
-    const query = new Set(tokenize('烘焙面包'));
-    expect(overlapRatio('量子计算', query)).toBe(0);
+  it('tf 饱和：term 出现两次得分高于一次但不足两倍', () => {
+    const docs = [tokenize('量子量子'), tokenize('量子'), tokenize('无关文档内容')];
+    const stats = buildBm25Stats(docs);
+    const once = bm25Score(tokenize('量子'), new Set(['量子']), stats);
+    const twice = bm25Score(tokenize('量子量子'), new Set(['量子']), stats);
+    expect(twice).toBeGreaterThan(once);
+    expect(twice).toBeLessThan(2 * once);
+  });
+
+  it('文档长度归一化：同 tf 下更短的文档得分更高', () => {
+    const docs = [tokenize('量子'), tokenize('量子加上一大堆无关的内容文字'), tokenize('无关文档')];
+    const stats = buildBm25Stats(docs);
+    const shortDoc = bm25Score(tokenize('量子'), new Set(['量子']), stats);
+    const longDoc = bm25Score(tokenize('量子加上一大堆无关的内容文字'), new Set(['量子']), stats);
+    expect(shortDoc).toBeGreaterThan(longDoc);
+  });
+
+  it('空 query / 空文档 / 空语料 → 0', () => {
+    const stats = buildBm25Stats([tokenize('量子')]);
+    expect(bm25Score(tokenize('量子'), new Set(), stats)).toBe(0);
+    expect(bm25Score([], new Set(['量子']), stats)).toBe(0);
+    expect(bm25Score([], new Set(['量子']), buildBm25Stats([]))).toBe(0);
+  });
+});
+
+describe('lexicalRecall', () => {
+  const data = memory(
+    [
+      fact('烘焙量子计算', 0.9, 'f_rare'), // 命中稀有词「计算」+ 高频词「量子」
+      fact('量子物理', 0.9, 'f_common'),
+      fact('住在深圳', 0.9, 'f_none'),
+    ],
+    {
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '量子', updatedAt: '' }, // 短文档，同 tf 下归一化加分
+      },
+    },
+  );
+
+  it('BM25 打分：稀有词权重最高、短文档加分、无关者 0 分、section 参与召回', () => {
+    const hits = lexicalRecall(data, new Set(tokenize('量子 计算')), 10);
+    expect(hits.map((h) => h.ref)).toEqual([
+      'fact:f_rare',
+      'section:user.topOfMind',
+      'fact:f_common',
+    ]);
+    expect(hits.every((h) => h.bm25 > 0)).toBe(true);
+  });
+
+  it('limit 截断为 top-N', () => {
+    const hits = lexicalRecall(data, new Set(tokenize('量子 计算')), 2);
+    expect(hits).toHaveLength(2);
+    expect(hits.map((h) => h.ref)).toEqual(['fact:f_rare', 'section:user.topOfMind']);
+  });
+
+  it('无命中返回空数组', () => {
+    expect(lexicalRecall(data, new Set(tokenize('提拉米苏')), 10)).toEqual([]);
   });
 });
 
@@ -402,10 +469,10 @@ describe('retrieveMemory 向量召回', () => {
     const byId = new Map(result!.facts.map((d) => [d.id, d]));
     expect(byId.get('f_sem')!.inVectorLeg).toBe(true);
     expect(byId.get('f_sem')!.cosine).toBeCloseTo(0.65, 10);
-    expect(byId.get('f_sem')!.lexical).toBe(0);
+    expect(byId.get('f_sem')!.bm25).toBe(0);
     expect(byId.get('f_lex')!.inVectorLeg).toBe(false);
     expect(byId.get('f_lex')!.cosine).toBeNull();
-    expect(byId.get('f_lex')!.lexical).toBeGreaterThan(0);
+    expect(byId.get('f_lex')!.bm25).toBeGreaterThan(0);
   });
 });
 
@@ -470,7 +537,7 @@ describe('retrieveMemory rerank 精排', () => {
     expect(byId.get('b')!.rerank).toBe(0.9);
     expect(byId.get('b')!.final).toBeCloseTo(0.9 * 0.95, 10);
     expect(byId.get('b')!.rrf).toBeCloseTo(1 / 62, 10);
-    expect(byId.get('b')!.lexical).toBe(1);
+    expect(byId.get('b')!.bm25).toBeGreaterThan(0);
     expect(byId.get('a')!.cosine).toBeNull();
     expect(result!.poolSize).toBe(3);
   });

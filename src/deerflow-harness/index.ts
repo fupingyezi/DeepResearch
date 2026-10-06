@@ -181,13 +181,15 @@ export {
   previewMemoryRetrieval,
   type BuildMemoryContextOptions,
   type MemoryRetrievalPreview,
-  // retrieval（RAG 管线：双路召回 → RRF → rerank；明细供预览/调试）
+  // retrieval（RAG 管线：BM25/向量双路召回 → RRF → rerank；明细供预览/调试）
+  bm25Score,
+  buildBm25Stats,
   lexicalRecall,
-  overlapRatio,
   retrieveMemory,
   rrfFuse,
   tokenize,
   vectorRecallJs,
+  type Bm25Stats,
   type FactScoreDetail,
   type RetrieveResult,
   type SectionScoreDetail,

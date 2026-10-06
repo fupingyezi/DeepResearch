@@ -8,8 +8,11 @@
  * - 路 A 向量召回：pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底）；
  *   余弦 ≥ 语义门槛才进 RRF；4 个召回 section 单独 JS 过门槛并入——pgvector 的
  *   top-50 可能全被 facts 占满，section 不能因此丢（只算 ≤4 次余弦，代价可忽略）；
- * - 路 B 词面召回：query token 重叠率 > 0 的 facts + 4 section，top-50；
- * - RRF(k=60) 按**排名**融合——向量分与词面分不同量纲，排名天然可比；
+ * - 路 B 词面召回：BM25（JS，语料 = facts + 4 召回 section，idf 查询时现算）top-50。
+ *   idf 压掉「在/研究」这类语料高频词、tf 与文档长度归一化对长文不偏——精确术语
+ *   （缩写 / 标识符）的命中比向量路更直接；与 obsidian-rag 的 FTS5 BM25 同语义
+ *   （那里语料在 SQLite，这里 ≤104 篇全在内存，现算零成本）；
+ * - RRF(k=60) 按**排名**融合——向量分与 BM25 分不同量纲，排名天然可比；
  * - rerank 精排池头（≤20 条），池尾按 RRF 序衔接；未注册 / 失败 → warnOnce
  *   保持 RRF 序（本项目惯例静默降级，与 obsidian-rag fail-fast 的刻意差异点）；
  * - 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）取 topK；
@@ -17,7 +20,8 @@
  *   topOfMind 进池才留。双路全空 → null → 不注入。
  *
  * rerank 分分布高度压缩（不相关也常 0.99+），只做相对排序；「全部落空」由
- * 双路召回皆空判定，不存在绝对分数阈值。
+ * 双路召回皆空判定，不存在绝对分数阈值。BM25 分同理只做**同轮相对排序**
+ * （idf 随语料变化，跨轮不可比）。
  */
 
 import { cosineSimilarity, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
@@ -147,19 +151,62 @@ export function tokenize(text: string): string[] {
   return tokens;
 }
 
-/** 计算文本与 query token 集合的重叠率（|交集| / |query|）。 */
-export function overlapRatio(text: string, queryTokens: Set<string>): number {
-  if (queryTokens.size === 0) return 0;
-  const tokens = tokenize(text);
-  if (tokens.length === 0) return 0;
-  let hit = 0;
-  const seen = new Set<string>();
-  for (const token of tokens) {
-    if (seen.has(token)) continue;
-    seen.add(token);
-    if (queryTokens.has(token)) hit++;
+// ---- BM25（路 B 词面打分）----
+
+const BM25_K1 = 1.5; // tf 饱和参数（标准值）
+const BM25_B = 0.75; // 文档长度归一化强度（标准值）
+
+/** 语料统计：df 按「每文档去重后是否含词」计，与标准 BM25 口径一致。 */
+export interface Bm25Stats {
+  docCount: number;
+  avgDocLength: number;
+  /** term → 含该词的文档数。 */
+  docFreq: Map<string, number>;
+}
+
+export function buildBm25Stats(docs: string[][]): Bm25Stats {
+  const docFreq = new Map<string, number>();
+  let totalLength = 0;
+  for (const tokens of docs) {
+    totalLength += tokens.length;
+    for (const term of new Set(tokens)) {
+      docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
+    }
   }
-  return hit / queryTokens.size;
+  return {
+    docCount: docs.length,
+    avgDocLength: docs.length > 0 ? totalLength / docs.length : 0,
+    docFreq,
+  };
+}
+
+/**
+ * BM25+ 打分：Σ_{t∈query} idf(t) × tf(t,d)×(k1+1) / (tf + k1×(1−b+b×dl/avgdl))。
+ * idf 取 BM25+ 变体 ln(1+(N−df+0.5)/(df+0.5))——恒非负，语料内高频词 idf≈0 自然被压掉；
+ * query 侧按唯一 term 求和（多轮拼接的词面 query 不会被未命中词稀释）。
+ */
+export function bm25Score(
+  docTokens: string[],
+  queryTokens: Set<string>,
+  stats: Bm25Stats,
+  k1 = BM25_K1,
+  b = BM25_B,
+): number {
+  if (queryTokens.size === 0 || docTokens.length === 0 || stats.docCount === 0) return 0;
+  const tf = new Map<string, number>();
+  for (const t of docTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+  // avgdl = 0 只可能发生在全部文档为空时，此时任意 tf 均为 0，比值取 1 兜底即可
+  const dlRatio = stats.avgDocLength > 0 ? docTokens.length / stats.avgDocLength : 1;
+  let score = 0;
+  for (const term of queryTokens) {
+    const f = tf.get(term);
+    if (!f) continue;
+    const df = stats.docFreq.get(term) ?? 0;
+    if (df === 0) continue; // tf>0 必然 df≥1，此处只防脏语料统计
+    const idf = Math.log(1 + (stats.docCount - df + 0.5) / (df + 0.5));
+    score += idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + b * dlRatio)));
+  }
+  return score;
 }
 
 // ---- 候选标识：`fact:<id>` / `section:<group>.<slot>`（与 pg-storage 的 ref_id 同口径）----
@@ -197,28 +244,34 @@ function getSection(data: MemoryData, group: 'user' | 'history', slot: string): 
 
 export interface LexicalHit {
   ref: string;
-  lexical: number;
+  /** BM25 分（无上界，同轮内可比）。 */
+  bm25: number;
 }
 
-/** 路 B 词面召回：重叠率 > 0 的 facts + 4 个召回 section，按重叠率降序取 top-N。 */
+/**
+ * 路 B 词面召回：语料 = facts + 4 个召回 section（与向量路可召回集合一致），
+ * query 时现算 corpus 统计并逐篇 BM25 打分，> 0 者按分降序取 top-N。
+ * 多轮拼接的词面 query 会带出上轮实体（省略式提问「它呢？」命中），
+ * BM25 按唯一 query term 求和、未命中词不计分，长 query 不稀释命中权重。
+ */
 export function lexicalRecall(
   data: MemoryData,
   queryTokens: Set<string>,
   limit: number,
 ): LexicalHit[] {
-  const hits: LexicalHit[] = [];
-  for (const f of data.facts ?? []) {
-    const lexical = overlapRatio(f.content, queryTokens);
-    if (lexical > 0) hits.push({ ref: factRef(f.id), lexical });
-  }
+  const docs: Array<{ ref: string; tokens: string[] }> = [];
+  for (const f of data.facts ?? []) docs.push({ ref: factRef(f.id), tokens: tokenize(f.content) });
   for (const [group, slot] of RECALL_SECTION_SLOTS) {
     const section = getSection(data, group, slot);
     if (!section?.summary) continue;
-    const lexical = overlapRatio(section.summary, queryTokens);
-    if (lexical > 0) hits.push({ ref: sectionRef(group, slot), lexical });
+    docs.push({ ref: sectionRef(group, slot), tokens: tokenize(section.summary) });
   }
-  hits.sort((a, b) => b.lexical - a.lexical);
-  return hits.slice(0, limit);
+  const stats = buildBm25Stats(docs.map((d) => d.tokens));
+  return docs
+    .map((d) => ({ ref: d.ref, bm25: bm25Score(d.tokens, queryTokens, stats) }))
+    .filter((h) => h.bm25 > 0)
+    .sort((a, b) => b.bm25 - a.bm25)
+    .slice(0, limit);
 }
 
 /**
@@ -404,8 +457,8 @@ export interface FactScoreDetail {
   content: string;
   category: FactCategory;
   confidence: number;
-  /** 词面重叠率（0..1）。 */
-  lexical: number;
+  /** BM25 词面分（无上界，只做同轮相对排序）。 */
+  bm25: number;
   /** 向量路余弦；无向量 / 维度不符 / 未过门槛 → null。 */
   cosine: number | null;
   /** 是否由向量路召回（余弦 ≥ 门槛）。 */
@@ -426,7 +479,7 @@ export interface SectionScoreDetail {
   group: 'user' | 'history';
   slot: string;
   summary: string;
-  lexical: number;
+  bm25: number;
   cosine: number | null;
   inVectorLeg: boolean;
   rrf: number | null;
@@ -487,11 +540,11 @@ function warnRerankDegradeOnce(e: unknown): void {
 function scoreOf(
   ref: string,
   entry: PoolEntry | undefined,
-  lexicalByRef: Map<string, number>,
+  bm25ByRef: Map<string, number>,
   vectorHits: Map<string, number>,
-): Pick<FactScoreDetail, 'lexical' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'final'> {
+): Pick<FactScoreDetail, 'bm25' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'final'> {
   return {
-    lexical: lexicalByRef.get(ref) ?? 0,
+    bm25: bm25ByRef.get(ref) ?? 0,
     cosine: vectorHits.get(ref) ?? null,
     inVectorLeg: vectorHits.has(ref),
     rrf: entry?.rrf ?? null,
@@ -558,7 +611,7 @@ export async function retrieveMemory(
 
   // ---- 路 B：词面召回 ----
   const lexicalHits = lexicalRecall(data, queryTokens, RECALL_EACH);
-  const lexicalByRef = new Map(lexicalHits.map((h) => [h.ref, h.lexical]));
+  const bm25ByRef = new Map(lexicalHits.map((h) => [h.ref, h.bm25]));
 
   // ---- RRF 融合 → 候选池 ----
   // 路 A 按真实相似度重排（PG 结果已降序，JS 并入的 section 需归位）再进 RRF；
@@ -627,7 +680,7 @@ export async function retrieveMemory(
         content: f.content,
         category: f.category,
         confidence: f.confidence,
-        ...scoreOf(ref, poolByRef.get(ref), lexicalByRef, vectorHits),
+        ...scoreOf(ref, poolByRef.get(ref), bm25ByRef, vectorHits),
         picked: pickedIds.has(f.id),
       };
     })
@@ -641,7 +694,7 @@ export async function retrieveMemory(
       group,
       slot,
       summary: section.summary ?? '',
-      ...scoreOf(ref, poolByRef.get(ref), lexicalByRef, vectorHits),
+      ...scoreOf(ref, poolByRef.get(ref), bm25ByRef, vectorHits),
       picked: group === 'user' ? keepTopOfMind : historySlot === slot,
     };
   });

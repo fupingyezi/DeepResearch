@@ -61,12 +61,14 @@ export {
 } from './prompt';
 
 export {
+  bm25Score,
+  buildBm25Stats,
   lexicalRecall,
-  overlapRatio,
   retrieveMemory,
   rrfFuse,
   tokenize,
   vectorRecallJs,
+  type Bm25Stats,
   type FactScoreDetail,
   type LexicalHit,
   type RetrieveOptions,
