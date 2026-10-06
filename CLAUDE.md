@@ -273,7 +273,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 - **向量基础设施**（`embeddings.ts`）：智谱 embedding-3（OpenAI 兼容 `/embeddings`，dimensions 256..2048 默认 1024），工厂由 wiring 经 `setMemoryEmbeddingsFactory` 注入；未注册 / 无 Key / API 失败一律静默降级词面。**必须显式传 `encodingFormat: 'float'`**：SDK 缺省时按 base64 解码响应，而智谱忽略该参数仍返回 float——1024 维被当字节流重解释成 256 个无意义数，余弦成 NaN，语义检索悄悄退回词面且无报错。**L2 归一化在 embedding 出口做**：`embedQuery`/`embedTexts` 统一归一（覆盖 query / updater / fact CRUD / backfill 全部向量出生点），存量向量经 backfill 原地归一（零 API 调用）——PG 存归一向量后 `1 - <=>` 即余弦
 - **rerank**（`rerank.ts` + `src/lib/zhipu-rerank.ts`）：单段智谱 rerank API 裸 fetch（`POST {base}/rerank`，`results` 按 index 对齐缺失填 0）。fail-fast 在适配层（非 2xx 抛错）、静默降级在 harness 封装层（`rerankWithFallback` → null + warnOnce）。**rerank 分分布高度压缩（不相关也常 0.99+），只做相对排序**——不存在绝对分数阈值，「全部落空」由双路召回皆空判定。env：`DEERFLOW_RERANK_ENABLED`（'0' 显式关）/ `DEERFLOW_RERANK_API_KEY`（回落 `ZHIPU_API_KEY`）/ `DEERFLOW_RERANK_MODEL=rerank` / `DEERFLOW_RERANK_BASE_URL`（默认 open.bigmodel.cn/api/paas/v4）
 - **阈值 0.6 系实测标定**：embedding-3 中文短文本无关基线 0.44~0.55，真相关 0.64~0.69，取 0.6 作为**路 A 召回门槛**（标定依据见 retrieval.ts 注释）；换 embedding 模型 / 语言后需重标定。**记忆与提问须同语言**：跨语言余弦 0.33~0.49 全低于阈值，故 MEMORY_UPDATE_PROMPT 要求用用户对话的语言写 summary 与 facts
-- 向量检索为 pgvector 精确扫描（B-tree 按 scope 过滤 + `<=>` 排序，无 HNSW），facts 上限 100 不变；观察入口 `GET /api/memory/retrieve?q=`（与真实注入同一段代码，含打分明细 / poolSize / rerankUsed / vectorLeg）；旧数据回填 `backfillMemoryEmbeddings`（补缺失 / 维度不匹配 / 未归一的 facts 与 sections，save 前 reload 合并防互踩）
+- 向量检索为 pgvector 精确扫描（B-tree 按 scope 过滤 + `<=>` 排序，无 HNSW），facts 上限 100 不变；观察入口 `GET /api/memory/retrieve?q=`（与真实注入同一段代码，含打分明细 / poolSize / rerankUsed / vectorLeg；预览代码独立在 `*.preview.ts`，不进生产链路）；旧数据回填 `backfillMemoryEmbeddings`（补缺失 / 维度不匹配 / 未归一的 facts 与 sections，save 前 reload 合并防互踩）
 
 ### 8.5 MCP 与 Skill 扩展（extensions）
 
@@ -358,7 +358,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 
 - `src/server/wiring.ts`——ThreadService 进程单例工厂（globalThis + ensure\* 注入点）
 - `src/server/http/`（api-handler / errors / auth / logger / rate-limit）——统一请求管线 / 错误映射（toHttpError）/ 会话 cookie / HTTP 访问日志 / 限流占位
-- `src/server/validation/schemas.ts`——全部路由 body/query 的 zod schema（v4，`error.issues`）
+- `src/server/validation/schemas.ts` / `schemas.preview.ts`——全部路由 body/query 的 zod schema（v4，`error.issues`）；预览接口的 schema 独立在 `schemas.preview.ts`
 - `src/server/daos/`（chat-session / chat-message / file-metadata / file-content）——app 侧四张表单表 SQL（SqlExecutor + withTransaction）
 - `src/server/services/`——领域编排（chat / conversation / file / memory / model-key / extension / prompt-enhance / sandbox / model-config）
 - `src/server/services/model-config-service.ts`——主聊天链路模型解析：用户选定预设 + 该 provider 加密 Key → ModelConfig
@@ -379,7 +379,7 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/runtime/sse/client-event.ts` / `to-client-event.ts`——ClientAgentEvent 白名单协议 / 内→外过滤边界
 - `src/deerflow-harness/types/agent-event.ts`——AgentEvent 内部事件枚举
 - `src/deerflow-harness/subagents/executor.ts` / `parent-history.ts`——SubagentExecutor（超时+取消）/ 父历史只读注入
-- `src/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts` / `pg-storage.ts`——MemoryUpdater / 向量基础设施（归一化）/ RAG 检索管线 / PG 存储后端
+- `src/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts` / `pg-storage.ts` / `injection.preview.ts` / `retrieval.preview.ts`——MemoryUpdater / 向量基础设施（归一化）/ RAG 检索管线 / PG 存储后端 / 检索效果预览 + 打分明细组装（\*.preview.ts，不进生产链路）
 - `src/lib/zhipu-rerank.ts`——智谱 rerank 适配层（fail-fast 裸 fetch，降级在 harness `rerankWithFallback`）
 - `src/deerflow-harness/vision/image-fetcher.ts` / `vision-middleware.ts`——图片字节注入 + 多模态 content 构造 / 历史图片压缩
 - `src/deerflow-harness/tools/builtins/`——内置工具（task / search_web / clarification / view_image）

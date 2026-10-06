@@ -4,6 +4,10 @@
  * 与「全量注入」互补的第二种记忆使用模式：按当前用户输入检索出相关度最高的
  * 少量 facts 与 section，用更小的 token 预算注入 system prompt。
  *
+ * 生产链路只消费检索子集（picked）；打分明细（预览/调试展示）独立在
+ * retrieval.preview.ts——管线在 `collectTrace` 时把中间产物快照（trace）
+ * 交给它组装，预览与真实注入同一来源、不会漂移。
+ *
  * 管线：
  * - 路 A 向量召回：pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底）；
  *   余弦 ≥ 语义门槛才进 RRF；4 个召回 section 单独 JS 过门槛并入——pgvector 的
@@ -31,7 +35,7 @@
 import { cosineSimilarity, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
 import { memoryDegradeStats } from './stats';
 import type { VectorSearchResult } from './storage';
-import type { Fact, FactCategory, MemoryData, SectionData } from './types';
+import type { Fact, MemoryData, SectionData } from './types';
 
 const RECALL_EACH = 50; // 双路召回各取 50（facts 上限 100，足够宽）
 const RERANK_CANDIDATES = 20; // rerank 精排头宽，同时是候选池宽下限
@@ -182,12 +186,13 @@ export function bm25Score(
 }
 
 // ---- 候选标识：`fact:<id>` / `section:<group>.<slot>`（与 pg-storage 的 ref_id 同口径）----
+// 导出供 retrieval.preview.ts 组装明细时按同一口径取 ref。
 
-function factRef(id: string): string {
+export function factRef(id: string): string {
   return `fact:${id}`;
 }
 
-function sectionRef(group: 'user' | 'history', slot: string): string {
+export function sectionRef(group: 'user' | 'history', slot: string): string {
   return `section:${group}.${slot}`;
 }
 
@@ -221,7 +226,7 @@ export interface LexicalHit {
 }
 
 /**
- * 全量语料词面打分（不截断）：召回与预览明细共用同一份分数。
+ * 全量语料词面打分（不截断）：召回截断与 trace 明细共用同一份分数。
  * 语料 = facts + 4 个召回 section（与向量路可召回集合一致），query 时现算
  * corpus 统计并逐篇 BM25 打分，> 0 者按分降序返回全量。
  * 多轮拼接的词面 query 会带出上轮实体（省略式提问「它呢？」命中），
@@ -315,7 +320,8 @@ export function rrfFuse(
 
 // ---- 候选池 / 组装 ----
 
-interface PoolEntry {
+/** 候选池条目（导出供 trace 消费者取明细字段）。 */
+export interface PoolEntry {
   ref: string;
   kind: 'fact' | 'section';
   /** 供 rerank 的正文（fact.content / section.summary）。 */
@@ -325,10 +331,11 @@ interface PoolEntry {
    *  池尾为接续名次（rank 从 RERANK_CANDIDATES 起）；未参与精排 → null。
    *  provider 原始分高度压缩（不相关也 0.99+），量级不可比，只取它给出的顺序。 */
   rerank: number | null;
-  /** provider 原始精排分（仅调试用，不做任何计算）。 */
+  /** provider 原始精排分（分布压缩，不参与 final）：精排排序依据，
+   *  经 trace 透出给预览明细展示。 */
   rerankRaw: number | null;
   /** 组装排序分：final =（rerank ?? RRF）×（fact 再乘 confidence 权重），
-   *  在 rerank 之后统一算好写回——topK 选择与预览明细读同一个值。 */
+   *  在 rerank 之后统一算好写回——topK 选择与 trace 明细读同一个值。 */
   final: number | null;
   fact?: Fact;
   group?: 'user' | 'history';
@@ -442,61 +449,36 @@ function pickSections(
   };
 }
 
-// ---- 明细（预览/调试展示用；数据全部取自管线真实过程，不存在二次重算）----
-
-export interface FactScoreDetail {
-  id: string;
-  content: string;
-  category: FactCategory;
-  confidence: number;
-  /** BM25 词面分（无上界，只做同轮相对排序）。 */
-  bm25: number;
-  /** 向量路余弦；无向量 / 维度不符 / 未过门槛 → null。 */
-  cosine: number | null;
-  /** 是否由向量路召回（余弦 ≥ 门槛）。 */
-  inVectorLeg: boolean;
-  /** RRF 融合分；未进候选池 → null。 */
-  rrf: number | null;
-  /** 倒数排名分（与 RRF 同量纲，可跨条目比较）：池头精排名次、池尾接续名次；
-   *  未参与精排 / 精排失败 → null。 */
-  rerank: number | null;
-  /** provider 原始精排分（分布压缩，仅调试用）；未精排 → null。 */
-  rerankRaw: number | null;
-  /** 组装排序分 =（rerank ?? RRF）×（0.5 + 0.5×confidence）；未进池 → null。 */
-  final: number | null;
-  /** 是否进入实际注入集合。 */
-  picked: boolean;
-}
-
-export interface SectionScoreDetail {
-  /** `user.topOfMind` / `history.recentMonths` 等。 */
-  ref: string;
-  group: 'user' | 'history';
-  slot: string;
-  summary: string;
-  bm25: number;
-  cosine: number | null;
-  inVectorLeg: boolean;
-  rrf: number | null;
-  rerank: number | null;
-  rerankRaw: number | null;
-  /** 池内秩来源分（rerank ?? RRF，同为倒数排名量纲）；未进池 → null。 */
-  final: number | null;
-  picked: boolean;
-}
-
-export interface RetrieveResult {
-  picked: MemoryData;
-  /** 全部 fact 的明细（含未入选者），按 final 降序。 */
-  facts: FactScoreDetail[];
-  /** 4 个召回 section 的明细。 */
-  sections: SectionScoreDetail[];
+/**
+ * 管线中间产物快照（仅 `collectTrace` 时返回，供预览明细组装——见
+ * retrieval.preview.ts 的 buildRetrievalDetail）。字段全部取自管线过程值，
+ * 明细层不做二次计算，保证「预览看到的」与「实际注入的」同一来源。
+ */
+export interface RetrieveTrace {
+  /** 候选池条目（rerank 与 final 已写回；rerank 前池序即 RRF 序）。 */
+  pool: PoolEntry[];
+  /** 全量语料 BM25 分（含未进 top-50 召回者：明细显示真实分而非 0）。 */
+  bm25ByRef: Map<string, number>;
+  /** 向量路命中（ref → 余弦，≥ 门槛才收录）。 */
+  vectorHits: Map<string, number>;
+  /** 实际进入注入集合的 fact id。 */
+  pickedFactIds: Set<string>;
+  /** topOfMind 是否保留（进池）。 */
+  keepTopOfMind: boolean;
+  /** 保留的 history 段（池内秩最优一段；未命中 → null）。 */
+  historySlot: 'recentMonths' | 'earlierContext' | 'longTermBackground' | null;
   /** RRF 融合后的候选池大小。 */
   poolSize: number;
   /** 本轮是否真的走了 rerank 精排（注册了且成功返回等长分数）。 */
   rerankUsed: boolean;
   /** 向量路来源：pg = pgvector；js = 线性扫描兜底（无后端 / SQL 失败）；null = 无向量。 */
   vectorLeg: 'pg' | 'js' | null;
+}
+
+/** 生产结果：picked 可直接喂 formatMemoryForInjection；trace 仅 collectTrace 时返回。 */
+export interface RetrieveResult {
+  picked: MemoryData;
+  trace?: RetrieveTrace;
 }
 
 export interface RetrieveOptions {
@@ -512,6 +494,8 @@ export interface RetrieveOptions {
   rerank?: ((query: string, docs: string[]) => Promise<number[] | null>) | null;
   /** rerank 用的单句 query（拼串会稀释语义）；缺省 = query。 */
   rerankQuery?: string;
+  /** 收集预览明细所需的中间产物快照（trace）；生产链路不需要，缺省关闭。 */
+  collectTrace?: boolean;
 }
 
 let warnedVectorDegrade = false;
@@ -552,31 +536,8 @@ export function resetMemoryRetrievalDegrades(): void {
 }
 
 /**
- * 打分明细的公共字段：全部取自管线过程值（词面命中 / 向量命中 / 池条目），
- * 明细层不做二次计算——facts 与 sections 明细共用，保证口径一致。
- */
-function scoreOf(
-  ref: string,
-  entry: PoolEntry | undefined,
-  bm25ByRef: Map<string, number>,
-  vectorHits: Map<string, number>,
-): Pick<
-  FactScoreDetail,
-  'bm25' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'rerankRaw' | 'final'
-> {
-  return {
-    bm25: bm25ByRef.get(ref) ?? 0,
-    cosine: vectorHits.get(ref) ?? null,
-    inVectorLeg: vectorHits.has(ref),
-    rrf: entry?.rrf ?? null,
-    rerank: entry?.rerank ?? null,
-    rerankRaw: entry?.rerankRaw ?? null,
-    final: entry?.final ?? null,
-  };
-}
-
-/**
- * 按 query 检索 memory，返回子集与全程明细。子集可直接喂 formatMemoryForInjection。
+ * 按 query 检索 memory，返回子集（picked，可直接喂 formatMemoryForInjection）。
+ * collectTrace 时附带预览明细所需的中间产物快照（trace，见 retrieval.preview.ts）。
  * query 为空且无向量、或双路召回全空时返回 null（调用方据此跳过注入，避免噪声）。
  */
 export async function retrieveMemory(
@@ -635,9 +596,6 @@ export async function retrieveMemory(
   // ---- 路 B：词面召回 ----
   const allLexical = scoreAllLexical(data, queryTokens);
   const lexicalHits = allLexical.slice(0, RECALL_EACH);
-  // 明细用全量分数：top-50 截断只作用于召回，未进召回者的 bm25 若显示 0，
-  // 调参预览会把「词面有分但排在 50 名外」误读成「词面完全不匹配」
-  const bm25ByRef = new Map(allLexical.map((h) => [h.ref, h.bm25]));
 
   // ---- RRF 融合 → 候选池 ----
   // 路 A 按真实相似度重排（PG 结果已降序，JS 并入的 section 需归位）再进 RRF；
@@ -706,7 +664,6 @@ export async function retrieveMemory(
   const { facts: pickedFacts, pickedIds } = finalizeFacts(ranked, topK);
   const { user, history, keepTopOfMind, historySlot } = pickSections(data, ranked);
 
-  const poolByRef = new Map(pool.map((e) => [e.ref, e]));
   const picked: MemoryData = {
     version: data.version,
     lastUpdated: data.lastUpdated,
@@ -715,39 +672,23 @@ export async function retrieveMemory(
     facts: pickedFacts,
   };
 
-  const factsDetail: FactScoreDetail[] = (data.facts ?? [])
-    .map((f) => {
-      const ref = factRef(f.id);
-      return {
-        id: f.id,
-        content: f.content,
-        category: f.category,
-        confidence: f.confidence,
-        ...scoreOf(ref, poolByRef.get(ref), bm25ByRef, vectorHits),
-        picked: pickedIds.has(f.id),
-      };
-    })
-    .sort((a, b) => (b.final ?? -Infinity) - (a.final ?? -Infinity));
+  if (!options.collectTrace) return { picked };
 
-  const sectionsDetail: SectionScoreDetail[] = RECALL_SECTION_SLOTS.map(([group, slot]) => {
-    const section = getSection(data, group, slot);
-    const ref = sectionRef(group, slot);
-    return {
-      ref,
-      group,
-      slot,
-      summary: section.summary ?? '',
-      ...scoreOf(ref, poolByRef.get(ref), bm25ByRef, vectorHits),
-      picked: group === 'user' ? keepTopOfMind : historySlot === slot,
-    };
-  });
-
+  // 明细组装所需的中间产物快照（buildRetrievalDetail 消费）。全量词面分含
+  // 未进 top-50 召回者——截断只作用于召回，明细若显示 0 会把「词面有分但
+  // 排在 50 名外」误读成「词面完全不匹配」
   return {
     picked,
-    facts: factsDetail,
-    sections: sectionsDetail,
-    poolSize: pool.length,
-    rerankUsed,
-    vectorLeg,
+    trace: {
+      pool,
+      bm25ByRef: new Map(allLexical.map((h) => [h.ref, h.bm25])),
+      vectorHits,
+      pickedFactIds: pickedIds,
+      keepTopOfMind,
+      historySlot,
+      poolSize: pool.length,
+      rerankUsed,
+      vectorLeg,
+    },
   };
 }

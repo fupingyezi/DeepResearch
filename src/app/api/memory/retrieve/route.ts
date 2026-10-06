@@ -13,6 +13,9 @@
  * 设置页已提供「全量注入 / 按需检索」切换（PUT /api/memory/mode）；本接口
  * 是单 query 粒度的检索诊断入口，不依赖前端开关状态。
  *
+ * 预览代码独立在 *.preview.ts（memory-service.preview.ts / schemas.preview.ts /
+ * harness 的 injection.preview.ts），本路由只是薄控制器。
+ *
  * 注：本接口只读不写，无前端消费者（明细形状可随管线演进）；会触发旧数据
  * 向量回填（fire-and-forget，与线上行为一致）。
  */
@@ -20,8 +23,8 @@
 import { NextResponse } from 'next/server';
 
 import { withApiHandler } from '@/server/http';
-import { getMemoryService } from '@/server/services/memory-service';
-import { retrievePreviewSchema } from '@/server/validation/schemas';
+import { previewRetrieval } from '@/server/services/memory-service.preview';
+import { retrievePreviewSchema } from '@/server/validation/schemas.preview';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,7 +32,7 @@ export const dynamic = 'force-dynamic';
 export const GET = withApiHandler(
   { query: retrievePreviewSchema, fallbackMessage: 'Retrieve preview failed' },
   async ({ user, query }) => {
-    const data = await getMemoryService().previewRetrieval(user!.id, query.q);
+    const data = await previewRetrieval(user!.id, query.q);
     return NextResponse.json({ message: 'Retrieve preview success!', data }, { status: 200 });
   },
 );

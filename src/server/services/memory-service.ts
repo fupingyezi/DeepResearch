@@ -1,5 +1,5 @@
 /**
- * 记忆域服务：fact CRUD / 检索预览 / 注入模式偏好。
+ * 记忆域服务：fact CRUD / 注入模式偏好（检索效果预览独立在 memory-service.preview.ts）。
  *
  * 约定（与注入侧、异步写入侧一致）：全部操作走「跨 agent 全局 per-user」
  * 记忆（agentName=null，PG 双表，scope_key=${userId}::），对齐 deer-flow 2.0
@@ -17,14 +17,13 @@ import {
   createMemoryFact,
   deleteMemoryFact,
   getMemoryData,
-  previewMemoryRetrieval,
   updateMemoryFact,
   type FactCategory,
   type MemoryData,
 } from '@/deerflow-harness';
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
 import { AppError } from '@/server/http';
-import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '@/server/wiring';
+import { ensureMemoryStorage } from '@/server/wiring';
 
 /** fact 分类白名单（单一出处：facts 路由新建与更新共用）。 */
 const VALID_CATEGORIES = new Set<FactCategory>([
@@ -72,7 +71,6 @@ export interface MemoryServiceDeps {
   createFact: typeof createMemoryFact;
   updateFact: typeof updateMemoryFact;
   deleteFact: typeof deleteMemoryFact;
-  preview: typeof previewMemoryRetrieval;
   getMode: typeof getMemoryMode;
   setMode: typeof setMemoryMode;
 }
@@ -143,17 +141,6 @@ export class MemoryService {
     }
   }
 
-  /**
-   * 检索模式效果预览：与真实注入走同一段代码。
-   * 前置幂等装配存储后端 + embedding / rerank 工厂（threadService 未初始化时
-   * 也要能向量化 query 并精排，否则退化为纯词面 + RRF 序预览）。
-   */
-  async previewRetrieval(userId: string, query: string): Promise<unknown> {
-    await ensureMemoryStorage();
-    await ensureMemoryRerankerFactory();
-    return this.deps.preview({ agentName: null, userId, query });
-  }
-
   /** 注入模式偏好（未设置过 → inject + isDefault 标记）。 */
   async getMode(userId: string): Promise<{ mode: MemoryInjectionMode; isDefault: boolean }> {
     const stored = await this.deps.getMode(userId);
@@ -171,7 +158,6 @@ const defaultDeps: MemoryServiceDeps = {
   createFact: createMemoryFact,
   updateFact: updateMemoryFact,
   deleteFact: deleteMemoryFact,
-  preview: previewMemoryRetrieval,
   getMode: getMemoryMode,
   setMode: setMemoryMode,
 };

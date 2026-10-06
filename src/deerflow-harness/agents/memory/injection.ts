@@ -1,20 +1,16 @@
 /**
- * 记忆注入：`buildMemoryContext` 与预览接口的共用实现。
+ * 记忆注入（生产链路）：`buildMemoryContext` 与检索模式的共用实现。
  *
- * 两个入口都走 `retrieveForInjection`——预览看到的（打分明细 / 注入文本）与
- * 实际拼进 system prompt 的是同一段代码的产物，不会漂移。
+ * `retrieveForInjection` 同时被检索效果预览（injection.preview.ts）调用——
+ * 预览看到的（打分明细 / 注入文本）与实际拼进 system prompt 的是同一段代码的
+ * 产物，不会漂移。预览代码独立在 *.preview.ts，不进生产链路。
  */
 
 import { getMemoryConfig } from './config';
 import { backfillMemoryEmbeddings, embedQuery } from './embeddings';
 import { formatMemoryForInjection } from './prompt';
 import { rerankWithFallback } from './rerank';
-import {
-  retrieveMemory,
-  type FactScoreDetail,
-  type RetrieveResult,
-  type SectionScoreDetail,
-} from './retrieval';
+import { retrieveMemory, type RetrieveResult } from './retrieval';
 import { getMemoryStorage, type VectorSearchResult } from './storage';
 import type { MemoryData } from './types';
 
@@ -42,10 +38,12 @@ interface RetrieveForInjectionOutcome {
 }
 
 /**
- * 检索模式的共用实现：`buildMemoryContext` 与 `previewMemoryRetrieval` 都走这里，
- * 保证「预览看到的」与「实际注入的」是同一段代码的产物、不会漂移。
+ * 检索模式的共用实现：`buildMemoryContext` 与注入预览（injection.preview.ts）
+ * 都走这里，保证「预览看到的」与「实际注入的」是同一段代码的产物、不会漂移。
+ * 导出仅供预览模块使用（生产链路只有 buildMemoryContext 一个入口）；
+ * collectTrace 时在管线产物里附上明细组装所需的中间产物快照（trace）。
  */
-async function retrieveForInjection(
+export async function retrieveForInjection(
   data: MemoryData,
   opts: {
     agentName: string | null;
@@ -53,6 +51,7 @@ async function retrieveForInjection(
     query: string;
     recentQueries?: string[];
   },
+  collectTrace = false,
 ): Promise<RetrieveForInjectionOutcome> {
   const config = getMemoryConfig();
   // 词面 query = 近 N 轮拼接（去重：resume 时语义 query 即最近一轮，不重复计入）；
@@ -89,6 +88,7 @@ async function retrieveForInjection(
     vectorRecall,
     rerank: config.rerankEnabled ? rerankWithFallback : null,
     rerankQuery: opts.query.trim() ? opts.query : undefined,
+    collectTrace,
   });
 
   const pickedText = result
@@ -100,81 +100,6 @@ async function retrieveForInjection(
     queryEmbedding,
     injectedText: pickedText.trim() ? `<memory mode="retrieve">\n${pickedText}\n</memory>\n` : '',
     result,
-  };
-}
-
-/** 检索预览结果（供调试接口展示，不参与生产链路）。 */
-export interface MemoryRetrievalPreview {
-  query: string;
-  /** 当前生效的记忆/检索配置。 */
-  config: {
-    embeddingEnabled: boolean;
-    embeddingDimensions: number;
-    embeddingBackfillEnabled: boolean;
-    retrieveTopK: number;
-    retrieveMaxTokens: number;
-    semanticMatchThreshold: number;
-    rerankEnabled: boolean;
-  };
-  /** 路 A 召回门槛的生效值（取自 MemoryConfig，便于解读打分明细）。 */
-  thresholds: { semanticMatch: number };
-  /** query 是否成功向量化（false = 无 Key / API 失败，本次为纯词面检索）。 */
-  embedded: boolean;
-  queryEmbeddingDim: number | null;
-  /** 向量路来源：pg / js（兜底扫描）/ null（无向量）。 */
-  vectorLeg: 'pg' | 'js' | null;
-  /** 本轮是否真的走了 rerank 精排。 */
-  rerankUsed: boolean;
-  /** RRF 融合后的候选池大小。 */
-  poolSize: number;
-  /** 逐条 fact 的打分明细（按 final 降序，含未入选者）。 */
-  facts: FactScoreDetail[];
-  /** 4 个召回 section 的打分明细。 */
-  sections: SectionScoreDetail[];
-  /** 实际会拼进 prompt 的文本；空串 = 本轮不注入。 */
-  injectedText: string;
-}
-
-/**
- * 预览检索效果：走与真实注入完全相同的代码路径，明细直接取自 retrieveForInjection
- * 的管线产物（构造性同源，不存在二次重算、不会漂移）。见 /api/memory/retrieve。
- */
-export async function previewMemoryRetrieval(opts: {
-  agentName?: string | null;
-  userId?: string | null;
-  query: string;
-}): Promise<MemoryRetrievalPreview> {
-  const config = getMemoryConfig();
-  const agentName = opts.agentName ?? null;
-  const userId = opts.userId ?? null;
-  const data = await getMemoryStorage().load({ agentName, userId });
-
-  const outcome = await retrieveForInjection(data, {
-    agentName,
-    userId,
-    query: opts.query,
-  });
-
-  return {
-    query: opts.query,
-    config: {
-      embeddingEnabled: config.embeddingEnabled,
-      embeddingDimensions: config.embeddingDimensions,
-      embeddingBackfillEnabled: config.embeddingBackfillEnabled,
-      retrieveTopK: config.retrieveTopK,
-      retrieveMaxTokens: config.retrieveMaxTokens,
-      semanticMatchThreshold: config.semanticMatchThreshold,
-      rerankEnabled: config.rerankEnabled,
-    },
-    thresholds: { semanticMatch: config.semanticMatchThreshold },
-    embedded: outcome.queryEmbedding != null,
-    queryEmbeddingDim: outcome.queryEmbedding?.length ?? null,
-    vectorLeg: outcome.result?.vectorLeg ?? null,
-    rerankUsed: outcome.result?.rerankUsed ?? false,
-    poolSize: outcome.result?.poolSize ?? 0,
-    facts: outcome.result?.facts ?? [],
-    sections: outcome.result?.sections ?? [],
-    injectedText: outcome.injectedText,
   };
 }
 

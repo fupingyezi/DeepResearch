@@ -1,11 +1,10 @@
 import type { Embeddings } from '@langchain/core/embeddings';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { resetMemoryEmbeddingsFactory, setMemoryEmbeddingsFactory } from '../embeddings';
-import { buildMemoryContext, previewMemoryRetrieval } from '../index';
+import { buildMemoryContext } from '../index';
 import { PgMemoryStorage } from '../pg-storage';
-import { resetMemoryRerankerFactory, setMemoryRerankerFactory } from '../rerank';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact, MemoryData } from '../types';
 import { FakeSql } from './fake-sql';
@@ -54,7 +53,6 @@ describe('buildMemoryContext · retrieve 模式', () => {
 
   afterEach(() => {
     resetMemoryEmbeddingsFactory();
-    resetMemoryRerankerFactory();
     resetMemoryStorage();
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
   });
@@ -143,61 +141,5 @@ describe('buildMemoryContext · retrieve 模式', () => {
     const block = await buildMemoryContext({ mode: 'retrieve', query: '随便聊聊' });
     expect(block).toContain('mode="retrieve"');
     expect(block).toContain('完全无关的内容');
-  });
-
-  it('预览接口不传 recentQueries：单 query 行为与注入侧一致', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await getMemoryStorage().save(memory([fact('用户偏好用 pnpm 管理依赖')]), {
-      agentName: null,
-      userId: null,
-    });
-
-    const preview = await previewMemoryRetrieval({ query: '它呢？' });
-    expect(preview.injectedText).toBe(''); // 无历史可拼，单 query 无命中
-    expect(preview.thresholds).toEqual({ semanticMatch: 0.6 });
-    expect(preview.poolSize).toBe(0);
-    expect(preview.rerankUsed).toBe(false);
-    expect(preview.vectorLeg).toBeNull();
-    warn.mockRestore();
-  });
-
-  it('rerank 工厂已注册 → 预览 rerankUsed=true，管线产物透出', async () => {
-    await getMemoryStorage().save(
-      memory([
-        fact('用户偏好用 pnpm 管理依赖', 'f_pnpm'),
-        fact('用户用 pnpm 管理 monorepo', 'f_mono'),
-      ]),
-      { agentName: null, userId: null },
-    );
-    setMemoryRerankerFactory(() => ({ rerank: async (_q, docs) => docs.map(() => 1) }));
-
-    const preview = await previewMemoryRetrieval({ query: 'pnpm 管理依赖' });
-    expect(preview.rerankUsed).toBe(true);
-    expect(preview.poolSize).toBe(2);
-    expect(preview.facts.filter((d) => d.picked).length).toBeGreaterThan(0);
-    expect(preview.injectedText).toContain('mode="retrieve"');
-  });
-
-  it('config.rerankEnabled=false → 即使工厂已注册也不调用 rerank', async () => {
-    const reranker = { rerank: vi.fn(async () => [0.9, 0.1]) };
-    setMemoryRerankerFactory(() => reranker);
-    setMemoryConfig({
-      ...DEFAULT_MEMORY_CONFIG,
-      embeddingDimensions: DIMS,
-      rerankEnabled: false,
-    });
-    await getMemoryStorage().save(
-      memory([
-        fact('用户偏好用 pnpm 管理依赖', 'f_pnpm'),
-        fact('用户用 pnpm 管理 monorepo', 'f_mono'),
-      ]),
-      { agentName: null, userId: null },
-    );
-
-    const preview = await previewMemoryRetrieval({ query: 'pnpm 管理依赖' });
-    expect(preview.rerankUsed).toBe(false);
-    expect(preview.config.rerankEnabled).toBe(false);
-    expect(reranker.rerank).not.toHaveBeenCalled();
-    expect(preview.injectedText).toContain('mode="retrieve"'); // RRF 序照常注入
   });
 });

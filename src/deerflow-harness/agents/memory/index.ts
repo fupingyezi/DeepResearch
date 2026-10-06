@@ -69,13 +69,18 @@ export {
   tokenize,
   vectorRecallJs,
   type Bm25Stats,
-  type FactScoreDetail,
   type LexicalHit,
   type RetrieveOptions,
   type RetrieveResult,
   type RrfEntry,
-  type SectionScoreDetail,
 } from './retrieval';
+
+export {
+  buildRetrievalDetail,
+  type FactScoreDetail,
+  type RetrievePreviewDetail,
+  type SectionScoreDetail,
+} from './retrieval.preview';
 
 export {
   detectCorrection,
@@ -108,9 +113,6 @@ export {
   type ConversationContext,
 } from './queue';
 
-export {
-  buildMemoryContext,
-  previewMemoryRetrieval,
-  type BuildMemoryContextOptions,
-  type MemoryRetrievalPreview,
-} from './injection';
+export { buildMemoryContext, type BuildMemoryContextOptions } from './injection';
+
+export { previewMemoryRetrieval, type MemoryRetrievalPreview } from './injection.preview';

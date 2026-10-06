@@ -322,17 +322,6 @@ describe('retrieveMemory 词面召回', () => {
     expect(Array.isArray(result!.picked.facts)).toBe(true);
   });
 
-  it('预览明细的 bm25 覆盖全量语料：未进 top-50 召回者也有真实分', async () => {
-    // 55 条高 tf 条目把 target 挤出 top-50 召回（RECALL_EACH=50），
-    // 但明细应显示其真实词面分而非 0——0 会被误读成「词面完全不匹配」
-    const strong = Array.from({ length: 55 }, (_, i) => fact('婚礼婚礼婚礼婚礼', 0.9, `s${i}`));
-    const data = memory([...strong, fact('这件事与婚礼有关', 0.9, 'target')]);
-    const result = await retrieveMemory(data, '婚礼', { topK: 1 });
-    const detail = result!.facts.find((d) => d.id === 'target')!;
-    expect(detail.bm25).toBeGreaterThan(0);
-    expect(detail.picked).toBe(false);
-  });
-
   it('不 rerank 时池宽仍 ≥ 20：section 不挤占 fact 名额、topK 取满', async () => {
     // 4 个 section 与 12 条 fact 都命中 query，section 的 tf 更高 → RRF 序里
     // section 占前 4。池宽若 = topK(8)，池里只剩 4 个 fact 名额、topK 取不满
@@ -349,9 +338,9 @@ describe('retrieveMemory 词面召回', () => {
         longTermBackground: { summary: '婚礼婚礼婚礼', updatedAt: '' },
       },
     });
-    const result = await retrieveMemory(data, '婚礼', { topK: 8 });
+    const result = await retrieveMemory(data, '婚礼', { topK: 8, collectTrace: true });
     expect(result!.picked.facts).toHaveLength(8); // 修复前只有 4
-    expect(result!.poolSize).toBe(16); // 池宽上限 20，语料命中 16 条全进池
+    expect(result!.trace!.poolSize).toBe(16); // 池宽上限 20，语料命中 16 条全进池
   });
 });
 
@@ -384,9 +373,12 @@ describe('retrieveMemory 向量召回', () => {
 
   it('维度不匹配的向量被忽略（回落词面）', async () => {
     const data = memory([fact('量子计算研究', 0.9, 'f', [1, 0, 0])]); // 3 维 vs query 4 维
-    const result = await retrieveMemory(data, '量子计算', { queryEmbedding: QUERY_VEC });
+    const result = await retrieveMemory(data, '量子计算', {
+      queryEmbedding: QUERY_VEC,
+      collectTrace: true,
+    });
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
-    expect(result!.vectorLeg).toBe('js'); // 无向量路命中，词面路补上
+    expect(result!.trace!.vectorLeg).toBe('js'); // 无向量路命中，词面路补上
   });
 
   it('query 无有效 token 但有向量时不早退', async () => {
@@ -440,8 +432,9 @@ describe('retrieveMemory 向量召回', () => {
     const result = await retrieveMemory(data, '随便聊聊', {
       queryEmbedding: QUERY_VEC,
       vectorRecall: recall,
+      collectTrace: true,
     });
-    expect(result!.vectorLeg).toBe('pg');
+    expect(result!.trace!.vectorLeg).toBe('pg');
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['f_near']);
     expect(recall).toHaveBeenCalledWith(QUERY_VEC, 50);
   });
@@ -454,8 +447,9 @@ describe('retrieveMemory 向量召回', () => {
       vectorRecall: async () => {
         throw new Error('pg down');
       },
+      collectTrace: true,
     });
-    expect(result!.vectorLeg).toBe('js');
+    expect(result!.trace!.vectorLeg).toBe('js');
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
@@ -486,8 +480,11 @@ describe('retrieveMemory 向量召回', () => {
 
   it('vectorRecall 缺省 → 直接 JS 扫描（vectorLeg=js）', async () => {
     const data = memory([fact('无关内容', 0.9, 'f', unit(0.8))]);
-    const result = await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC });
-    expect(result!.vectorLeg).toBe('js');
+    const result = await retrieveMemory(data, '随便聊聊', {
+      queryEmbedding: QUERY_VEC,
+      collectTrace: true,
+    });
+    expect(result!.trace!.vectorLeg).toBe('js');
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['f']);
   });
 
@@ -512,24 +509,10 @@ describe('retrieveMemory 向量召回', () => {
     const result = await retrieveMemory(data, '怎么调试 Kubernetes 网络', {
       queryEmbedding: QUERY_VEC,
       vectorRecall: recall,
+      collectTrace: true,
     });
-    expect(result!.vectorLeg).toBe('pg');
+    expect(result!.trace!.vectorLeg).toBe('pg');
     expect(result!.picked.user.topOfMind.summary).toContain('婚礼');
-  });
-
-  it('明细同源：inVectorLeg / cosine / rrf 与真实管线一致', async () => {
-    const data = memory([
-      fact('语义命中', 0.9, 'f_sem', unit(0.65)),
-      fact('词面命中 量子计算', 0.9, 'f_lex'),
-    ]);
-    const result = await retrieveMemory(data, '量子计算', { queryEmbedding: QUERY_VEC });
-    const byId = new Map(result!.facts.map((d) => [d.id, d]));
-    expect(byId.get('f_sem')!.inVectorLeg).toBe(true);
-    expect(byId.get('f_sem')!.cosine).toBeCloseTo(0.65, 10);
-    expect(byId.get('f_sem')!.bm25).toBe(0);
-    expect(byId.get('f_lex')!.inVectorLeg).toBe(false);
-    expect(byId.get('f_lex')!.cosine).toBeNull();
-    expect(byId.get('f_lex')!.bm25).toBeGreaterThan(0);
   });
 });
 
@@ -543,8 +526,8 @@ describe('retrieveMemory rerank 精排', () => {
 
   it('rerank 分数重排池序（同 confidence 时以 rerank 分定序）', async () => {
     const rerank = vi.fn(async () => [0.5, 0.9, 0.7]);
-    const result = await retrieveMemory(data, '量子计算', { rerank });
-    expect(result!.rerankUsed).toBe(true);
+    const result = await retrieveMemory(data, '量子计算', { rerank, collectTrace: true });
+    expect(result!.trace!.rerankUsed).toBe(true);
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['b', 'c', 'a']);
     expect(rerank).toHaveBeenCalledWith('量子计算', [
       data.facts[0].content,
@@ -554,8 +537,11 @@ describe('retrieveMemory rerank 精排', () => {
   });
 
   it('rerank 返回 null → 保持 RRF 序（rerankUsed=false）', async () => {
-    const result = await retrieveMemory(data, '量子计算', { rerank: async () => null });
-    expect(result!.rerankUsed).toBe(false);
+    const result = await retrieveMemory(data, '量子计算', {
+      rerank: async () => null,
+      collectTrace: true,
+    });
+    expect(result!.trace!.rerankUsed).toBe(false);
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['a', 'b', 'c']);
   });
 
@@ -565,8 +551,9 @@ describe('retrieveMemory rerank 精排', () => {
       rerank: async () => {
         throw new Error('api down');
       },
+      collectTrace: true,
     });
-    expect(result!.rerankUsed).toBe(false);
+    expect(result!.trace!.rerankUsed).toBe(false);
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['a', 'b', 'c']);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
@@ -587,8 +574,8 @@ describe('retrieveMemory rerank 精排', () => {
     expect(getMemoryDegradeStats().rerankFailures).toBe(2);
 
     down = false;
-    const result = await retrieveMemory(data, '量子计算', { rerank });
-    expect(result!.rerankUsed).toBe(true);
+    const result = await retrieveMemory(data, '量子计算', { rerank, collectTrace: true });
+    expect(result!.trace!.rerankUsed).toBe(true);
     expect(info).toHaveBeenCalledTimes(1);
     info.mockRestore();
     resetMemoryRetrievalDegrades();
@@ -615,33 +602,21 @@ describe('retrieveMemory rerank 精排', () => {
       queryEmbedding: QUERY_VEC,
       rerank: async () => Array.from({ length: 20 }, (_, i) => 1 - i * 0.01),
       topK: 22,
+      collectTrace: true,
     });
-    expect(result!.rerankUsed).toBe(true);
+    expect(result!.trace!.rerankUsed).toBe(true);
     const pickedIds = result!.picked.facts.map((f) => f.id);
     expect(pickedIds.slice(0, 2)).toEqual(['m0', 'm1']);
     expect(pickedIds.slice(-2)).toEqual(['m20', 'm21']);
-    const byId = new Map(result!.facts.map((d) => [d.id, d]));
-    expect(byId.get('m19')!.rerank).toBeCloseTo(1 / 80, 10);
-    expect(byId.get('m20')!.rerank).toBeCloseTo(1 / 81, 10);
-    expect(byId.get('m21')!.rerank).toBeCloseTo(1 / 82, 10);
+    const rerankByRef = new Map(result!.trace!.pool.map((e) => [e.ref, e.rerank]));
+    expect(rerankByRef.get('fact:m19')).toBeCloseTo(1 / 80, 10);
+    expect(rerankByRef.get('fact:m20')).toBeCloseTo(1 / 81, 10);
+    expect(rerankByRef.get('fact:m21')).toBeCloseTo(1 / 82, 10);
   });
 
   it('rerankQuery 显式传入时用于调用（而非拼接的词面 query）', async () => {
     const rerank = vi.fn(async () => [0.1, 0.2, 0.3]);
     await retrieveMemory(data, '量子计算 有什么 进展', { rerank, rerankQuery: '量子计算' });
     expect(rerank).toHaveBeenCalledWith('量子计算', expect.any(Array));
-  });
-
-  it('明细同源：rerank/final/picked 与真实管线一致', async () => {
-    const result = await retrieveMemory(data, '量子计算', { rerank: async () => [0.5, 0.9, 0.7] });
-    const byId = new Map(result!.facts.map((d) => [d.id, d]));
-    expect(byId.get('b')!.picked).toBe(true);
-    expect(byId.get('b')!.rerankRaw).toBe(0.9); // provider 原始分只进明细，不进计算
-    expect(byId.get('b')!.rerank).toBeCloseTo(1 / 61, 10); // 精排第 1 位 → 倒数排名分，与 RRF 同量纲
-    expect(byId.get('b')!.final).toBeCloseTo((1 / 61) * 0.95, 10);
-    expect(byId.get('b')!.rrf).toBeCloseTo(1 / 62, 10);
-    expect(byId.get('b')!.bm25).toBeGreaterThan(0);
-    expect(byId.get('a')!.cosine).toBeNull();
-    expect(result!.poolSize).toBe(3);
   });
 });

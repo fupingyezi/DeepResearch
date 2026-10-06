@@ -89,11 +89,6 @@ export const setMemoryModeSchema = z.object({
   mode: z.enum(['inject', 'retrieve']),
 });
 
-/** retrieve：检索预览 query（?q=）。 */
-export const retrievePreviewSchema = z.object({
-  q: z.string().trim().min(1),
-});
-
 // ---- model-keys ----
 
 /** model-keys：保存 / 覆盖某 provider 的 Key（provider 白名单在 service 层）。 */
