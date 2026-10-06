@@ -3,7 +3,8 @@
  *
  * 行为：
  * - `add()`：debounce 入队；同一 thread_id 的 context 会被合并（保留最新 messages，
- *   correction/reinforcement 信号取 OR）。
+ *   correction/reinforcement 信号取 OR）。「只留最新」的语义前提：调用方
+ *   （memory-middleware）传的是该 thread 的全量过滤历史，见 enqueue 注释。
  * - `addNowait()` / `flushNowait()`：以 0 延迟立即调度处理。
  * - `flush()`：取消计时器并立即同步处理（用于优雅关闭）。
  * - 同时只有一个 _processQueue 在执行；并发请求会被 reschedule。
@@ -90,6 +91,11 @@ export class MemoryUpdateQueue {
       reinforcementDetected: mergedReinforcement,
     };
 
+    // 同 thread 只留最新一条不丢信息的前提：调用方传的是该 thread 的**全量**
+    // 过滤历史（memory-middleware 的 state.messages 是 checkpoint 全量，
+    // filterMessagesForMemory 只剥离非文本内容），最新一条天然覆盖更早入队者；
+    // correction/reinforcement 是轮次级信号，取 OR 保不丢。若未来有调用方
+    // 只传增量轮次，这里必须改成追加合并，否则中间轮次会静默丢失
     this.queue = this.queue.filter((c) => c.threadId !== args.threadId);
     this.queue.push(ctx);
   }
