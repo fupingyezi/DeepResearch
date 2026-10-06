@@ -81,18 +81,31 @@ class NoopMemoryStorage implements MemoryStorage {
   }
 }
 
+// dev 下注册表挂 globalThis：Next 按路由分包编译，每个 route bundle 有独立的
+// storage 模块图，纯模块级变量会分裂成多份——wiring 只在首个执行
+// ensureMemoryStorage 的 bundle 里调用 setMemoryStorage，其余 bundle 的注册表
+// 永远是 Noop 默认，读记忆的 API 路由恒返回空。做法对齐 wiring.__threadService
+// （非 production 挂 globalThis）；vitest 默认按文件分进程，globalThis 与
+// 模块级变量的隔离语义一致，测试不受影响。
 let _instance: MemoryStorage | null = null;
 
+const globalForMemoryStorage =
+  process.env.NODE_ENV === 'production'
+    ? null
+    : (globalThis as unknown as { __memoryStorage?: MemoryStorage | null });
+
 export function getMemoryStorage(): MemoryStorage {
-  return _instance ?? new NoopMemoryStorage();
+  return globalForMemoryStorage?.__memoryStorage ?? _instance ?? new NoopMemoryStorage();
 }
 
 /** 注入后端（wiring 侧在 pgvector 就绪后切到 PgMemoryStorage）。 */
 export function setMemoryStorage(storage: MemoryStorage): void {
-  _instance = storage;
+  if (globalForMemoryStorage) globalForMemoryStorage.__memoryStorage = storage;
+  else _instance = storage;
 }
 
 /** 仅供测试使用：重置单例。 */
 export function resetMemoryStorage(): void {
-  _instance = null;
+  if (globalForMemoryStorage) globalForMemoryStorage.__memoryStorage = null;
+  else _instance = null;
 }
