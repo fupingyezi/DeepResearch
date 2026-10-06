@@ -2,7 +2,8 @@
  * Memory updater
  *
  * 流程：
- *   load current memory → 拼 prompt → LLM ainvoke → 解析 JSON → applyUpdates → save
+ *   load current memory → 拼 prompt → LLM ainvoke → 解析 JSON
+ *   → 锁外预演（applyUpdates + strip + 嵌向量）→ 锁内 RMW（applyUpdates 重跑 + 守卫合并向量）→ save
  *
  * - max_facts 限制（按 confidence 倒排截断）
  * - factConfidenceThreshold 过滤
@@ -394,6 +395,65 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
   return out;
 }
 
+/**
+ * 把锁外预演的嵌入结果并回锁内重跑出的最新状态。
+ *
+ * 守卫与回填合并同纪律：facts 按 content key（不能按 id——锁内重跑给同一批
+ * 新 fact 生成的新 id 与 draft 不同）、sections 按槽位+summary 比对，嵌入期间
+ * 被并发写改动过的条目旧向量作废，交检索侧回填重嵌。
+ */
+function mergePreembeddedVectors(updated: MemoryData, draft: MemoryData): MemoryData {
+  const config = getMemoryConfig();
+  let result = updated;
+
+  const preByContent = new Map<string, number[]>();
+  for (const f of draft.facts) {
+    const key = factContentKey(f.content);
+    if (key && isCompatibleVector(f.embedding, config.embeddingDimensions)) {
+      preByContent.set(key, f.embedding as number[]);
+    }
+  }
+  if (preByContent.size > 0) {
+    const mergedFacts = updated.facts.map((f) => {
+      const key = factContentKey(f.content);
+      const vector = key ? preByContent.get(key) : null;
+      if (!vector) return f;
+      // 锁内已有合法向量（并发写已嵌）不覆盖
+      if (isCompatibleVector(f.embedding, config.embeddingDimensions)) return f;
+      return { ...f, embedding: vector };
+    });
+    if (mergedFacts.some((f, i) => f !== updated.facts[i])) {
+      result = { ...updated, facts: mergedFacts };
+    }
+  }
+
+  for (const [group, slot] of RECALL_SECTION_SLOTS) {
+    const container = result[group] as unknown as Record<string, SectionData>;
+    const current = container[slot];
+    if (!current?.summary) continue;
+    if (isCompatibleVector(current.embedding, config.embeddingDimensions)) continue;
+    const pre = (draft[group] as unknown as Record<string, SectionData>)[slot];
+    if (!pre?.summary || pre.summary !== current.summary) continue;
+    if (!isCompatibleVector(pre.embedding, config.embeddingDimensions)) continue;
+    // 逐槽重建容器与顶层对象，不 mutate updated 的对象图
+    result =
+      group === 'user'
+        ? {
+            ...result,
+            user: { ...result.user, [slot]: { ...current, embedding: pre.embedding as number[] } },
+          }
+        : {
+            ...result,
+            history: {
+              ...result.history,
+              [slot]: { ...current, embedding: pre.embedding as number[] },
+            },
+          };
+  }
+
+  return result;
+}
+
 // Memory updater（LLM-based）
 
 function buildCorrectionHint(correction: boolean, reinforcement: boolean): string {
@@ -577,17 +637,30 @@ export class MemoryUpdater {
         }
       }
 
+      // 锁外嵌入：在最新快照上预演 applyUpdates + stripUploadMentions 得 draft
+      // （两者都是纯函数，锁内会在 fresh 上重跑），对 draft 里缺向量的条目调 embedTexts。
+      // 嵌入是 HTTP 调用，不能持行锁——那会把同用户的并发写阻塞在网络上。
+      // 必须在 stripUploadMentions 之后嵌：strip 会改写 section summary，先嵌会产生立刻失效的向量
+      let draft: MemoryData | null = null;
+      if (getMemoryConfig().embeddingEnabled) {
+        try {
+          const latest = await getMemoryStorage().reload({ agentName, userId });
+          draft = stripUploadMentions(applyUpdates(latest, parsed, opts.threadId ?? null));
+          await embedMissingSections(draft);
+          await embedMissingFacts(draft);
+        } catch (e) {
+          // 预演失败不阻断更新：向量留待检索侧回填
+          draft = null;
+        }
+      }
+
       // 锁内 RMW：applyUpdates 重新作用于锁内的最新盘上状态。current 是 LLM 调用
       // 前读的快照（期间其它进程可能已落盘），直接 save 会把它覆盖掉。
       const saved = await getMemoryStorage().update(
-        async (fresh) => {
+        (fresh) => {
           let updated = applyUpdates(fresh, parsed, opts.threadId ?? null);
           updated = stripUploadMentions(updated);
-          // 新增 / 保留的 facts 与 sections 批量补齐向量后落盘（失败照常 save，等检索侧回填）。
-          // 必须在 stripUploadMentions 之后：strip 会改写 section summary，先嵌会产生立刻失效的向量
-          await embedMissingSections(updated);
-          await embedMissingFacts(updated);
-          return updated;
+          return draft ? mergePreembeddedVectors(updated, draft) : updated;
         },
         { agentName, userId },
       );

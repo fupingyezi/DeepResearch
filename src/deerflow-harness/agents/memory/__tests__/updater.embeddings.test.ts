@@ -9,7 +9,12 @@ import {
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
 import { PgMemoryStorage } from '../pg-storage';
-import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
+import {
+  getMemoryStorage,
+  resetMemoryStorage,
+  setMemoryStorage,
+  type MemoryStorage,
+} from '../storage';
 import {
   createMemoryFact,
   MemoryUpdater,
@@ -282,5 +287,51 @@ describe('updater 写侧嵌入', () => {
     expect(saved.history.recentMonths.embedding).toEqual(vec(summary.length));
     // 未被 strip 的 section 不受影响
     expect(saved.user.topOfMind.embedding).toEqual(vec(9));
+  });
+
+  it('嵌入 HTTP 在 update 事务（mutator）之外发起', async () => {
+    // 包一层 storage 记录「embed 调用是否发生在 mutator 执行期间」：
+    // 修复前 embedMissing* 在 mutator 内 await（持行锁调 HTTP），标记会为 true
+    const base = new PgMemoryStorage(new FakeSql());
+    let inMutator = false;
+    const embedDuringMutator: boolean[] = [];
+    const trackingStorage: MemoryStorage = {
+      load: (o) => base.load(o),
+      reload: (o) => base.reload(o),
+      save: (d, o) => base.save(d, o),
+      update: async (mutator, o) =>
+        base.update(async (fresh) => {
+          inMutator = true;
+          try {
+            return await mutator(fresh);
+          } finally {
+            inMutator = false;
+          }
+        }, o),
+    };
+    setMemoryStorage(trackingStorage);
+    setMemoryModelFactory(() =>
+      fakeModel(
+        JSON.stringify({
+          newFacts: [{ content: '锁外嵌入事实', category: 'context', confidence: 0.9 }],
+        }),
+        prompts,
+      ),
+    );
+    setMemoryEmbeddingsFactory(() =>
+      fakeEmbeddings(async (texts) => {
+        embedDuringMutator.push(inMutator);
+        return texts.map(() => vec(1));
+      }),
+    );
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('你好')], { userId: 'p01' });
+    expect(ok).toBe(true);
+    // 嵌入确实发生，且没有一次发生在 mutator（行锁持有期）内
+    expect(embedDuringMutator.length).toBeGreaterThan(0);
+    expect(embedDuringMutator.every((during) => !during)).toBe(true);
+
+    const saved = await getMemoryStorage().reload({ userId: 'p01' });
+    expect(saved.facts[0].embedding).toEqual(vec(1));
   });
 });
