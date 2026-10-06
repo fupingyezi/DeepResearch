@@ -290,6 +290,78 @@ describe('updater 写侧嵌入', () => {
     expect(saved.user.topOfMind.embedding).toEqual(vec(9));
   });
 
+  it('stripUploadMentions 命中 /mnt 路径与 <uploaded_files> 标签事实；多条目无 lastIndex 串扰', async () => {
+    // 顺序即不变量：f-late 命中后旧实现的共享 lastIndex 停在 18，f-en 的匹配位在 0 < 18
+    // 被漏检；f-path / f-tag 以非词字符开头，旧实现组外 \b 下永不命中
+    const scope = { agentName: null, userId: 'u13' };
+    const preset = {
+      version: '1.0' as const,
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+      user: {
+        workContext: { summary: '', updatedAt: '' },
+        personalContext: { summary: '', updatedAt: '' },
+        topOfMind: { summary: '', updatedAt: '' },
+      },
+      history: {
+        recentMonths: { summary: '', updatedAt: '' },
+        earlierContext: { summary: '', updatedAt: '' },
+        longTermBackground: { summary: '', updatedAt: '' },
+      },
+      facts: [
+        {
+          id: 'f-late',
+          content: '本次讨论重点是 upload file 的流程改进',
+          category: 'context' as const,
+          confidence: 0.8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          source: 'test',
+        },
+        {
+          id: 'f-en',
+          content: 'uploaded a file for review.',
+          category: 'context' as const,
+          confidence: 0.8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          source: 'test',
+        },
+        {
+          id: 'f-path',
+          content: '参考文件在 /mnt/user-data/uploads/report.pdf',
+          category: 'context' as const,
+          confidence: 0.8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          source: 'test',
+        },
+        {
+          id: 'f-tag',
+          content: '附件见 <uploaded_files> 里的文件',
+          category: 'context' as const,
+          confidence: 0.8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          source: 'test',
+        },
+        {
+          id: 'f-keep',
+          content: '用户偏好用 pnpm 管理依赖',
+          category: 'context' as const,
+          confidence: 0.8,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          source: 'test',
+        },
+      ],
+    };
+    await getMemoryStorage().save(preset, scope);
+
+    setMemoryModelFactory(() => fakeModel(JSON.stringify({ newFacts: [] }), prompts));
+    setMemoryEmbeddingsFactory(() => fakeEmbeddings(async (texts) => texts.map(() => vec(1))));
+
+    const ok = await new MemoryUpdater().updateMemory([humanMsg('继续')], { userId: 'u13' });
+    expect(ok).toBe(true);
+
+    const saved = await getMemoryStorage().reload(scope);
+    expect(saved.facts.map((f) => f.content)).toEqual(['用户偏好用 pnpm 管理依赖']);
+  });
+
   it('LLM 调用超时被 signal 打断：本轮记失败，队列不卡', async () => {
     // updateTimeoutMs=50：invoke 返回的 Promise 尊重 signal，abort 时 reject
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS, updateTimeoutMs: 50 });

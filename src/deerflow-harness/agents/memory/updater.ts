@@ -279,8 +279,13 @@ export async function updateMemoryFact(
 
 // Strip upload mentions
 
+// \b 只收进以词字符开头的两个英文分支：/mnt 路径与 <uploaded_files> 标签以非词字符
+// 开头，前置字符是中文/空格时「非词→非词」不构成词边界，组外的 \b 会让这两个分支永不命中
 const UPLOAD_SENTENCE_RE =
-  /[^.!?]*\b(?:upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
+  /[^.!?]*(?:\bupload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|\bfile\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
+// 判定用无 g 副本：带 g 的 test() 会推进 lastIndex，filter 跨迭代复用会让后续条目从
+// 上次命中的位置起匹配而漏检（replace 不受影响——它自行管理 lastIndex）。
+const UPLOAD_TEST_RE = new RegExp(UPLOAD_SENTENCE_RE.source, 'i');
 
 function stripUploadMentions(memory: MemoryData): MemoryData {
   // 惰性拷贝：无变更时返回原引用——pg-storage.update 以 `next === current`
@@ -305,9 +310,7 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
     }
   }
   if (Array.isArray(out.facts)) {
-    const kept = out.facts.filter((f) => !UPLOAD_SENTENCE_RE.test(f.content ?? ''));
-    // 重置 lastIndex（全局 regex test 副作用）
-    UPLOAD_SENTENCE_RE.lastIndex = 0;
+    const kept = out.facts.filter((f) => !UPLOAD_TEST_RE.test(f.content ?? ''));
     if (kept.length !== out.facts.length) {
       if (out === memory) out = JSON.parse(JSON.stringify(memory));
       out.facts = kept;
