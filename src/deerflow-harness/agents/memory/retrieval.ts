@@ -15,11 +15,11 @@
  * - RRF(k=60) 按**排名**融合——向量分与 BM25 分不同量纲，排名天然可比；
  * - 候选池宽 = max(topK, 20)（池窄时 4 个召回 section 会挤占 fact 名额、topK
  *   取不满；池只是候选空间，最终组装仍按 final 取 topK，注入条数不变）；
- * - rerank 精排池头 20 条，池尾按 RRF 序衔接；未注册 / 失败 → 状态切换告警 +
+ * - rerank 精排池头 20 条，池尾接续倒数排名分（rank 从 20 起）；未注册 / 失败 → 状态切换告警 +
  *   保持 RRF 序（本项目惯例静默降级，与 obsidian-rag fail-fast 的刻意差异点）；
  * - 组装：final =（rerank ?? RRF）×（0.5 + 0.5×confidence）取 topK——rerank 只
  *   提供精排**顺序**（原始分压缩 0.99+ 量级无意义，转成与 RRF 同量纲的倒数
- *   排名分 1/(RRF_K+rank+1)），两支可跨条目比较；
+ *   排名分 1/(RRF_K+rank+1)，池头为精排名次、池尾为接续名次），两支可跨条目比较；
  *   workContext/personalContext 恒保留（身份信息）；history 三段留池内最优一段；
  *   topOfMind 进池才留。双路全空 → null → 不注入。
  *
@@ -354,7 +354,8 @@ interface PoolEntry {
   /** 供 rerank 的正文（fact.content / section.summary）。 */
   text: string;
   rrf: number;
-  /** 精排倒数排名分（1/(RRF_K+rank+1)，与 RRF 同量纲）；未精排 → null。
+  /** 倒数排名分（1/(RRF_K+rank+1)，与 RRF 同量纲）：池头为精排名次、
+   *  池尾为接续名次（rank 从 RERANK_CANDIDATES 起）；未参与精排 → null。
    *  provider 原始分高度压缩（不相关也 0.99+），量级不可比，只取它给出的顺序。 */
   rerank: number | null;
   /** provider 原始精排分（仅调试用，不做任何计算）。 */
@@ -489,7 +490,8 @@ export interface FactScoreDetail {
   inVectorLeg: boolean;
   /** RRF 融合分；未进候选池 → null。 */
   rrf: number | null;
-  /** 精排倒数排名分（与 RRF 同量纲，可跨条目比较）；未精排 / 精排失败 → null。 */
+  /** 倒数排名分（与 RRF 同量纲，可跨条目比较）：池头精排名次、池尾接续名次；
+   *  未参与精排 / 精排失败 → null。 */
   rerank: number | null;
   /** provider 原始精排分（分布压缩，仅调试用）；未精排 → null。 */
   rerankRaw: number | null;
@@ -688,7 +690,7 @@ export async function retrieveMemory(
 
   const pool = buildCandidatePool(data, fused);
 
-  // ---- rerank 精排池头，池尾按 RRF 序衔接 ----
+  // ---- rerank 精排池头，池尾接续倒数排名分 ----
   let rerankUsed = false;
   let ranked = pool;
   if (options.rerank && pool.length > 1) {
@@ -715,6 +717,12 @@ export async function retrieveMemory(
       // 精排的作用被还原为「重排」，final 的 rrf / rerank 两支才可跨条目比较
       head.forEach((e, i) => {
         e.rerank = 1 / (RRF_K + i + 1);
+      });
+      // 池尾接续名次分（rank = RERANK_CANDIDATES + i）：头 min 1/(RRF_K+20) >
+      // 尾 max 1/(RRF_K+21)，边界单调——尾段若沿用 RRF 分（两路求和，最高
+      // ~0.033），会反超被精排压低的后段池头，rerank 一开尾段反而窜前
+      tail.forEach((e, i) => {
+        e.rerank = 1 / (RRF_K + RERANK_CANDIDATES + i + 1);
       });
       ranked = [...head, ...tail];
     }

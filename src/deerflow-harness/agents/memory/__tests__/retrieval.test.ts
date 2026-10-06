@@ -603,6 +603,29 @@ describe('retrieveMemory rerank 精排', () => {
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['high', 'low']);
   });
 
+  it('池尾接续倒数排名分：topK > 20 时尾段不反超池头', async () => {
+    // 22 条 fact 词面同分（同 CJK token 集）、向量同分（均 unit(0.9)）：
+    // 双路各列数据序 → RRF = 2/(61+i)，池尾 m20/m21 高达 ~0.0247/0.0244。
+    // 若池尾沿用 RRF 分，会反超精排池头（1/61..1/80 = 0.0164..0.0125），
+    // rerank 一开尾段反而窜进 topK 前部——接续名次分后按 m0..m21 单调
+    const many = memory(
+      Array.from({ length: 22 }, (_, i) => fact(`量子计算方向 ${i}`, 0.9, `m${i}`, unit(0.9))),
+    );
+    const result = await retrieveMemory(many, '量子计算', {
+      queryEmbedding: QUERY_VEC,
+      rerank: async () => Array.from({ length: 20 }, (_, i) => 1 - i * 0.01),
+      topK: 22,
+    });
+    expect(result!.rerankUsed).toBe(true);
+    const pickedIds = result!.picked.facts.map((f) => f.id);
+    expect(pickedIds.slice(0, 2)).toEqual(['m0', 'm1']);
+    expect(pickedIds.slice(-2)).toEqual(['m20', 'm21']);
+    const byId = new Map(result!.facts.map((d) => [d.id, d]));
+    expect(byId.get('m19')!.rerank).toBeCloseTo(1 / 80, 10);
+    expect(byId.get('m20')!.rerank).toBeCloseTo(1 / 81, 10);
+    expect(byId.get('m21')!.rerank).toBeCloseTo(1 / 82, 10);
+  });
+
   it('rerankQuery 显式传入时用于调用（而非拼接的词面 query）', async () => {
     const rerank = vi.fn(async () => [0.1, 0.2, 0.3]);
     await retrieveMemory(data, '量子计算 有什么 进展', { rerank, rerankQuery: '量子计算' });
