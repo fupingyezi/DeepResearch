@@ -53,7 +53,9 @@ const DEFAULT_TOP_K = 8;
  */
 const SEMANTIC_MATCH_THRESHOLD = 0.6;
 
-/** 中英停用词（只列高频虚词，避免把「的/了/the/a」当有效信号）。 */
+/** latin 停用词（只列高频虚词，避免把「the/a」当有效信号）。
+ *  CJK 不设停用词：BM25 的 idf 按语料现算，天然压掉全语料高频字；
+ *  停用词表只拦单字、拦不住 bigram（「的」删了仍以「好的」这类二元组进索引）。 */
 const STOP_WORDS = new Set([
   'a',
   'an',
@@ -87,41 +89,6 @@ const STOP_WORDS = new Set([
   'with',
   'you',
   'your',
-  '的',
-  '了',
-  '和',
-  '是',
-  '在',
-  '我',
-  '有',
-  '就',
-  '不',
-  '人',
-  '都',
-  '一',
-  '上',
-  '也',
-  '很',
-  '到',
-  '说',
-  '要',
-  '去',
-  '会',
-  '着',
-  '没有',
-  '看',
-  '好',
-  '自',
-  '这',
-  '那',
-  '吗',
-  '呢',
-  '吧',
-  '请',
-  '帮',
-  '怎么',
-  '什么',
-  '如何',
 ]);
 
 /**
@@ -148,7 +115,7 @@ export function tokenize(text: string): string[] {
     const run = match[0];
     for (let i = 0; i < run.length; i++) {
       const ch = run[i];
-      if (!STOP_WORDS.has(ch)) tokens.push(ch);
+      tokens.push(ch);
       if (i + 1 < run.length) tokens.push(run.slice(i, i + 2));
     }
   }
