@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryDegradeStats, resetMemoryDegradeStats } from '../stats';
 import type { Fact, MemoryData, SectionData } from '../types';
 import { FakeSql } from './fake-sql';
 
@@ -58,7 +59,9 @@ describe('PgMemoryStorage', () => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
     sql = new FakeSql();
     storage = new PgMemoryStorage(sql);
+    resetMemoryDegradeStats();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -181,6 +184,23 @@ describe('PgMemoryStorage', () => {
     expect(result).toBeNull();
     const after = await storage.reload(scope);
     expect(after.facts.map((f) => f.content)).toEqual(['a']);
+    expect(getMemoryDegradeStats().storageUpdateFailures).toBe(1);
+  });
+
+  it('load 失败：健康→故障打一次 warn、故障期静默计数，恢复打 info', async () => {
+    // 连续两次失败：warn 只在健康→故障切换时打一次，计数逐次累加
+    sql.failNext = new Error('pg down');
+    expect((await storage.load(scope)).facts).toEqual([]);
+    sql.failNext = new Error('pg down');
+    expect((await storage.load(scope)).facts).toEqual([]);
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.info).not.toHaveBeenCalled();
+    expect(getMemoryDegradeStats().storageLoadFailures).toBe(2);
+
+    // 恢复：打一次 info，健康态复位（再故障会重新打 warn）
+    expect((await storage.load(scope)).facts).toEqual([]);
+    expect(console.info).toHaveBeenCalledTimes(1);
   });
 
   it('update 删除 fact 后向量表同步重建（DELETE + INSERT）', async () => {

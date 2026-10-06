@@ -17,6 +17,7 @@
  */
 
 import { getMemoryConfig } from './config';
+import { memoryDegradeStats } from './stats';
 import {
   isCompatibleVector,
   isUnitVector,
@@ -82,7 +83,9 @@ const UPSERT_STATE = `
 export class PgMemoryStorage implements MemoryStorage {
   constructor(private readonly sql: MemorySqlExecutor) {}
 
-  private warnedLoadFailure = false;
+  /** load 链路健康态：只在「健康→故障」「故障→健康」切换时打日志，
+   *  故障期内逐次读都失败，逐次告警会刷屏。 */
+  private loadHealthy = true;
 
   private toScope(opts: { agentName?: string | null; userId?: string | null }): Scope {
     const agentName = opts.agentName ?? null;
@@ -210,15 +213,21 @@ export class PgMemoryStorage implements MemoryStorage {
       // 单语句快照读：state 与 vectors 同一快照（见 SELECT_STATE_WITH_VECTORS），
       // 不先读 jsonb 再补一条向量查询——两条查询间并发写提交会读出错位组合
       const result = await this.sql.query(SELECT_STATE_WITH_VECTORS, [scope.key]);
+      if (!this.loadHealthy) {
+        this.loadHealthy = true;
+        console.info('[memory/pg-storage] load recovered');
+      }
       if (result.rows.length === 0) return createEmptyMemory();
       const data = this.parseStoredData(result.rows[0].data);
       this.applyVectorRows(result.rows[0].vectors, data);
       return data;
     } catch (e) {
-      // PG 故障回落空 schema（记忆功能不损，仅内容暂空）。
-      // 只告警一次：中断期每轮聊天都走这里，逐次告警会刷屏。
-      if (!this.warnedLoadFailure) {
-        this.warnedLoadFailure = true;
+      memoryDegradeStats.storageLoadFailures += 1;
+      // PG 故障回落空 schema（记忆功能不损，仅内容暂空）。「只打一次 warn」
+      // 会让持续降级在日志里彻底消失——这里在健康→故障切换时打 warn、
+      // 故障期内静默计数，恢复时在成功路径打 info，计数随 stats 暴露
+      if (this.loadHealthy) {
+        this.loadHealthy = false;
         console.warn('[memory/pg-storage] load failed, returning empty memory:', e);
       }
       return createEmptyMemory();
@@ -285,6 +294,7 @@ export class PgMemoryStorage implements MemoryStorage {
       });
     } catch (e) {
       if (e instanceof MutatorError) throw e.origin;
+      memoryDegradeStats.storageUpdateFailures += 1;
       console.error('[memory/pg-storage] update failed:', e);
       return null;
     }
