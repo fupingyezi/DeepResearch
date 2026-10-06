@@ -21,17 +21,23 @@ import {
   EMBEDDING_BATCH_LIMIT,
   getMemoryConfig,
   maxImageBytesFromEnv,
+  PgMemoryStorage,
   setMemoryConfig,
   setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
+  setMemoryRerankerFactory,
+  setMemoryStorage,
   setParentHistoryProvider,
   setThreadImageFetcher,
   setTitleModelFactory,
+  type MemorySqlExecutor,
   type ThreadService,
   type ModelConfig,
 } from '@/deerflow-harness';
 import { OpenAIEmbeddings } from '@langchain/openai';
+import { getClient, initialMemoryDb, query } from '@/lib/db';
 import { getFile, getMimeType } from '@/lib/storage';
+import { createZhipuReranker } from '@/lib/zhipu-rerank';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,
@@ -56,6 +62,7 @@ let initPromise: Promise<ThreadService> | null =
 let memoryFactoryRegistered = false;
 let titleFactoryRegistered = false;
 let embeddingsFactoryRegistered = false;
+let rerankerFactoryRegistered = false;
 let imageFetcherRegistered = false;
 let parentHistoryProviderRegistered = false;
 
@@ -140,6 +147,9 @@ export function ensureMemoryEmbeddingsFactory(): void {
       // float 数组 —— 结果是数组被当字节流重解释，得到 256 个（原 1024）无意义数值，
       // 余弦算成 NaN，语义检索静默退回词面检索。指定后 SDK 原样返回，实测维度与语义均正确。
       encodingFormat: 'float',
+      // SDK 缺省超时 10 分钟：单请求挂起会拖住整条记忆链路，与 LLM 调用的
+      // AbortSignal.timeout(updateTimeoutMs) 同口径兜底
+      timeout: getMemoryConfig().updateTimeoutMs,
       configuration: {
         baseURL: process.env.DEERFLOW_EMBEDDING_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
       },
@@ -153,6 +163,109 @@ export function ensureMemoryEmbeddingsFactory(): void {
       embeddingDimensions: Math.min(2048, Math.max(256, Math.round(dims))),
     });
   }
+}
+
+/**
+ * 把智谱 rerank 客户端注入给 memory 子系统（RAG 精排）。
+ * DEERFLOW_RERANK_ENABLED='0' 显式关：工厂返回 null 并把 config 关掉（检索保持 RRF 序）；
+ * 无 DEERFLOW_RERANK_API_KEY / ZHIPU_API_KEY 时工厂返回 null（同 embedding 口径，
+ * 检索保持 RRF 序继续）。导出供 memory-service 预览接口在 threadService 尚未
+ * 初始化时也能提前注册。
+ */
+export function ensureMemoryRerankerFactory(): void {
+  if (rerankerFactoryRegistered) return;
+  rerankerFactoryRegistered = true;
+  if (process.env.DEERFLOW_RERANK_ENABLED === '0') {
+    setMemoryConfig({ ...getMemoryConfig(), rerankEnabled: false });
+    setMemoryRerankerFactory(() => null);
+    return;
+  }
+  setMemoryRerankerFactory(() => {
+    const apiKey = process.env.DEERFLOW_RERANK_API_KEY || process.env.ZHIPU_API_KEY;
+    if (!apiKey) return null;
+    return createZhipuReranker({
+      apiKey,
+      model: process.env.DEERFLOW_RERANK_MODEL || 'rerank',
+      baseUrl: process.env.DEERFLOW_RERANK_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+    });
+  });
+}
+
+/**
+ * 把 lib/db 的连接池包装成 harness 的最小 SQL 接口（query + transaction），
+ * 供 PgMemoryStorage 使用。transaction 语义：fn 抛错 → ROLLBACK 后原样上抛；
+ * 不支持嵌套（记忆存储不嵌套事务，显式抛错防误用）。
+ */
+function makeMemorySqlExecutor(): MemorySqlExecutor {
+  const txExecutor = (client: Awaited<ReturnType<typeof getClient>>): MemorySqlExecutor => ({
+    query: async (text, params) => {
+      const result = await client.query(text, (params ?? []) as any[]);
+      return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount };
+    },
+    transaction: async () => {
+      throw new Error('[wiring] nested memory transactions are not supported');
+    },
+  });
+  return {
+    query: async (text, params) => {
+      const result = await query(text, (params ?? []) as any[]);
+      return {
+        rows: (result?.rows ?? []) as Record<string, unknown>[],
+        rowCount: result?.rowCount ?? null,
+      };
+    },
+    transaction: async (fn) => {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        const out = await fn(txExecutor(client));
+        await client.query('COMMIT');
+        return out;
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+const globalForMemoryStorage = globalThis as unknown as {
+  __memoryStorageInit?: Promise<void>;
+};
+
+let memoryStorageReady = false;
+
+/**
+ * 记忆存储后端装配：pgvector 可用（initialMemoryDb 成功）→ 注入 PgMemoryStorage；
+ * 否则 warnOnce 保持 Noop 后端（记忆功能关闭，聊天不阻断）。
+ * 幂等 + dev 下 globalThis 缓存 init promise（HMR 重新求值模块不重复建连）。
+ * 导出供 memory-service 在 threadService 尚未初始化时也能提前装配。
+ */
+export async function ensureMemoryStorage(): Promise<void> {
+  if (memoryStorageReady) return;
+  let p: Promise<void> | null =
+    process.env.NODE_ENV === 'production'
+      ? null
+      : (globalForMemoryStorage.__memoryStorageInit ?? null);
+  if (!p) {
+    p = (async () => {
+      // 先确保 embedding 工厂注册：env 的维度覆盖（DEERFLOW_EMBEDDING_DIMENSIONS）
+      // 在其中合入 MemoryConfig，pgvector 列维度必须按覆盖后的值初始化
+      ensureMemoryEmbeddingsFactory();
+      const { embeddingDimensions } = getMemoryConfig();
+      const init = await initialMemoryDb(embeddingDimensions);
+      if (init.ok) {
+        setMemoryStorage(new PgMemoryStorage(makeMemorySqlExecutor()));
+      } else {
+        console.warn(`[wiring] pgvector unavailable, memory disabled: ${init.reason}`);
+      }
+      memoryStorageReady = true;
+    })();
+    if (process.env.NODE_ENV !== 'production') globalForMemoryStorage.__memoryStorageInit = p;
+  }
+  await p;
 }
 
 /**
@@ -230,9 +343,12 @@ function getDefaultModelConfig(): ModelConfig {
 async function build(): Promise<ThreadService> {
   const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
 
+  // 记忆存储后端：pgvector 就绪则切 PG（含旧文件懒迁移），否则保留文件后端
+  await ensureMemoryStorage();
   ensureMemoryModelFactory();
   ensureTitleModelFactory();
   ensureMemoryEmbeddingsFactory();
+  ensureMemoryRerankerFactory();
   ensureThreadImageFetcher();
   ensureParentHistoryProvider(checkpointer);
 

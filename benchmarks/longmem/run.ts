@@ -35,7 +35,9 @@ import { ChatOpenAI } from '@langchain/openai';
 
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
 import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
+import { getMemoryStorage } from '../../src/deerflow-harness/agents/memory/storage';
 import { getMemoryUpdateStats } from '../../src/deerflow-harness/agents/memory/updater';
+import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '../../src/server/wiring';
 import { computeRunCost } from '../../src/deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
@@ -846,6 +848,19 @@ export async function main(): Promise<void> {
       baseUrl: config.agent.baseUrl,
       apiKey: config.agent.apiKey,
     });
+    // 装配记忆存储到 PG（与产品链路同一条 wiring）：pgvector 就绪则切
+    // PgMemoryStorage，否则保持 Noop——写记忆静默丢弃、检索恒空。评测在这种
+    // 空转状态下会得出「factCount=0」的假成绩，必须失败退出而不是照跑。
+    await ensureMemoryStorage();
+    ensureMemoryRerankerFactory();
+    if (typeof getMemoryStorage().vectorSearch !== 'function') {
+      console.error(
+        '[LongMem] 记忆存储未装配到 PG（DATABASE_URL 缺失或 pgvector 不可用）：' +
+          '记忆写入与检索会静默空转，评测结果无意义。请先 docker compose up -d postgres 并检查 env。',
+      );
+      process.exit(1);
+    }
+    console.log('[LongMem] 记忆存储: PG（scope 按 longmem_<id> 隔离）');
   }
 
   // ── 两阶段记忆评测准备 ──
@@ -854,11 +869,6 @@ export async function main(): Promise<void> {
       console.error('[LongMem] --ingest 与 --no-memory 互斥：两阶段评测必须开启记忆系统');
       process.exit(1);
     }
-    // 把记忆落盘隔离到 benchmark 本地目录，避免污染 ~/.deer-flow，且便于清理
-    if (!process.env.DEERFLOW_DATA_DIR) {
-      process.env.DEERFLOW_DATA_DIR = path.resolve('benchmarks/.memory-store');
-    }
-    console.log(`[LongMem] 记忆存储目录: ${process.env.DEERFLOW_DATA_DIR}`);
   }
 
   // 打印运行配置
@@ -895,8 +905,8 @@ export async function main(): Promise<void> {
   const startTime = Date.now();
   const results: LongMemReport['results'] = [];
 
-  // ingest 模式强制串行：每个 example 写同一记忆文件、且抽取调用密集，
-  // 串行可保证进度日志清晰并避免 LLM 限流。
+  // ingest 模式强制串行：每个 example 的 session 写同一 PG scope、且抽取调用密集，
+  // 串行可保证进度日志清晰并避免 LLM 限流（并发安全已由 PG 行锁兜底）。
   const batchSize = args.ingest ? 1 : args.concurrency;
   const runOpts = { ingest: args.ingest };
   for (let i = 0; i < dataset.length; i += batchSize) {
@@ -986,7 +996,7 @@ export async function main(): Promise<void> {
 // 此前是裸的 `main().catch(...)`，而本模块同时被 research-qa/run.ts 以
 // `await import('../longmem/run')` 的方式路由调用 —— 于是 import 会触发一次
 // main()、紧接着 `await longMemMain()` 又跑第二次，**两个 run 并发抢同一个输出
-// 文件与同一个 benchmarks/.memory-store**。
+// 文件与同一批 PG 记忆 scope**。
 const isDirectRun =
   !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 

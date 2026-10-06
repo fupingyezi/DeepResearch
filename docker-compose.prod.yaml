@@ -6,9 +6,9 @@
 #   - 中间件端口只绑定 127.0.0.1：app 走 compose 内部网络访问，不对公网暴露；
 #     运维从服务器本地或 SSH 隧道直连
 #   - 依赖服务健康后才拉起 app，避免启动期连接失败
-#   - 运行期生成的数据（记忆/沙箱/扩展状态/自定义技能）挂卷持久化
-#     注：memory 与 extensions_config 的落盘位置由 app 的 environment 显式
-#     指到挂载目录内（代码默认值落在 ~ 与 cwd，不在卷上会丢数据）。
+#   - 运行期生成的数据（沙箱/扩展状态/自定义技能）挂卷持久化
+#     注：extensions_config 的落盘位置由 app 的 environment 显式指到挂载目录内
+#     （代码默认值落在 cwd，不在卷上会丢数据）；记忆已走 PG，无需卷。
 
 # 容器日志上限（所有服务共用）：compose 默认的 json-file 驱动不轮转，长期跑会把磁盘
 # 写满 —— 磁盘满时这台机器连 SSH 都会失去响应（2026-09 生产事故的成因之一）。
@@ -32,9 +32,7 @@ services:
     env_file:
       - .env.production
     environment:
-      # 长期记忆默认写 ~/.deer-flow，指到卷内目录防容器重建丢数据
-      DEERFLOW_DATA_DIR: /app/.memory
-      # MCP/skill 启用状态默认写 {cwd}/extensions_config.json，同样指到卷内
+      # MCP/skill 启用状态默认写 {cwd}/extensions_config.json，指到卷内防容器重建丢数据
       DEERFLOW_EXTENSIONS_CONFIG_PATH: /app/.data/extensions_config.json
       # 关掉 Next 自带的信号清理（server.close → exit(0)）：否则 SIGTERM 一到
       # 进程就被 Next 直接退出，instrumentation 的排水序列根本跑不完
@@ -49,8 +47,7 @@ services:
       minio:
         condition: service_started
     volumes:
-      # 长期记忆、沙箱工作区、扩展启用状态、自定义技能：容器重建后需保留
-      - app_memory:/app/.memory
+      # 沙箱工作区、扩展启用状态、自定义技能：容器重建后需保留
       - app_extensions:/app/.data
       - app_sandbox:/app/.sandbox
       - app_skills_custom:/app/skills/custom
@@ -70,7 +67,9 @@ services:
 
   postgres:
     logging: *default-logging
-    image: postgres:15
+    # pgvector 官方镜像 = postgres:15 + vector 扩展（记忆检索的向量列），
+    # 数据卷与 postgres:15 兼容；扩展创建失败时应用自动关闭记忆功能
+    image: pgvector/pgvector:pg15
     restart: unless-stopped
     # 多进程部署：连接数 = 每进程 pg 池上限 × 进程数 + 管理余量。
     # 官方镜像缺省 100，3 进程 × 默认池即可触顶（超限请求直接 5xx，表现为
@@ -128,7 +127,6 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
-  app_memory:
   app_extensions:
   app_sandbox:
   app_skills_custom:

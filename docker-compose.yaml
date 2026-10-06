@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15
+    # pgvector 官方镜像 = postgres:15 + vector 扩展（记忆检索的向量列），
+    # 与 postgres:15 同版本号磁盘格式，数据卷可直接沿用、回滚换回原镜像同样安全
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_DB: DeepResearch
       POSTGRES_USER: yezi

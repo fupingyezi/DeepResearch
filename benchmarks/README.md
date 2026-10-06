@@ -124,7 +124,7 @@ benchmarks/
 │   ├── run.ts            # 评测主脚本（CLI 参数：--ingest / --type / --limit / --history-mode ...）
 │   ├── agent.ts          # Agent 包装器（PREFIX / INGEST 两种历史模式）
 │   ├── dataset.ts        # 官方数据集格式适配
-│   └── ingest.ts         # 记忆预写入（逐 session 落盘 memory.json，按题隔离 userId）
+│   └── ingest.ts         # 记忆预写入（逐 session 落盘 PG memory_state，按题隔离 userId）
 └── research-qa/          # 研究 QA 套件
     ├── README.md         # 详细说明
     ├── run.ts            # 评测主脚本

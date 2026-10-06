@@ -363,9 +363,9 @@ export class DeerFlowClient {
     if (this.explicitSystemPrompt) return this.explicitSystemPrompt;
 
     // memory 作用域 agent 名固定为 null：lead 对话使用「跨 agent 全局 per-user」
-    // 记忆（users/{userId}/memory.json），对齐 deer-flow 2.0 默认对话 agent_name=None。
+    // 记忆（scope_key=`${userId}::`），对齐 deer-flow 2.0 默认对话 agent_name=None。
     // 注意与展示用 agentId（opts.agentName='lead'，用于事件/生命周期/缓存 key）解耦——
-    // 这里**不要**用 opts.agentName，否则会落到 per-agent 文件而读不到跨 agent 全局记忆。
+    // 这里**不要**用 opts.agentName，否则会落到 per-agent scope 而读不到跨 agent 全局记忆。
     try {
       return await buildLeadAgentSystemPrompt({
         agentName: null,
@@ -556,7 +556,7 @@ export class DeerFlowClient {
     //
     // memory 作用域：lead 对话**不写** ctx.agent_name（保持 undefined → null），
     // 使 memoryMiddleware 把对话总结落到「跨 agent 全局 per-user」记忆
-    // users/{userId}/memory.json，与注入侧 / 读 API 三侧一致（对齐 deer-flow 2.0）。
+    // scope_key=`${userId}::`，与注入侧 / 读 API 三侧一致（对齐 deer-flow 2.0）。
     // agentId（='lead'）仅用于对外事件/生命周期/缓存 key，不参与 memory 路径决策。
     if (ctx) {
       ctx.currentModelConfig = this.modelConfig;

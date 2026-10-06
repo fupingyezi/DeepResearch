@@ -1,7 +1,7 @@
 /**
  * Memory data schema
  *
- * 文件以 JSON 形式落盘。所有时间戳为 ISO-8601 + `Z` 后缀（UTC）。
+ * 以 JSON 结构持久化（PG jsonb 列）。所有时间戳为 ISO-8601 + `Z` 后缀（UTC）。
  */
 
 export type FactCategory =
@@ -17,8 +17,8 @@ export interface SectionData {
   /** ISO-8601 with `Z` suffix; 空字符串表示 "从未更新过"。 */
   updatedAt: string;
   /**
-   * 语义向量。仅参与检索打分的 section 生成（topOfMind 与 history 三段）；
-   * 恒保留的 workContext/personalContext 不参与打分、不存向量。
+   * 语义向量。仅参与检索召回的 section 生成（topOfMind 与 history 三段）；
+   * 恒保留的 workContext/personalContext 不进召回、不存向量。
    * 旧数据缺失；summary 改写后旧向量随整槽替换丢弃，由写侧重嵌或回填补齐。
    */
   embedding?: number[];
@@ -101,4 +101,73 @@ export function validateAgentName(agentName: string): void {
       `Invalid agent name ${JSON.stringify(agentName)}: names must match ${AGENT_NAME_PATTERN}`,
     );
   }
+}
+
+/**
+ * 把持久层读出的 JSON 合并到空 schema，保证下游字段安全（防御旧数据缺字段 /
+ * 结构漂移）。facts 的非法 embedding（非数组 / 含非有限数）剥除，避免污染检索侧；
+ * 维度不匹配的合法向量保留，由检索 / 回填按 config 维度判定失效并重算。
+ */
+export function mergeWithEmpty(parsed: unknown): MemoryData {
+  const empty = createEmptyMemory();
+  const p = (parsed ?? {}) as {
+    lastUpdated?: unknown;
+    user?: { workContext?: unknown; personalContext?: unknown; topOfMind?: unknown };
+    history?: { recentMonths?: unknown; earlierContext?: unknown; longTermBackground?: unknown };
+    facts?: unknown;
+  };
+  return {
+    version: '1.0',
+    lastUpdated: typeof p.lastUpdated === 'string' ? p.lastUpdated : empty.lastUpdated,
+    user: {
+      workContext: mergeSection(p.user?.workContext, empty.user.workContext),
+      personalContext: mergeSection(p.user?.personalContext, empty.user.personalContext),
+      topOfMind: mergeSection(p.user?.topOfMind, empty.user.topOfMind),
+    },
+    history: {
+      recentMonths: mergeSection(p.history?.recentMonths, empty.history.recentMonths),
+      earlierContext: mergeSection(p.history?.earlierContext, empty.history.earlierContext),
+      longTermBackground: mergeSection(
+        p.history?.longTermBackground,
+        empty.history.longTermBackground,
+      ),
+    },
+    facts: Array.isArray(p.facts)
+      ? p.facts.filter((f) => f && typeof f === 'object').map((f) => sanitizeLoadedFact(f as Fact))
+      : [],
+  };
+}
+
+function sanitizeLoadedFact(f: Fact): Fact {
+  if (f.embedding != null) {
+    const v: unknown = f.embedding;
+    const ok = Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+    if (!ok) {
+      const rest = { ...f };
+      delete rest.embedding;
+      return rest;
+    }
+  }
+  return f;
+}
+
+/**
+ * section 合并：保留 summary/updatedAt 与合法的 embedding 向量。
+ * 向量口径与 sanitizeLoadedFact 一致——非数组 / 含非有限数剥除；维度不符的
+ * 合法向量保留，由检索 / 回填按 config 维度判定失效并重算。
+ */
+function mergeSection(s: unknown, dft: SectionData): SectionData {
+  if (!s || typeof s !== 'object') return { ...dft };
+  const src = s as Partial<SectionData>;
+  const out: SectionData = {
+    summary: typeof src.summary === 'string' ? src.summary : dft.summary,
+    updatedAt: typeof src.updatedAt === 'string' ? src.updatedAt : dft.updatedAt,
+  };
+  if (
+    Array.isArray(src.embedding) &&
+    src.embedding.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
+  ) {
+    out.embedding = src.embedding as number[];
+  }
+  return out;
 }

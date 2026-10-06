@@ -1,8 +1,8 @@
 /**
- * 记忆域服务：fact CRUD / 检索预览 / 注入模式偏好。
+ * 记忆域服务：fact CRUD / 注入模式偏好（检索效果预览独立在 memory-service.preview.ts）。
  *
  * 约定（与注入侧、异步写入侧一致）：全部操作走「跨 agent 全局 per-user」
- * 记忆（agentName=null → users/{userId}/memory.json），对齐 deer-flow 2.0
+ * 记忆（agentName=null，PG 双表，scope_key=${userId}::），对齐 deer-flow 2.0
  * 默认对话 agent_name=None 行为。
  *
  * 行为冻结点：
@@ -17,14 +17,13 @@ import {
   createMemoryFact,
   deleteMemoryFact,
   getMemoryData,
-  previewMemoryRetrieval,
   updateMemoryFact,
   type FactCategory,
   type MemoryData,
 } from '@/deerflow-harness';
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
 import { AppError } from '@/server/http';
-import { ensureMemoryEmbeddingsFactory } from '@/server/wiring';
+import { ensureMemoryStorage } from '@/server/wiring';
 
 /** fact 分类白名单（单一出处：facts 路由新建与更新共用）。 */
 const VALID_CATEGORIES = new Set<FactCategory>([
@@ -72,7 +71,6 @@ export interface MemoryServiceDeps {
   createFact: typeof createMemoryFact;
   updateFact: typeof updateMemoryFact;
   deleteFact: typeof deleteMemoryFact;
-  preview: typeof previewMemoryRetrieval;
   getMode: typeof getMemoryMode;
   setMode: typeof setMemoryMode;
 }
@@ -82,16 +80,19 @@ export class MemoryService {
 
   /** 读取当前用户记忆（结构化 summary + facts）。 */
   async getMemory(userId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.read(null, userId);
   }
 
   /** 清空当前用户记忆。 */
   async clearMemory(userId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.clear(null, userId);
   }
 
   /** 新建 fact（来源 manual）。category / confidence 非法值回落默认。 */
   async createFact(userId: string, input: CreateMemoryFactInput): Promise<MemoryData> {
+    await ensureMemoryStorage();
     return this.deps.createFact(
       input.content,
       normalizeFactCategory(input.category),
@@ -107,6 +108,7 @@ export class MemoryService {
     factId: string,
     input: UpdateMemoryFactInput,
   ): Promise<MemoryData> {
+    await ensureMemoryStorage();
     const patch: { content?: string; category?: FactCategory; confidence?: number } = {};
     if (input.content !== undefined) patch.content = input.content;
     if (input.category !== undefined && VALID_CATEGORIES.has(input.category as FactCategory)) {
@@ -128,6 +130,7 @@ export class MemoryService {
 
   /** 删除 fact；fact 不存在 → MEMORY_FACT_NOT_FOUND。 */
   async deleteFact(userId: string, factId: string): Promise<MemoryData> {
+    await ensureMemoryStorage();
     try {
       return await this.deps.deleteFact(factId, null, userId);
     } catch (e) {
@@ -136,16 +139,6 @@ export class MemoryService {
       }
       throw e;
     }
-  }
-
-  /**
-   * 检索模式效果预览：与真实注入走同一段代码。
-   * 前置幂等注册 embedding 工厂（threadService 未初始化时也要能向量化 query，
-   * 否则退化为纯词面预览）。
-   */
-  async previewRetrieval(userId: string, query: string): Promise<unknown> {
-    ensureMemoryEmbeddingsFactory();
-    return this.deps.preview({ agentName: null, userId, query });
   }
 
   /** 注入模式偏好（未设置过 → inject + isDefault 标记）。 */
@@ -165,7 +158,6 @@ const defaultDeps: MemoryServiceDeps = {
   createFact: createMemoryFact,
   updateFact: updateMemoryFact,
   deleteFact: deleteMemoryFact,
-  preview: previewMemoryRetrieval,
   getMode: getMemoryMode,
   setMode: setMemoryMode,
 };

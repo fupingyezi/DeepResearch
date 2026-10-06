@@ -1,31 +1,38 @@
 /**
  * Memory storage。
  *
- * 关键特性：
- * - mtime cache（key=`{userId}::{agentName}`，None 用空串）。
- * - 原子写：写入临时文件后 `rename`。
- * - JSON 损坏 / IO 失败时回退到空 schema。
+ * 单后端：PgMemoryStorage（见 pg-storage.ts），wiring 侧 `setMemoryStorage()`
+ * 注入。jsonb 存结构、memory_vectors 存向量；并发写走 PG 行锁事务。
+ *
+ * 注册表默认是 NoopMemoryStorage：PG 尚未装配（或装配失败）期间记忆功能关闭
+ * ——load 返回空 schema、写操作静默放弃，不抛错不阻断聊天。
  */
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createEmptyMemory } from './types';
+import type { MemoryData } from './types';
 
-import { getDistLock, type DistLockHandle } from '../../runtime/locks/dist-lock';
-import { getMemoryConfig } from './config';
-import {
-  agentMemoryFile,
-  getBaseDir,
-  memoryFile,
-  userAgentMemoryFile,
-  userMemoryFile,
-} from './paths';
-import { createEmptyMemory, MemoryData, SectionData, utcNowIsoZ, validateAgentName } from './types';
+/**
+ * harness 侧的最小 SQL 接口（query + transaction），由 app 层包装 @/lib/db 的
+ * 连接池注入（模式同 checkpointer/factory）。harness 不反向依赖 app 层，
+ * 也不依赖 pg 驱动的具体类型。
+ */
+export interface MemorySqlExecutor {
+  query(
+    text: string,
+    params?: unknown[],
+  ): Promise<{ rows: Record<string, unknown>[]; rowCount?: number | null }>;
+  /** BEGIN/COMMIT/ROLLBACK 语义；fn 抛错时自动回滚并原样上抛。不支持嵌套。 */
+  transaction<T>(fn: (tx: MemorySqlExecutor) => Promise<T>): Promise<T>;
+}
 
-/** 记忆锁 TTL：mutator 可能内含 embedding 补齐（批量 API 调用），只兜底持有者崩溃。 */
-const MEMORY_LOCK_TTL_MS = 15_000;
-/** 记忆锁等待预算：覆盖对方完整走完一次 mutator 的时间。 */
-const MEMORY_LOCK_WAIT_MS = 5_000;
+/** pgvector 向量召回结果（按余弦相似度降序）。 */
+export interface VectorSearchResult {
+  kind: 'fact' | 'section';
+  /** fact 为 fact id；section 为 `<group>.<slot>`（如 `user.topOfMind`）。 */
+  refId: string;
+  /** 余弦相似度 0..1（存库向量已 L2 归一，`1 - <=>` 即余弦）。 */
+  similarity: number;
+}
 
 export interface MemoryStorage {
   load(opts?: { agentName?: string | null; userId?: string | null }): Promise<MemoryData>;
@@ -35,7 +42,7 @@ export interface MemoryStorage {
     opts?: { agentName?: string | null; userId?: string | null },
   ): Promise<boolean>;
   /**
-   * 加锁的 read-modify-write：per-user 锁内重读磁盘 → 应用 mutator → 原子写。
+   * 加锁的 read-modify-write：锁内重读最新状态 → 应用 mutator → 原子写。
    * mutator 返回同一引用视为无变更，跳过写入；mutator 抛错原样上抛（领域错误
    * 与 IO 失败区分开），IO 失败返回 null。
    */
@@ -43,260 +50,62 @@ export interface MemoryStorage {
     mutator: (current: MemoryData) => Promise<MemoryData> | MemoryData,
     opts?: { agentName?: string | null; userId?: string | null },
   ): Promise<MemoryData | null>;
-}
-
-interface CacheEntry {
-  data: MemoryData;
-  mtimeMs: number | null;
-}
-
-export class FileMemoryStorage implements MemoryStorage {
-  /** key: `${userId ?? ''}::${agentName ?? ''}`。 */
-  private cache = new Map<string, CacheEntry>();
-
-  private cacheKey(
-    agentName: string | null | undefined,
-    userId: string | null | undefined,
-  ): string {
-    return `${userId ?? ''}::${agentName ?? ''}`;
-  }
-
-  private resolveFilePath(
-    agentName: string | null | undefined,
-    userId: string | null | undefined,
-  ): string {
-    if (userId) {
-      if (agentName) {
-        validateAgentName(agentName);
-        return userAgentMemoryFile(userId, agentName);
-      }
-      const config = getMemoryConfig();
-      if (config.storagePath && path.isAbsolute(config.storagePath)) {
-        return config.storagePath;
-      }
-      return userMemoryFile(userId);
-    }
-
-    // 全局 memory（无 userId 隔离场景）
-    if (agentName) {
-      validateAgentName(agentName);
-      return agentMemoryFile(agentName);
-    }
-
-    const config = getMemoryConfig();
-    if (config.storagePath) {
-      return path.isAbsolute(config.storagePath)
-        ? config.storagePath
-        : path.join(getBaseDir(), config.storagePath);
-    }
-    return memoryFile();
-  }
-
-  private async statMtime(filePath: string): Promise<number | null> {
-    try {
-      const s = await fs.stat(filePath);
-      return s.mtimeMs;
-    } catch {
-      return null;
-    }
-  }
-
-  private async loadFromFile(filePath: string): Promise<MemoryData> {
-    let raw: string;
-    try {
-      raw = await fs.readFile(filePath, 'utf-8');
-    } catch (e: any) {
-      // 文件不存在视为空 memory；其余 IO 错误同样回退
-      if (e?.code !== 'ENOENT') {
-        console.warn('[memory/storage] Failed to read memory file:', e);
-      }
-      return createEmptyMemory();
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return createEmptyMemory();
-      // 容错：缺字段时自动补齐为空 schema 字段（不破坏旧数据）
-      return mergeWithEmpty(parsed);
-    } catch (e) {
-      console.warn('[memory/storage] Failed to parse memory file:', e);
-      return createEmptyMemory();
-    }
-  }
-
-  async load(
-    opts: { agentName?: string | null; userId?: string | null } = {},
-  ): Promise<MemoryData> {
-    const { agentName = null, userId = null } = opts;
-    const filePath = this.resolveFilePath(agentName, userId);
-    const key = this.cacheKey(agentName, userId);
-    const currentMtime = await this.statMtime(filePath);
-
-    const cached = this.cache.get(key);
-    if (cached && cached.mtimeMs === currentMtime) {
-      return cached.data;
-    }
-
-    const data = await this.loadFromFile(filePath);
-    this.cache.set(key, { data, mtimeMs: currentMtime });
-    return data;
-  }
-
-  async reload(
-    opts: { agentName?: string | null; userId?: string | null } = {},
-  ): Promise<MemoryData> {
-    const { agentName = null, userId = null } = opts;
-    const filePath = this.resolveFilePath(agentName, userId);
-    const key = this.cacheKey(agentName, userId);
-    const data = await this.loadFromFile(filePath);
-    const mtime = await this.statMtime(filePath);
-    this.cache.set(key, { data, mtimeMs: mtime });
-    return data;
-  }
-
-  async save(
-    data: MemoryData,
-    opts: { agentName?: string | null; userId?: string | null } = {},
-  ): Promise<boolean> {
-    // 与 update 同一条锁路径：全量覆盖也是 RMW，不能绕过锁直接写盘
-    const updated = await this.update(() => data, opts);
-    return updated !== null;
-  }
-
-  async update(
-    mutator: (current: MemoryData) => Promise<MemoryData> | MemoryData,
-    opts: { agentName?: string | null; userId?: string | null } = {},
-  ): Promise<MemoryData | null> {
-    const { agentName = null, userId = null } = opts;
-    const filePath = this.resolveFilePath(agentName, userId);
-    const key = this.cacheKey(agentName, userId);
-
-    // per-user 锁：同一用户的记忆只允许一个写者。等待期轮询（mutator 内含
-    // embedding 补齐，对方持锁可达秒级）；超预算继续执行并告警——锁是防错
-    // 而非门禁，最后的残余竞态由原子写保证文件不损坏。
-    const handle = await this.acquireMemoryLock(userId);
-    try {
-      // 锁内直读磁盘（绕开 mtime 缓存）：RMW 的 read 必须看到其它进程的最新写入
-      const current = await this.loadFromFile(filePath);
-      // mutator 的领域错误（fact 不存在等）原样上抛；只有落盘 IO 失败收敛为 null
-      const next = await mutator(current);
-      if (next === current) return current;
-      try {
-        await this.writeToFile(filePath, key, next);
-      } catch (e) {
-        console.error('[memory/storage] Failed to write memory file:', e);
-        return null;
-      }
-      return next;
-    } finally {
-      await handle?.release();
-    }
-  }
-
-  private async acquireMemoryLock(userId: string | null): Promise<DistLockHandle | null> {
-    const lock = getDistLock();
-    const lockKey = `deerflow:lock:memory:${userId ?? 'global'}`;
-    const deadline = Date.now() + MEMORY_LOCK_WAIT_MS;
-    for (;;) {
-      const handle = await lock.acquire(lockKey, MEMORY_LOCK_TTL_MS);
-      if (handle) return handle;
-      if (Date.now() >= deadline) {
-        console.warn(
-          `[memory/storage] memory lock wait timeout key=${lockKey}; proceed without lock`,
-        );
-        return null;
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  /** 原子写：临时文件 + rename，任何时刻读文件都不会读到半截 JSON。 */
-  private async writeToFile(filePath: string, key: string, data: MemoryData): Promise<void> {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    // shallow copy + 刷新 lastUpdated（避免直接 mutate 调用方对象）
-    const toWrite: MemoryData = { ...data, lastUpdated: utcNowIsoZ() };
-
-    const tmpPath = `${filePath}.${randomUUID().replace(/-/g, '')}.tmp`;
-    await fs.writeFile(tmpPath, JSON.stringify(toWrite, null, 2), 'utf-8');
-    await fs.rename(tmpPath, filePath);
-
-    const mtime = await this.statMtime(filePath);
-    this.cache.set(key, { data: toWrite, mtimeMs: mtime });
-    if (process.env.MEMORY_DEBUG === '1' || process.env.MEMORY_DEBUG === 'true') {
-      console.log(`[memory/storage] Memory saved to ${filePath}`);
-    }
-  }
-}
-
-/** 把磁盘上可能缺字段的 JSON 合并到空 schema，保证下游字段安全。 */
-function mergeWithEmpty(parsed: any): MemoryData {
-  const empty = createEmptyMemory();
-  const merged: MemoryData = {
-    version: parsed.version === '1.0' ? '1.0' : '1.0',
-    lastUpdated: typeof parsed.lastUpdated === 'string' ? parsed.lastUpdated : empty.lastUpdated,
-    user: {
-      workContext: mergeSection(parsed?.user?.workContext, empty.user.workContext),
-      personalContext: mergeSection(parsed?.user?.personalContext, empty.user.personalContext),
-      topOfMind: mergeSection(parsed?.user?.topOfMind, empty.user.topOfMind),
-    },
-    history: {
-      recentMonths: mergeSection(parsed?.history?.recentMonths, empty.history.recentMonths),
-      earlierContext: mergeSection(parsed?.history?.earlierContext, empty.history.earlierContext),
-      longTermBackground: mergeSection(
-        parsed?.history?.longTermBackground,
-        empty.history.longTermBackground,
-      ),
-    },
-    facts: Array.isArray(parsed.facts)
-      ? parsed.facts
-          .filter((f: any) => f && typeof f === 'object')
-          .map((f: any) => sanitizeLoadedFact(f))
-      : [],
-  };
-  return merged;
+  /**
+   * pgvector 向量召回（可选能力）：仅 PG 后端实现；未实现 / 实现抛错时
+   * 检索侧回落 JS 余弦线性扫描。limit 为召回条数上限（fact + section 混排）。
+   */
+  vectorSearch?(
+    opts: { agentName?: string | null; userId?: string | null },
+    queryVector: number[],
+    limit: number,
+  ): Promise<VectorSearchResult[]>;
 }
 
 /**
- * 结构非法的 embedding（非数组 / 含非有限数）直接剥除，避免污染检索侧。
- * 维度不匹配的合法向量保留（由检索 / 回填按 config 维度判定失效并重算）。
+ * PG 未装配时的占位后端：记忆功能整体关闭。
+ * load/reload 返回空 schema（语义检索自然全部落空、不注入）；
+ * save/update 放弃写入返回失败值——与 PG 故障口径一致，调用方照常容错。
  */
-function sanitizeLoadedFact(f: any): any {
-  if (f.embedding != null) {
-    const v: unknown = f.embedding;
-    const ok = Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isFinite(x));
-    if (!ok) delete f.embedding;
+class NoopMemoryStorage implements MemoryStorage {
+  async load(): Promise<MemoryData> {
+    return createEmptyMemory();
   }
-  return f;
+  async reload(): Promise<MemoryData> {
+    return createEmptyMemory();
+  }
+  async save(): Promise<boolean> {
+    return false;
+  }
+  async update(): Promise<MemoryData | null> {
+    return null;
+  }
 }
 
-/**
- * section 合并：保留 summary/updatedAt 与合法的 embedding 向量。
- * 向量口径与 sanitizeLoadedFact 一致——非数组 / 含非有限数剥除；维度不符的
- * 合法向量保留，由检索 / 回填按 config 维度判定失效并重算。
- */
-function mergeSection(s: any, dft: SectionData): SectionData {
-  if (!s || typeof s !== 'object') return { ...dft };
-  const out: SectionData = {
-    summary: typeof s.summary === 'string' ? s.summary : dft.summary,
-    updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : dft.updatedAt,
-  };
-  if (
-    Array.isArray(s.embedding) &&
-    s.embedding.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
-  ) {
-    out.embedding = s.embedding as number[];
-  }
-  return out;
-}
-
+// dev 下注册表挂 globalThis：Next 按路由分包编译，每个 route bundle 有独立的
+// storage 模块图，纯模块级变量会分裂成多份——wiring 只在首个执行
+// ensureMemoryStorage 的 bundle 里调用 setMemoryStorage，其余 bundle 的注册表
+// 永远是 Noop 默认，读记忆的 API 路由恒返回空。做法对齐 wiring.__threadService
+// （非 production 挂 globalThis）；vitest 默认按文件分进程，globalThis 与
+// 模块级变量的隔离语义一致，测试不受影响。
 let _instance: MemoryStorage | null = null;
 
+const globalForMemoryStorage =
+  process.env.NODE_ENV === 'production'
+    ? null
+    : (globalThis as unknown as { __memoryStorage?: MemoryStorage | null });
+
 export function getMemoryStorage(): MemoryStorage {
-  if (_instance) return _instance;
-  _instance = new FileMemoryStorage();
-  return _instance;
+  return globalForMemoryStorage?.__memoryStorage ?? _instance ?? new NoopMemoryStorage();
+}
+
+/** 注入后端（wiring 侧在 pgvector 就绪后切到 PgMemoryStorage）。 */
+export function setMemoryStorage(storage: MemoryStorage): void {
+  if (globalForMemoryStorage) globalForMemoryStorage.__memoryStorage = storage;
+  else _instance = storage;
 }
 
 /** 仅供测试使用：重置单例。 */
 export function resetMemoryStorage(): void {
-  _instance = null;
+  if (globalForMemoryStorage) globalForMemoryStorage.__memoryStorage = null;
+  else _instance = null;
 }

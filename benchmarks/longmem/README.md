@@ -106,18 +106,18 @@ pnpm bench:longmem:ingest -- --limit 5
 阶段 1（写入）：每个 example 用独立 userId 隔离
   haystack_sessions → 逐个 session → MemoryUpdater(LLM 抽取事实/摘要)
                                           ↓
-                              users/{userId}/memory.json
+                          PG memory_state（scope = userId::agentName）
 
 阶段 2（检索）：提问时不注入历史
   query → lead-agent (memory=ON, 同一 userId)
-              ↓ 自动从 users/{userId}/memory.json 注入记忆
+              ↓ 自动从 PG 检索该 scope 记忆注入
           基于记忆作答 → LLM Judge 判对错
 ```
 
 要点：
 
-- **隔离**：每题独立 `userId`（`longmem_<question_id>`）→ 独立记忆文件，题目之间互不污染；开跑前会清空该题旧记忆。
-- **存储位置**：默认落到 `benchmarks/.memory-store/`（通过 `DEERFLOW_DATA_DIR`），不污染 `~/.deer-flow`，可直接删除清理。
+- **隔离**：每题独立 `userId`（`longmem_<question_id>`）→ 独立 PG scope，题目之间互不污染；开跑前会清空该题旧记忆。
+- **存储位置**：与产品同一条装配链路（run.ts 的 `ensureMemoryStorage()` 接 PG）；pgvector 未就绪时 fail-fast 退出，不会静默空转。
 - **串行执行**：INGEST 模式强制 `concurrency=1`，保证写入顺序与日志清晰、规避 LLM 限流。
 - **抽取模型**：复用 agent 模型（非流式、低温度），无需额外配置。
 - 报告会多出一块 **Memory Ingestion** 指标（平均 session 数 / 抽取出的 fact 数 / 写入耗时）。

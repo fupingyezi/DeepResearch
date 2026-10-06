@@ -79,10 +79,103 @@ export const getClient = async () => {
   return client;
 };
 
+/**
+ * 记忆检索的 pgvector 初始化（与 initialDB 完全独立，原因见函数注释）。
+ * 进程级单例挂 globalThis（HMR / 多次 import 只跑一次），按维度缓存：
+ * 维度变了重跑一次（列维度同步逻辑处理）。
+ */
+const globalForMemoryDb = globalThis as unknown as {
+  __memoryDbInitPromise?: Promise<MemoryDbInitResult>;
+  __memoryDbInitDims?: number;
+};
+
+export interface MemoryDbInitResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 初始化记忆检索的表：memory_state（jsonb 真相源）+ memory_vectors（pgvector 向量列）。
+ *
+ * 必须独立于 initialDB、绝不抛出：initialDB 是单条 multi-statement（PG 按一个隐式
+ * 事务整体执行），CREATE EXTENSION 若因镜像/权限失败会连带 users 等核心表 bootstrap
+ * 全量回滚；这里 own try/catch，任何失败只返回 { ok: false }，由调用方（wiring）
+ * 关闭记忆功能（Noop 后端），聊天不阻断。
+ *
+ * embeddingDimensions 由调用方从 MemoryConfig 取（clamp 后的整数内插进 DDL，无注入面）。
+ * 列维度与请求不一致时先 DELETE 再 ALTER TYPE：pgvector 的 vector(m)→vector(n) 强转
+ * 会静默截断/补零，先清空让「维度变更存量向量失效、由回填重嵌」的语义与检索侧一致。
+ */
+export function initialMemoryDb(embeddingDimensions: number): Promise<MemoryDbInitResult> {
+  const dims = Math.round(embeddingDimensions);
+  if (globalForMemoryDb.__memoryDbInitPromise && globalForMemoryDb.__memoryDbInitDims === dims) {
+    return globalForMemoryDb.__memoryDbInitPromise;
+  }
+
+  globalForMemoryDb.__memoryDbInitPromise = (async (): Promise<MemoryDbInitResult> => {
+    const client = await pool.connect();
+    try {
+      try {
+        await client.query('CREATE EXTENSION IF NOT EXISTS vector');
+      } catch (e) {
+        return {
+          ok: false,
+          reason: `CREATE EXTENSION vector 失败: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+
+      await client.query(`
+        create table if not exists memory_state (
+          scope_key  varchar(255) primary key,
+          user_id    varchar(128),
+          agent_name varchar(64),
+          data       jsonb not null,
+          updated_at timestamptz not null default now()
+        );
+
+        create table if not exists memory_vectors (
+          scope_key varchar(255) not null references memory_state(scope_key) on delete cascade,
+          kind      varchar(8)  not null check (kind in ('fact','section')),
+          ref_id    varchar(64) not null,
+          embedding vector(${dims}) not null,
+          primary key (scope_key, kind, ref_id)
+        );
+        create index if not exists idx_memory_vectors_scope on memory_vectors(scope_key);
+      `);
+
+      // 维度同步：pgvector 把维度编码在 pg_attribute.atttypmod（实测 vector(1024) →
+      // atttypmod=1024）。带数据 ALTER 会直接报错（"expected N dimensions"）而非静默
+      // 截断，但先 DELETE 再 ALTER 与「维度变更存量向量失效、由回填重嵌」语义一致。
+      // 查不到视为无从判定，跳过——宁可保留旧列，也不误删存量向量。
+      const dimsResult = await client.query(
+        `SELECT atttypmod AS dims
+         FROM pg_attribute
+         WHERE attrelid = 'memory_vectors'::regclass AND attname = 'embedding'`,
+      );
+      const currentDims = Number(dimsResult.rows[0]?.dims);
+      if (Number.isFinite(currentDims) && currentDims !== dims) {
+        await client.query(`
+          DELETE FROM memory_vectors;
+          ALTER TABLE memory_vectors ALTER COLUMN embedding TYPE vector(${dims});
+        `);
+      }
+      return { ok: true };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: e instanceof Error ? e.message : String(e),
+      };
+    } finally {
+      client.release();
+    }
+  })();
+  globalForMemoryDb.__memoryDbInitDims = dims;
+  return globalForMemoryDb.__memoryDbInitPromise;
+}
+
 export async function initialDB() {
   // 进程级单例：HMR / 多次 import 都只跑一次
   if (globalForPg.__dbInitPromise) return globalForPg.__dbInitPromise;
-
   globalForPg.__dbInitPromise = (async () => {
     const client = await pool.connect();
     try {

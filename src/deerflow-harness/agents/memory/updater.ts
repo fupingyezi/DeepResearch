@@ -2,7 +2,8 @@
  * Memory updater
  *
  * 流程：
- *   load current memory → 拼 prompt → LLM ainvoke → 解析 JSON → applyUpdates → save
+ *   load current memory → 拼 prompt → LLM ainvoke → 解析 JSON
+ *   → 锁外预演（applyUpdates + strip + 嵌向量）→ 锁内 RMW（applyUpdates 重跑 + 守卫合并向量）→ save
  *
  * - max_facts 限制（按 confidence 倒排截断）
  * - factConfidenceThreshold 过滤
@@ -16,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import { getMemoryConfig } from './config';
-import { embedQuery, embedTexts, isCompatibleVector, SCORED_SECTION_SLOTS } from './embeddings';
+import { embedQuery, embedTexts, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
 import { formatConversationForUpdate, MEMORY_UPDATE_PROMPT } from './prompt';
 import { getMemoryStorage } from './storage';
 import {
@@ -111,7 +112,7 @@ async function embedMissingFacts(data: MemoryData): Promise<void> {
 }
 
 /**
- * 为参与打分的 sections（SCORED_SECTION_SLOTS）补齐缺失 / 维度失效的向量。
+ * 为参与召回的 sections（RECALL_SECTION_SLOTS）补齐缺失 / 维度失效的向量。
  * 与 embedMissingFacts 同纪律：整槽替换（不 mutate 元素本身，data 是 updater 私有
  * 深拷贝，槽位容器可直接写）、失败保持无向量交由检索侧回填重试。
  */
@@ -119,7 +120,7 @@ async function embedMissingSections(data: MemoryData): Promise<void> {
   const config = getMemoryConfig();
   if (!config.embeddingEnabled) return;
   const slots: Array<['user' | 'history', string]> = [];
-  for (const [group, key] of SCORED_SECTION_SLOTS) {
+  for (const [group, key] of RECALL_SECTION_SLOTS) {
     const container = data[group] as unknown as Record<string, SectionData>;
     const section = container[key];
     if (section?.summary && !isCompatibleVector(section.embedding, config.embeddingDimensions)) {
@@ -230,10 +231,18 @@ export async function updateMemoryFact(
   agentName: string | null = null,
   userId: string | null = null,
 ): Promise<MemoryData> {
-  // 整个 patch + 重向量化在 mutator 内完成：content 是否真的变了要在锁内最新数据上
-  // 判定，否则「变更即重嵌」可能基于过期内容，写入的向量对不上落盘的新 content。
+  // 锁外预嵌：embedQuery 是外部 HTTP，在 mutator 里 await 会让行锁跨网络往返持有，
+  // 同 scope 的并发写全被卡在网络上。patch.content 是本写的唯一内容来源，预嵌向量
+  // 与锁内写出的 content 天然同源，无需像 updateMemory 那样按 content key 守卫。
+  let preVector: number[] | null = null;
+  if (getMemoryConfig().embeddingEnabled && patch.content != null) {
+    const c = String(patch.content).trim();
+    if (c) preVector = await embedQuery(c);
+  }
+  // content 是否真的变了在锁内最新数据上判定（mutator 保持同步，无 await）；
+  // 失败保持无向量，交由回填重试
   const result = await getMemoryStorage().update(
-    async (data) => {
+    (data) => {
       const next: Fact[] = [];
       let found = false;
       let contentChanged = false;
@@ -247,9 +256,11 @@ export async function updateMemoryFact(
         if (patch.content != null) {
           const c = String(patch.content).trim();
           if (!c) throw new Error('content must be non-empty');
-          if (c !== u.content) contentChanged = true;
-          u.content = c;
-          delete u.embedding; // 旧向量对新 content 失效
+          if (c !== u.content) {
+            contentChanged = true;
+            u.content = c;
+            delete u.embedding; // 旧向量对新 content 失效
+          }
         }
         if (patch.category != null) {
           u.category = (String(patch.category).trim() || 'context') as FactCategory;
@@ -260,13 +271,9 @@ export async function updateMemoryFact(
         next.push(u);
       }
       if (!found) throw new Error(`fact not found: ${factId}`);
-      // content 变更后重新向量化（失败保持无向量，交由回填重试）
-      if (contentChanged && getMemoryConfig().embeddingEnabled) {
+      if (contentChanged && preVector) {
         const target = next.find((f) => f.id === factId);
-        if (target) {
-          const vector = await embedQuery(target.content);
-          if (vector) target.embedding = vector;
-        }
+        if (target) target.embedding = preVector;
       }
       return { ...data, facts: next };
     },
@@ -278,11 +285,18 @@ export async function updateMemoryFact(
 
 // Strip upload mentions
 
+// \b 只收进以词字符开头的两个英文分支：/mnt 路径与 <uploaded_files> 标签以非词字符
+// 开头，前置字符是中文/空格时「非词→非词」不构成词边界，组外的 \b 会让这两个分支永不命中
 const UPLOAD_SENTENCE_RE =
-  /[^.!?]*\b(?:upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
+  /[^.!?]*(?:\bupload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|\bfile\s+upload|\/mnt\/user-data\/uploads\/|<uploaded_files>)[^.!?]*[.!?]?\s*/gi;
+// 判定用无 g 副本：带 g 的 test() 会推进 lastIndex，filter 跨迭代复用会让后续条目从
+// 上次命中的位置起匹配而漏检（replace 不受影响——它自行管理 lastIndex）。
+const UPLOAD_TEST_RE = new RegExp(UPLOAD_SENTENCE_RE.source, 'i');
 
 function stripUploadMentions(memory: MemoryData): MemoryData {
-  const out: MemoryData = JSON.parse(JSON.stringify(memory));
+  // 惰性拷贝：无变更时返回原引用——pg-storage.update 以 `next === current`
+  // 判等跳过落盘写，无条件深拷贝会让每轮无变更更新也全量重写
+  let out: MemoryData = memory;
   for (const sec of ['user', 'history'] as const) {
     // UserSection / HistorySection 的字段是字面量 key 而非索引签名，TS 不允许
     // 直接断言为 Record<string, SectionData>，需要先经 unknown 中转。
@@ -292,16 +306,21 @@ function stripUploadMentions(memory: MemoryData): MemoryData {
       if (v && typeof v.summary === 'string') {
         const next = v.summary.replace(UPLOAD_SENTENCE_RE, '').replace(/  +/g, ' ').trim();
         if (next !== v.summary) {
-          v.summary = next;
-          delete v.embedding; // 文本变了，旧向量失效，由 embedMissingSections / 回填重嵌
+          if (out === memory) out = JSON.parse(JSON.stringify(memory));
+          const copySection = out[sec] as unknown as Record<string, SectionData>;
+          copySection[k].summary = next;
+          // 文本变了，旧向量失效，由 embedMissingSections / 回填重嵌
+          delete copySection[k].embedding;
         }
       }
     }
   }
   if (Array.isArray(out.facts)) {
-    out.facts = out.facts.filter((f) => !UPLOAD_SENTENCE_RE.test(f.content ?? ''));
-    // 重置 lastIndex（全局 regex test 副作用）
-    UPLOAD_SENTENCE_RE.lastIndex = 0;
+    const kept = out.facts.filter((f) => !UPLOAD_TEST_RE.test(f.content ?? ''));
+    if (kept.length !== out.facts.length) {
+      if (out === memory) out = JSON.parse(JSON.stringify(memory));
+      out.facts = kept;
+    }
   }
   return out;
 }
@@ -318,7 +337,13 @@ function factContentKey(content: any): string | null {
 function applyUpdates(current: MemoryData, update: any, threadId: string | null): MemoryData {
   const config = getMemoryConfig();
   const now = utcNowIsoZ();
-  const out: MemoryData = JSON.parse(JSON.stringify(current));
+  // 惰性拷贝：全部无变更时返回 current 本身（见 stripUploadMentions 同款注释）
+  let out: MemoryData = current;
+  const copy = (): MemoryData => {
+    if (out !== current) return out;
+    out = JSON.parse(JSON.stringify(current));
+    return out;
+  };
 
   // user sections：summary 未变（trim 后相等）保留原槽——连带旧向量与 updatedAt，
   // 避免无谓重嵌；重写则整槽替换，旧向量随新对象自然丢弃，由 embedMissingSections 重嵌
@@ -327,7 +352,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     const sec = userUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
       if (sec.summary.trim() === out.user[key].summary?.trim()) continue;
-      out.user[key] = { summary: sec.summary, updatedAt: now };
+      copy().user[key] = { summary: sec.summary, updatedAt: now };
     }
   }
 
@@ -337,7 +362,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     const sec = histUpdates[key];
     if (sec && sec.shouldUpdate && typeof sec.summary === 'string' && sec.summary.length > 0) {
       if (sec.summary.trim() === out.history[key].summary?.trim()) continue;
-      out.history[key] = { summary: sec.summary, updatedAt: now };
+      copy().history[key] = { summary: sec.summary, updatedAt: now };
     }
   }
 
@@ -348,7 +373,10 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
       : [],
   );
   if (removeIds.size > 0) {
-    out.facts = out.facts.filter((f) => !removeIds.has(f.id));
+    const kept = out.facts.filter((f) => !removeIds.has(f.id));
+    if (kept.length !== out.facts.length) {
+      copy().facts = kept;
+    }
   }
 
   // add new facts
@@ -358,6 +386,7 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
     if (k) existingKeys.add(k);
   }
   const newFacts: any[] = Array.isArray(update?.newFacts) ? update.newFacts : [];
+  const toAdd: Fact[] = [];
   for (const f of newFacts) {
     const conf = typeof f?.confidence === 'number' ? f.confidence : 0.5;
     if (conf < config.factConfidenceThreshold) continue;
@@ -379,19 +408,81 @@ function applyUpdates(current: MemoryData, update: any, threadId: string | null)
       const se = f.sourceError.trim();
       if (se) entry.sourceError = se;
     }
-    out.facts.push(entry);
+    toAdd.push(entry);
     existingKeys.add(key);
+  }
+  if (toAdd.length > 0) {
+    copy().facts.push(...toAdd);
   }
 
   // enforce max_facts
   if (out.facts.length > config.maxFacts) {
-    out.facts = out.facts
+    copy().facts = out.facts
       .slice()
       .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
       .slice(0, config.maxFacts);
   }
 
   return out;
+}
+
+/**
+ * 把锁外预演的嵌入结果并回锁内重跑出的最新状态。
+ *
+ * 守卫与回填合并同纪律：facts 按 content key（不能按 id——锁内重跑给同一批
+ * 新 fact 生成的新 id 与 draft 不同）、sections 按槽位+summary 比对，嵌入期间
+ * 被并发写改动过的条目旧向量作废，交检索侧回填重嵌。
+ */
+function mergePreembeddedVectors(updated: MemoryData, draft: MemoryData): MemoryData {
+  const config = getMemoryConfig();
+  let result = updated;
+
+  const preByContent = new Map<string, number[]>();
+  for (const f of draft.facts) {
+    const key = factContentKey(f.content);
+    if (key && isCompatibleVector(f.embedding, config.embeddingDimensions)) {
+      preByContent.set(key, f.embedding as number[]);
+    }
+  }
+  if (preByContent.size > 0) {
+    const mergedFacts = updated.facts.map((f) => {
+      const key = factContentKey(f.content);
+      const vector = key ? preByContent.get(key) : null;
+      if (!vector) return f;
+      // 锁内已有合法向量（并发写已嵌）不覆盖
+      if (isCompatibleVector(f.embedding, config.embeddingDimensions)) return f;
+      return { ...f, embedding: vector };
+    });
+    if (mergedFacts.some((f, i) => f !== updated.facts[i])) {
+      result = { ...updated, facts: mergedFacts };
+    }
+  }
+
+  for (const [group, slot] of RECALL_SECTION_SLOTS) {
+    const container = result[group] as unknown as Record<string, SectionData>;
+    const current = container[slot];
+    if (!current?.summary) continue;
+    if (isCompatibleVector(current.embedding, config.embeddingDimensions)) continue;
+    const pre = (draft[group] as unknown as Record<string, SectionData>)[slot];
+    if (!pre?.summary || pre.summary !== current.summary) continue;
+    if (!isCompatibleVector(pre.embedding, config.embeddingDimensions)) continue;
+    // 逐槽重建容器与顶层对象，不 mutate updated 的对象图
+    result =
+      group === 'user'
+        ? {
+            ...result,
+            user: { ...result.user, [slot]: { ...current, embedding: pre.embedding as number[] } },
+          }
+        : {
+            ...result,
+            history: {
+              ...result.history,
+              [slot]: { ...current, embedding: pre.embedding as number[] },
+            },
+          };
+  }
+
+  return result;
 }
 
 // Memory updater（LLM-based）
@@ -532,10 +623,13 @@ export class MemoryUpdater {
       // 关键：显式 callbacks: [] 切断与外层（HTTP SSE）的 callback handler 链。
       // 防止LLM 调用把 token 推到主请求那条已关闭的 ReadableStream，
       // 触发 `ERR_INVALID_STATE: Controller is already closed`。
+      // signal 给 LLM 调用加超时：挂起会永久占住队列的 processing 标记、
+      // 后续所有线程的记忆更新全部堆积（ChatOpenAI 透传 AbortSignal 到 SDK）。
       const response = await model.invoke(prompt, {
         runName: 'memory_agent',
         callbacks: [],
         tags: ['memory-updater'],
+        signal: AbortSignal.timeout(getMemoryConfig().updateTimeoutMs),
       });
       const responseContent = response.content;
       let text = extractMessageContentText(responseContent).trim();
@@ -577,24 +671,48 @@ export class MemoryUpdater {
         }
       }
 
+      // 锁外嵌入：在最新快照上预演 applyUpdates + stripUploadMentions 得 draft
+      // （两者都是纯函数，锁内会在 fresh 上重跑），对 draft 里缺向量的条目调 embedTexts。
+      // 嵌入是 HTTP 调用，不能持行锁——那会把同用户的并发写阻塞在网络上。
+      // 必须在 stripUploadMentions 之后嵌：strip 会改写 section summary，先嵌会产生立刻失效的向量
+      let draft: MemoryData | null = null;
+      if (getMemoryConfig().embeddingEnabled) {
+        try {
+          const latest = await getMemoryStorage().reload({ agentName, userId });
+          draft = stripUploadMentions(applyUpdates(latest, parsed, opts.threadId ?? null));
+          await embedMissingSections(draft);
+          await embedMissingFacts(draft);
+        } catch (e) {
+          // 预演失败不阻断更新：向量留待检索侧回填
+          draft = null;
+        }
+      }
+
       // 锁内 RMW：applyUpdates 重新作用于锁内的最新盘上状态。current 是 LLM 调用
       // 前读的快照（期间其它进程可能已落盘），直接 save 会把它覆盖掉。
       const saved = await getMemoryStorage().update(
-        async (fresh) => {
+        (fresh) => {
           let updated = applyUpdates(fresh, parsed, opts.threadId ?? null);
           updated = stripUploadMentions(updated);
-          // 新增 / 保留的 facts 与 sections 批量补齐向量后落盘（失败照常 save，等检索侧回填）。
-          // 必须在 stripUploadMentions 之后：strip 会改写 section summary，先嵌会产生立刻失效的向量
-          await embedMissingSections(updated);
-          await embedMissingFacts(updated);
-          return updated;
+          return draft ? mergePreembeddedVectors(updated, draft) : updated;
         },
         { agentName, userId },
       );
+      // saved === null（存储写失败）是独立于「抛错」的失败形态，必须计入 failed，
+      // 否则 attempted ≠ succeeded + failed，写失败会从计数器里静默消失
       if (saved) memoryUpdateStats.succeeded += 1;
+      else memoryUpdateStats.failed += 1;
       return !!saved;
     } catch (e) {
-      console.error('[memory/updater] Memory update failed:', e);
+      // 超时是独立故障形态（LLM 挂起被 signal 打断）：单独告警便于区分
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        console.warn(
+          `[memory/updater] LLM update timed out after ${getMemoryConfig().updateTimeoutMs}ms, skipping this round:`,
+          e,
+        );
+      } else {
+        console.error('[memory/updater] Memory update failed:', e);
+      }
       return fail();
     }
   }

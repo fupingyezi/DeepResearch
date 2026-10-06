@@ -8,7 +8,7 @@
 
 - 🤖 **单一 lead-agent，自主决策**：lead-agent 内置 `task("general-purpose", ...)` 能力，由模型自行判断是否拆解任务并调度 subagent 并行检索/汇总，无需前端切换"普通 / 联网 / 深度研究"模式。
 - 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离；模型 API Key 由各用户在「设置-模型管理」自行配置，加密存库（`MODEL_KEY_ENC_SECRET`），主聊天链路不读服务端环境变量里的模型 Key。
-- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（`DEERFLOW_DATA_DIR` 可覆盖根目录）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为词面重叠率与 embedding 余弦的混合打分（智谱 `embedding-3`），并按阈值取舍；无 Key 时静默降级为纯词面检索。
+- 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 PostgreSQL（`memory_state` jsonb + `memory_vectors` pgvector）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为 RAG 管线：pgvector 向量召回 + BM25 词面召回双路 → RRF 融合 → 智谱 rerank 精排（智谱 `embedding-3` 出向量）；无 Key 时静默降级为纯 BM25 词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 是每 run 一个的 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
@@ -92,7 +92,7 @@ src/
 │   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
 │   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
 │   │   ├── middlewares/                # 位序中间件实现（全部平铺，装配序见 index.ts）
-│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ 存储/队列 + embeddings + retrieval（混合检索）
+│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ PG 存储 + embeddings + retrieval（双路召回 / RRF / rerank）
 │   ├── extensions/                     # 统一扩展域：配置存储 + MCP 客户端 + Skill 加载器
 │   │   ├── mcp/                        # MCP 客户端（MultiServerMCPClient 封装）
 │   │   └── skills/                     # Skill 加载器（frontmatter 解析 + prompt 注入）
@@ -403,7 +403,7 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/memory/facts`                           | POST          | 新建记忆事实（来源标记 manual）                                                   |
 | `/api/memory/facts/[id]`                      | PUT/DELETE    | 更新 / 删除记忆事实                                                               |
 | `/api/memory/mode`                            | GET/PUT       | 记忆注入模式（`inject` 全量注入 / `retrieve` 按需检索）                           |
-| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的词面 / 余弦 / 阈值 / 得分 / 最终注入文本                    |
+| `/api/memory/retrieve?q=`                     | GET           | 检索预览：逐条 fact 的 BM25 / 余弦 / RRF / rerank 分 / 最终注入文本               |
 | `/api/model-keys`                             | GET/PUT/PATCH | 已配置的模型 Key（仅掩码）/ 保存 Key（加密存储）+ 选择模型                        |
 | `/api/model-keys/[provider]`                  | DELETE        | 删除某 provider 的 Key                                                            |
 | `/api/prompt/enhance`                         | POST          | 输入框「提示词增强」                                                              |
@@ -492,7 +492,7 @@ StreamBridge（进程内 typed EventEmitter 总线）
 - 可插拔沙箱后端（local / docker / remote）、Docker 容器生命周期与多对话并行编排（双层背压 + 跨进程协调）
 - run 取消语义（`cancelRun` / `deleteThread` / `submitRun` 抢占三条路径共用同一套 abort + 等收尾机制）
 - 图片多模态链路（OCR 上传解析 → `image_url` content blocks → 历史图片压缩 → `view_image` 回看）
-- 记忆检索（词面 + embedding 余弦混合打分、阈值标定、无 Key 降级）与注入模式
+- 记忆检索（BM25 / pgvector 双路召回 → RRF → rerank、阈值标定、无 Key 降级）与注入模式
 
 沙箱实现细节见 [`docs/sandbox-implementation.md`](./docs/sandbox-implementation.md)。
 架构对齐计划见 [`docs/deerflow-alignment-plan.md`](./docs/deerflow-alignment-plan.md)。
@@ -546,7 +546,7 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 
 ### 长期记忆
 
-记忆按用户持久化到 `~/.deer-flow/users/{userId}/memory.json`（根目录可由 `DEERFLOW_DATA_DIR` 覆盖），包含：
+记忆按用户持久化到 PostgreSQL（`memory_state` jsonb 存结构 + `memory_vectors` pgvector 存向量，按 `userId::agentName` scope 隔离；pgvector 不可用时记忆功能静默关闭、聊天不阻断），包含：
 
 - `user.workContext / personalContext / topOfMind`
 - `history.recentMonths / earlierContext / longTermBackground`
@@ -559,7 +559,7 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 - `inject`（默认）：所有 section + facts 按 confidence 降序，在 token 预算内截断后全量注入；
 - `retrieve`：按本轮输入检索 top-K facts 与最相关的一段历史，注入预算更小。
 
-检索为「词面重叠率」与「embedding 余弦」的混合打分（智谱 `embedding-3`，余弦低于阈值不参与），同义改写也能召回；未配置 `ZHIPU_API_KEY`（或调用失败）时静默退回纯词面检索。想观察检索效果可调 `GET /api/memory/retrieve?q=...`，它逐条列出词面分 / 余弦 / 是否过阈值 / 最终得分与最终注入文本。注意记忆与提问需**同语言**：跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 仅 0.33~0.49，全部低于阈值），因此 `MEMORY_UPDATE_PROMPT` 要求用对话语言书写 summary 与 facts。
+检索为 RAG 管线：BM25 词面召回与 pgvector 向量召回（智谱 `embedding-3`，余弦低于阈值不参与）双路 → RRF 排名融合 → 智谱 rerank 精排，同义改写也能召回；未配置 `ZHIPU_API_KEY`（或调用失败）时静默退回纯 BM25 词面检索。想观察检索效果可调 `GET /api/memory/retrieve?q=...`，它逐条列出 BM25 分 / 余弦 / RRF 分 / rerank 分与最终注入文本。注意记忆与提问需**同语言**：跨语言余弦显著偏低（实测中文 query ↔ 英文 fact 仅 0.33~0.49，全部低于阈值），因此 `MEMORY_UPDATE_PROMPT` 要求用对话语言书写 summary 与 facts。
 
 ### MCP 扩展
 
@@ -626,7 +626,6 @@ MEMORY_DEBUG=1 pnpm dev
 其它运行期可调环境变量：
 
 - `STREAM_BRIDGE_BUFFER_MAX` —— 单个 ThreadChannel 的事件 buffer 上限（默认 2000；超限丢弃最旧非关键帧，`start` / `error` / `end` / `human_interrupt` 关键帧永不丢弃）
-- `DEERFLOW_DATA_DIR` —— 记忆 / 数据落盘根目录，优先级高于默认的 `~/.deer-flow`
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
 - `DEERFLOW_SANDBOX_DIR` —— 沙箱工作区根目录（默认 `{cwd}/.sandbox`；local 后端用）
 - `DEERFLOW_SKILLS_DIR` —— 技能目录（默认 `{cwd}/skills`）
@@ -681,7 +680,7 @@ pnpm bench:longmem
 1. StreamBridge 与 **run 取消**均为**进程内**语义（取消句柄挂在 ThreadService 闭包里）：多实例水平扩展时，SSE 回放与停止请求都必须落到跑该 run 的那个进程，需与 StreamBridge 一起换成 Redis 协调
 2. 单次请求只能使用一个模型
 3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配、防递归、护栏规则、记忆检索与向量、run 取消语义、checkpoint 行为约束、remote 沙箱等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
-4. 记忆向量**无向量库 / 无 ANN 索引**：向量随 facts 存在 `memory.json` 里，检索即内存线性扫描，受 `maxFacts`（默认 100）约束；facts 规模显著增长后需另接向量存储
+4. 记忆检索为 pgvector **精确扫描**（B-tree 按 scope 过滤 + 精确 `<=>` 排序，无 ANN 索引）：单 scope 向量数超 ~5k 再评估 HNSW；facts 上限 100 不变
 5. remote 沙箱并发上限按进程独立计（多进程部署时实际连接数 = 上限 × 进程数）
 6. `view_image` 只支持**本会话上传的图片**（按文件名查找）；沙箱产物图片（如 matplotlib 输出）暂不支持
 7. 上传的文件对象在「删除对话」时才清理；未发送就放弃的上传（没有关联到任何消息）会在 MinIO 里留下未引用的对象

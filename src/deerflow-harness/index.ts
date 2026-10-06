@@ -117,17 +117,14 @@ export {
   getMemoryConfig,
   loadMemoryConfigFromDict,
   setMemoryConfig,
-  // paths
-  agentMemoryFile,
-  getBaseDir,
-  memoryFile,
-  userAgentMemoryFile,
-  userMemoryFile,
   // storage
   type MemoryStorage,
-  FileMemoryStorage,
+  type MemorySqlExecutor,
+  type VectorSearchResult,
+  PgMemoryStorage,
   getMemoryStorage,
   resetMemoryStorage,
+  setMemoryStorage,
   // prompt utilities
   countTokens,
   estimateTokensHeuristic,
@@ -172,14 +169,30 @@ export {
   resetMemoryEmbeddingsFactory,
   setMemoryEmbeddingsFactory,
   type MemoryEmbeddingsFactory,
+  // rerank（RAG 精排）
+  getMemoryRerankerFactory,
+  rerankWithFallback,
+  resetMemoryRerankerFactory,
+  setMemoryRerankerFactory,
+  type MemoryReranker,
+  type MemoryRerankerFactory,
   // facade
   buildMemoryContext,
   previewMemoryRetrieval,
   type BuildMemoryContextOptions,
   type MemoryRetrievalPreview,
-  // retrieval 明细（预览/调试）
-  previewFactScores,
+  // retrieval（RAG 管线：BM25/向量双路召回 → RRF → rerank；明细供预览/调试）
+  bm25Score,
+  buildBm25Stats,
+  lexicalRecall,
+  retrieveMemory,
+  rrfFuse,
+  tokenize,
+  vectorRecallJs,
+  type Bm25Stats,
   type FactScoreDetail,
+  type RetrieveResult,
+  type SectionScoreDetail,
 } from './agents/memory';
 
 // vision（多模态：图片字节注入 + 多模态消息构造 + 历史图压缩）

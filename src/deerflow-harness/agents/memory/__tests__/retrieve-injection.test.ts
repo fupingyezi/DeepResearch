@@ -1,24 +1,20 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import type { Embeddings } from '@langchain/core/embeddings';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { resetMemoryEmbeddingsFactory, setMemoryEmbeddingsFactory } from '../embeddings';
-import { buildMemoryContext, previewMemoryRetrieval } from '../index';
-import { getMemoryStorage, resetMemoryStorage } from '../storage';
+import { buildMemoryContext } from '../index';
+import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact, MemoryData } from '../types';
+import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 const QUERY_VEC = [1, 0, 0, 0];
 
-/** 记忆检索端到端：走真实 storage（tmp 文件），覆盖 buildMemoryContext 的
- *  retrieve 分支行为（多轮 query、空 query 回落、阈值配置生效）。 */
+/** 记忆检索端到端：走真实 storage（PgMemoryStorage + 假 SQL），覆盖
+ *  buildMemoryContext 的 retrieve 分支行为（多轮 query、空 query、阈值配置生效）。 */
 describe('buildMemoryContext · retrieve 模式', () => {
-  let tmpDir: string;
-
   function fact(content: string, id = content, embedding?: number[]): Fact {
     return {
       id,
@@ -50,33 +46,25 @@ describe('buildMemoryContext · retrieve 模式', () => {
     };
   }
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-inject-test-'));
-    setMemoryConfig({
-      ...DEFAULT_MEMORY_CONFIG,
-      storagePath: path.join(tmpDir, 'memory.json'),
-      embeddingDimensions: DIMS,
-    });
-    resetMemoryStorage();
+  beforeEach(() => {
+    setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
+    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetMemoryEmbeddingsFactory();
     resetMemoryStorage();
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG });
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
-  it('空 query 且无历史 → 回落全量注入（而非整段不注入）', async () => {
+  it('空 query 且无历史 → 无可检索信号，不注入（不回落全量）', async () => {
     await getMemoryStorage().save(memory([fact('用户偏好用 TypeScript 写后端服务')]), {
       agentName: null,
       userId: null,
     });
 
     const block = await buildMemoryContext({ mode: 'retrieve', query: '' });
-    expect(block).toContain('<memory>'); // 全量注入标签（无 mode 属性）
-    expect(block).not.toContain('mode="retrieve"');
-    expect(block).toContain('TypeScript');
+    expect(block).toBe('');
   });
 
   it('query 有信号但全部落空 → 仍不注入（避免无关记忆噪声）', async () => {
@@ -147,25 +135,11 @@ describe('buildMemoryContext · retrieve 模式', () => {
 
     setMemoryConfig({
       ...DEFAULT_MEMORY_CONFIG,
-      storagePath: path.join(tmpDir, 'memory.json'),
       embeddingDimensions: DIMS,
       semanticMatchThreshold: 0.5,
     });
     const block = await buildMemoryContext({ mode: 'retrieve', query: '随便聊聊' });
     expect(block).toContain('mode="retrieve"');
     expect(block).toContain('完全无关的内容');
-  });
-
-  it('预览接口不传 recentQueries：单 query 行为与注入侧一致', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await getMemoryStorage().save(memory([fact('用户偏好用 pnpm 管理依赖')]), {
-      agentName: null,
-      userId: null,
-    });
-
-    const preview = await previewMemoryRetrieval({ query: '它呢？' });
-    expect(preview.injectedText).toBe(''); // 无历史可拼，单 query 无命中
-    expect(preview.thresholds).toEqual({ semanticMatch: 0.6, minScore: 0.05 });
-    warn.mockRestore();
   });
 });
