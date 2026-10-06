@@ -3,13 +3,17 @@
  *
  * 职责边界：
  * - 适配层（src/lib/zhipu-rerank.ts）fail-fast：非 2xx / 响应畸形直接抛错；
- * - 本封装层静默降级：工厂缺失 / 构造失败 / API 失败 → warnOnce + 返回 null，
+ * - 本封装层静默降级：工厂缺失 / 构造失败 / API 失败 → 计数 + 返回 null，
  *   调用方（检索管线）据此保持 RRF 序继续——与本项目「降级不炸」惯例一致，
  *   是相对 obsidian-rag fail-fast 路线的刻意差异点（那边是评测工具，这边是产品链路）。
+ *   告警是状态切换式（健康→故障 warn、故障→健康 info），故障期内计数
+ *   进 memoryDegradeStats，持续降级不会淹没在一条 warnOnce 里。
  *
  * 分数语义：zhipu rerank 的 relevance_score 分布高度压缩（不相关也常 0.99+），
  * 只做**相对排序**用，绝不当「相关/不相关」的绝对阈值。
  */
+
+import { memoryDegradeStats } from './stats';
 
 export interface MemoryReranker {
   /** 对 docs 按与 query 的相关性打分；返回与 docs 等长的分数数组（按 index 对齐）。 */
@@ -22,9 +26,17 @@ let _factory: MemoryRerankerFactory | null = null;
 let warnedRerankFailure = false;
 
 function warnRerankOnce(stage: string, e: unknown): void {
+  memoryDegradeStats.rerankFailures += 1;
   if (warnedRerankFailure) return;
   warnedRerankFailure = true;
   console.warn(`[memory/rerank] ${stage} failed (keeping RRF order):`, e);
+}
+
+/** 精排成功 → 故障标记复位，再失败会重新打 warn。 */
+function markRerankHealthy(): void {
+  if (!warnedRerankFailure) return;
+  warnedRerankFailure = false;
+  console.info('[memory/rerank] rerank recovered');
 }
 
 export function setMemoryRerankerFactory(factory: MemoryRerankerFactory | null): void {
@@ -69,6 +81,7 @@ export async function rerankWithFallback(query: string, docs: string[]): Promise
       );
       return null;
     }
+    markRerankHealthy();
     return scores;
   } catch (e) {
     warnRerankOnce('rerank', e);

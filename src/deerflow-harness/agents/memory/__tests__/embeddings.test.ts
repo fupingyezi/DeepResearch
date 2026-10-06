@@ -15,6 +15,7 @@ import {
 } from '../embeddings';
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { PgMemoryStorage } from '../pg-storage';
+import { getMemoryDegradeStats, resetMemoryDegradeStats } from '../stats';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact } from '../types';
 import { FakeSql } from './fake-sql';
@@ -187,6 +188,37 @@ describe('embedQuery / embedTexts', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(embedQuery('test')).resolves.toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('嵌入失败计数进 stats；恢复后打 info 复位（再故障重新 warn）', async () => {
+    resetMemoryEmbeddingsFactory();
+    resetMemoryDegradeStats();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let down = true;
+    setMemoryEmbeddingsFactory(
+      () =>
+        fakeEmbeddings(async (batch) => {
+          if (down) throw new Error('api down');
+          return batch.map(() => vec(1));
+        }) as unknown as Embeddings,
+    );
+
+    await expect(embedQuery('a')).resolves.toBeNull();
+    await expect(embedQuery('b')).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1); // 故障段内 warn 一次
+    expect(getMemoryDegradeStats().embedFailures).toBe(2); // 计数逐次累加
+
+    down = false;
+    await expect(embedQuery('c')).resolves.not.toBeNull();
+    expect(info).toHaveBeenCalledTimes(1); // 恢复：打一次 info
+
+    down = true;
+    await expect(embedQuery('d')).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledTimes(2); // 再故障：重新 warn
+    expect(getMemoryDegradeStats().embedFailures).toBe(3);
+    warn.mockRestore();
+    info.mockRestore();
   });
 
   it('出口统一 L2 归一化：embedQuery 与 embedTexts 返回单位向量', async () => {

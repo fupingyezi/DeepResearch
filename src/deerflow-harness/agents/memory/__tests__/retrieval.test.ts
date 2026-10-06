@@ -6,11 +6,13 @@ import {
   bm25Score,
   buildBm25Stats,
   lexicalRecall,
+  resetMemoryRetrievalDegrades,
   retrieveMemory,
   rrfFuse,
   tokenize,
   vectorRecallJs,
 } from '../retrieval';
+import { getMemoryDegradeStats, resetMemoryDegradeStats } from '../stats';
 
 const QUERY_VEC = [1, 0, 0, 0];
 
@@ -427,6 +429,29 @@ describe('retrieveMemory 向量召回', () => {
     warn.mockRestore();
   });
 
+  it('vectorRecall 失败计数进 stats；恢复 pg 后打 info 复位', async () => {
+    resetMemoryRetrievalDegrades();
+    resetMemoryDegradeStats();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const data = memory([fact('无关内容', 0.9, 'f', unit(0.8))]);
+    let down = true;
+    const recall = async (): Promise<VectorSearchResult[]> => {
+      if (down) throw new Error('pg down');
+      return [{ kind: 'fact', refId: 'f', similarity: 0.8 }];
+    };
+
+    await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC, vectorRecall: recall });
+    await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC, vectorRecall: recall });
+    expect(getMemoryDegradeStats().vectorFallbacks).toBe(2);
+
+    // 恢复：一次 pg 成功 → 故障标记复位，打一次 info
+    down = false;
+    await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC, vectorRecall: recall });
+    expect(info).toHaveBeenCalledTimes(1);
+    info.mockRestore();
+    resetMemoryRetrievalDegrades();
+  });
+
   it('vectorRecall 缺省 → 直接 JS 扫描（vectorLeg=js）', async () => {
     const data = memory([fact('无关内容', 0.9, 'f', unit(0.8))]);
     const result = await retrieveMemory(data, '随便聊聊', { queryEmbedding: QUERY_VEC });
@@ -513,6 +538,28 @@ describe('retrieveMemory rerank 精排', () => {
     expect(result!.picked.facts.map((f) => f.id)).toEqual(['a', 'b', 'c']);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it('rerank 失败计数进 stats；恢复后打 info 复位', async () => {
+    resetMemoryRetrievalDegrades();
+    resetMemoryDegradeStats();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let down = true;
+    const rerank = async (): Promise<number[] | null> => {
+      if (down) throw new Error('api down');
+      return [0.9, 0.8, 0.7];
+    };
+
+    await retrieveMemory(data, '量子计算', { rerank });
+    await retrieveMemory(data, '量子计算', { rerank });
+    expect(getMemoryDegradeStats().rerankFailures).toBe(2);
+
+    down = false;
+    const result = await retrieveMemory(data, '量子计算', { rerank });
+    expect(result!.rerankUsed).toBe(true);
+    expect(info).toHaveBeenCalledTimes(1);
+    info.mockRestore();
+    resetMemoryRetrievalDegrades();
   });
 
   it('confidence 加权作用在 rerank 分上（同分高置信在前）', async () => {

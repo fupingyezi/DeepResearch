@@ -7,6 +7,7 @@ import {
   setMemoryRerankerFactory,
   type MemoryReranker,
 } from '../rerank';
+import { getMemoryDegradeStats, resetMemoryDegradeStats } from '../stats';
 
 /**
  * rerankWithFallback 的降级矩阵：工厂缺失 / 构造失败 / API 失败 / 分数长度不符
@@ -16,7 +17,9 @@ import {
 describe('rerankWithFallback', () => {
   beforeEach(() => {
     resetMemoryRerankerFactory();
+    resetMemoryDegradeStats();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -50,6 +53,8 @@ describe('rerankWithFallback', () => {
     await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toBeNull();
     await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toBeNull();
     expect(console.warn).toHaveBeenCalledTimes(1);
+    // warn 只打一次，计数逐次累加——持续降级从 stats 上可见
+    expect(getMemoryDegradeStats().rerankFailures).toBe(2);
   });
 
   it('rerank 成功 → 分数原样透传', async () => {
@@ -73,6 +78,30 @@ describe('rerankWithFallback', () => {
     await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toBeNull();
     fail = false;
     await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toEqual([0.9, 0.1]);
+  });
+
+  it('失败 → 恢复打 info；再失败重新打 warn（状态切换式日志 + 计数）', async () => {
+    let fail = true;
+    setMemoryRerankerFactory(() => ({
+      rerank: async () => {
+        if (fail) throw new Error('api down');
+        return [0.9, 0.1];
+      },
+    }));
+
+    await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toBeNull();
+    expect(console.warn).toHaveBeenCalledTimes(1);
+
+    // 恢复：故障标记复位，打一次 info
+    fail = false;
+    await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toEqual([0.9, 0.1]);
+    expect(console.info).toHaveBeenCalledTimes(1);
+
+    // 再故障：重新打 warn（warnOnce 是「每故障段一次」，不是「永久一次」）
+    fail = true;
+    await expect(rerankWithFallback('q', ['a', 'b'])).resolves.toBeNull();
+    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(getMemoryDegradeStats().rerankFailures).toBe(2);
   });
 
   it('分数长度与 docs 不符 → warnOnce + null（防错位乱序）', async () => {

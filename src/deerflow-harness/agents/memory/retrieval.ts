@@ -25,6 +25,7 @@
  */
 
 import { cosineSimilarity, isCompatibleVector, RECALL_SECTION_SLOTS } from './embeddings';
+import { memoryDegradeStats } from './stats';
 import type { VectorSearchResult } from './storage';
 import type { Fact, FactCategory, MemoryData, SectionData } from './types';
 
@@ -522,15 +523,37 @@ let warnedVectorDegrade = false;
 let warnedRerankDegrade = false;
 
 function warnVectorDegradeOnce(e: unknown): void {
+  memoryDegradeStats.vectorFallbacks += 1;
+  // 健康→故障切换时打 warn，故障期内静默计数（持续降级看 stats）
   if (warnedVectorDegrade) return;
   warnedVectorDegrade = true;
   console.warn('[memory/retrieval] vector recall failed, falling back to JS scan:', e);
 }
 
 function warnRerankDegradeOnce(e: unknown): void {
+  memoryDegradeStats.rerankFailures += 1;
   if (warnedRerankDegrade) return;
   warnedRerankDegrade = true;
   console.warn('[memory/retrieval] rerank failed, keeping RRF order:', e);
+}
+
+/** 对应链路恢复 → 故障标记复位，再故障会重新打 warn。 */
+function markVectorRecallHealthy(): void {
+  if (!warnedVectorDegrade) return;
+  warnedVectorDegrade = false;
+  console.info('[memory/retrieval] vector recall recovered (pgvector)');
+}
+
+function markRerankHealthy(): void {
+  if (!warnedRerankDegrade) return;
+  warnedRerankDegrade = false;
+  console.info('[memory/retrieval] rerank recovered');
+}
+
+/** 仅供测试使用：重置降级告警标志。 */
+export function resetMemoryRetrievalDegrades(): void {
+  warnedVectorDegrade = false;
+  warnedRerankDegrade = false;
 }
 
 /**
@@ -580,6 +603,7 @@ export async function retrieveMemory(
     if (options.vectorRecall) {
       try {
         hits = await options.vectorRecall(queryEmbedding, RECALL_EACH);
+        markVectorRecallHealthy();
       } catch (e) {
         warnVectorDegradeOnce(e);
       }
@@ -645,6 +669,7 @@ export async function retrieveMemory(
     }
     if (scores) {
       rerankUsed = true;
+      markRerankHealthy();
       head.forEach((e, i) => {
         e.rerank = scores![i] ?? 0;
       });

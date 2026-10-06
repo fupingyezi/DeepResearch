@@ -12,11 +12,20 @@ export interface MemoryDegradeStats {
   storageLoadFailures: number;
   /** PG 记忆写失败次数（update 返回 null，本次更新丢失）。 */
   storageUpdateFailures: number;
+  /** embedding API 失败次数（语义路回落词面 / 新向量留待回填）。 */
+  embedFailures: number;
+  /** rerank API 失败次数（精排回落 RRF 序）。 */
+  rerankFailures: number;
+  /** pgvector 召回失败回落 JS 线性扫描次数。 */
+  vectorFallbacks: number;
 }
 
 export const memoryDegradeStats: MemoryDegradeStats = {
   storageLoadFailures: 0,
   storageUpdateFailures: 0,
+  embedFailures: 0,
+  rerankFailures: 0,
+  vectorFallbacks: 0,
 };
 
 export function getMemoryDegradeStats(): MemoryDegradeStats {
@@ -27,4 +36,7 @@ export function getMemoryDegradeStats(): MemoryDegradeStats {
 export function resetMemoryDegradeStats(): void {
   memoryDegradeStats.storageLoadFailures = 0;
   memoryDegradeStats.storageUpdateFailures = 0;
+  memoryDegradeStats.embedFailures = 0;
+  memoryDegradeStats.rerankFailures = 0;
+  memoryDegradeStats.vectorFallbacks = 0;
 }

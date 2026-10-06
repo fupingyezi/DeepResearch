@@ -16,6 +16,7 @@ import type { Embeddings } from '@langchain/core/embeddings';
 
 import { getMemoryConfig } from './config';
 import { getMemoryStorage } from './storage';
+import { memoryDegradeStats } from './stats';
 import type { Fact, MemoryData, SectionData } from './types';
 
 export type MemoryEmbeddingsFactory = () => Embeddings | null;
@@ -78,6 +79,7 @@ export async function embedQuery(text: string): Promise<number[] | null> {
   if (!embeddings) return null;
   try {
     const vector = await embeddings.embedQuery(text);
+    markEmbedHealthy();
     return isExpectedLength(vector) ? normalizeVector(vector) : null;
   } catch (e) {
     warnEmbedFailureOnce('embedQuery', e);
@@ -99,6 +101,7 @@ export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> 
     const batch = texts.slice(i, i + EMBEDDING_BATCH_LIMIT);
     try {
       const vectors = await embeddings.embedDocuments(batch);
+      markEmbedHealthy();
       for (let j = 0; j < batch.length; j++) {
         const vector = vectors[j];
         out[i + j] = isExpectedLength(vector) ? normalizeVector(vector) : null;
@@ -406,7 +409,16 @@ function createEmbeddingsInstance(): Embeddings | null {
 }
 
 function warnEmbedFailureOnce(stage: string, e: unknown): void {
+  memoryDegradeStats.embedFailures += 1;
+  // 健康→故障切换时打 warn，故障期内静默计数（持续降级看 stats，不靠刷屏日志）
   if (warnedEmbedFailure) return;
   warnedEmbedFailure = true;
   console.warn(`[memory/embeddings] ${stage} failed (falling back to lexical scoring):`, e);
+}
+
+/** 任一嵌入调用成功 → 故障标记复位，再故障会重新打 warn。 */
+function markEmbedHealthy(): void {
+  if (!warnedEmbedFailure) return;
+  warnedEmbedFailure = false;
+  console.info('[memory/embeddings] embedding recovered');
 }
