@@ -17,11 +17,13 @@
  *   取不满；池只是候选空间，最终组装仍按 final 取 topK，注入条数不变）；
  * - rerank 精排池头 20 条，池尾按 RRF 序衔接；未注册 / 失败 → 状态切换告警 +
  *   保持 RRF 序（本项目惯例静默降级，与 obsidian-rag fail-fast 的刻意差异点）；
- * - 组装：final =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）取 topK；
+ * - 组装：final =（rerank ?? RRF）×（0.5 + 0.5×confidence）取 topK——rerank 只
+ *   提供精排**顺序**（原始分压缩 0.99+ 量级无意义，转成与 RRF 同量纲的倒数
+ *   排名分 1/(RRF_K+rank+1)），两支可跨条目比较；
  *   workContext/personalContext 恒保留（身份信息）；history 三段留池内最优一段；
  *   topOfMind 进池才留。双路全空 → null → 不注入。
  *
- * rerank 分分布高度压缩（不相关也常 0.99+），只做相对排序；「全部落空」由
+ * rerank 原始分分布高度压缩（不相关也常 0.99+），只做相对排序；「全部落空」由
  * 双路召回皆空判定，不存在绝对分数阈值。BM25 分同理只做**同轮相对排序**
  * （idf 随语料变化，跨轮不可比）。
  */
@@ -347,7 +349,11 @@ interface PoolEntry {
   /** 供 rerank 的正文（fact.content / section.summary）。 */
   text: string;
   rrf: number;
+  /** 精排倒数排名分（1/(RRF_K+rank+1)，与 RRF 同量纲）；未精排 → null。
+   *  provider 原始分高度压缩（不相关也 0.99+），量级不可比，只取它给出的顺序。 */
   rerank: number | null;
+  /** provider 原始精排分（仅调试用，不做任何计算）。 */
+  rerankRaw: number | null;
   /** 组装排序分：final =（rerank ?? RRF）×（fact 再乘 confidence 权重），
    *  在 rerank 之后统一算好写回——topK 选择与预览明细读同一个值。 */
   final: number | null;
@@ -364,7 +370,16 @@ function buildCandidatePool(data: MemoryData, fused: RrfEntry[]): PoolEntry[] {
     if (ref.startsWith('fact:')) {
       const fact = factById.get(ref.slice('fact:'.length));
       if (!fact) continue;
-      pool.push({ ref, kind: 'fact', text: fact.content, rrf, rerank: null, final: null, fact });
+      pool.push({
+        ref,
+        kind: 'fact',
+        text: fact.content,
+        rrf,
+        rerank: null,
+        rerankRaw: null,
+        final: null,
+        fact,
+      });
     } else {
       const parsed = parseSectionRef(ref);
       if (!parsed) continue;
@@ -376,6 +391,7 @@ function buildCandidatePool(data: MemoryData, fused: RrfEntry[]): PoolEntry[] {
         text: section.summary,
         rrf,
         rerank: null,
+        rerankRaw: null,
         final: null,
         group: parsed.group,
         slot: parsed.slot,
@@ -468,9 +484,11 @@ export interface FactScoreDetail {
   inVectorLeg: boolean;
   /** RRF 融合分；未进候选池 → null。 */
   rrf: number | null;
-  /** rerank 分；未精排 / 精排失败 → null。 */
+  /** 精排倒数排名分（与 RRF 同量纲，可跨条目比较）；未精排 / 精排失败 → null。 */
   rerank: number | null;
-  /** 组装排序分 =（rerank 分 or RRF 分）×（0.5 + 0.5×confidence）；未进池 → null。 */
+  /** provider 原始精排分（分布压缩，仅调试用）；未精排 → null。 */
+  rerankRaw: number | null;
+  /** 组装排序分 =（rerank ?? RRF）×（0.5 + 0.5×confidence）；未进池 → null。 */
   final: number | null;
   /** 是否进入实际注入集合。 */
   picked: boolean;
@@ -487,7 +505,8 @@ export interface SectionScoreDetail {
   inVectorLeg: boolean;
   rrf: number | null;
   rerank: number | null;
-  /** 池内秩来源分（rerank 分 or RRF 分）；未进池 → null。 */
+  rerankRaw: number | null;
+  /** 池内秩来源分（rerank ?? RRF，同为倒数排名量纲）；未进池 → null。 */
   final: number | null;
   picked: boolean;
 }
@@ -567,13 +586,17 @@ function scoreOf(
   entry: PoolEntry | undefined,
   bm25ByRef: Map<string, number>,
   vectorHits: Map<string, number>,
-): Pick<FactScoreDetail, 'bm25' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'final'> {
+): Pick<
+  FactScoreDetail,
+  'bm25' | 'cosine' | 'inVectorLeg' | 'rrf' | 'rerank' | 'rerankRaw' | 'final'
+> {
   return {
     bm25: bm25ByRef.get(ref) ?? 0,
     cosine: vectorHits.get(ref) ?? null,
     inVectorLeg: vectorHits.has(ref),
     rrf: entry?.rrf ?? null,
     rerank: entry?.rerank ?? null,
+    rerankRaw: entry?.rerankRaw ?? null,
     final: entry?.final ?? null,
   };
 }
@@ -676,14 +699,21 @@ export async function retrieveMemory(
       rerankUsed = true;
       markRerankHealthy();
       head.forEach((e, i) => {
-        e.rerank = scores![i] ?? 0;
+        e.rerankRaw = scores![i] ?? 0;
       });
-      head.sort((x, y) => (y.rerank ?? 0) - (x.rerank ?? 0));
+      head.sort((x, y) => (y.rerankRaw ?? 0) - (x.rerankRaw ?? 0));
+      // provider 精排分高度压缩（不相关也常 0.99+），量级信息不可比也不可信：
+      // 只取它给出的**顺序**，转成与 RRF 同量纲的倒数排名分参与组装——
+      // 精排的作用被还原为「重排」，final 的 rrf / rerank 两支才可跨条目比较
+      head.forEach((e, i) => {
+        e.rerank = 1 / (RRF_K + i + 1);
+      });
       ranked = [...head, ...tail];
     }
   }
 
   // ---- 组装分（单一出处）：final =（rerank ?? RRF）×（fact 再乘 confidence 权重）----
+  // rerank 与 rrf 同为倒数排名量纲（见上），fact 与 section 条目之间直接可比；
   // 一次算好写回池条目：topK 选择与预览明细读同一个值，公式不会漂移
   for (const e of pool) {
     e.final = (e.rerank ?? e.rrf) * (e.kind === 'fact' && e.fact ? confidenceWeight(e.fact) : 1);

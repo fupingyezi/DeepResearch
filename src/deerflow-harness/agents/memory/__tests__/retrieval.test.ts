@@ -602,8 +602,9 @@ describe('retrieveMemory rerank 精排', () => {
     const result = await retrieveMemory(data, '量子计算', { rerank: async () => [0.5, 0.9, 0.7] });
     const byId = new Map(result!.facts.map((d) => [d.id, d]));
     expect(byId.get('b')!.picked).toBe(true);
-    expect(byId.get('b')!.rerank).toBe(0.9);
-    expect(byId.get('b')!.final).toBeCloseTo(0.9 * 0.95, 10);
+    expect(byId.get('b')!.rerankRaw).toBe(0.9); // provider 原始分只进明细，不进计算
+    expect(byId.get('b')!.rerank).toBeCloseTo(1 / 61, 10); // 精排第 1 位 → 倒数排名分，与 RRF 同量纲
+    expect(byId.get('b')!.final).toBeCloseTo((1 / 61) * 0.95, 10);
     expect(byId.get('b')!.rrf).toBeCloseTo(1 / 62, 10);
     expect(byId.get('b')!.bm25).toBeGreaterThan(0);
     expect(byId.get('a')!.cosine).toBeNull();
