@@ -456,7 +456,40 @@ Type error: Module '"@/types"' has no exported member 'chatWithAgentProps'.
 
 ---
 
-## 13. 遗留事项与改进方向
+## 13. 部署事故：docker build 在 lint/typecheck 阶段挂死，40 分钟被 ssh-action 超时掐掉（2026-10）
+
+**现象**：PR #22（feat/rag-retrieval）合并后首次部署，服务器本地 `next build` 在
+「Linting and checking validity of types」阶段（webpack 编译完成之后）挂满
+`command_timeout: 40m`，被 ssh-action 以 Run Command Timeout 掐掉；重跑一次同样位置、
+同样挂死。第二次跑的日志里 `COPY . . CACHED` 但 `RUN pnpm build` 重跑——被掐掉的
+构建层不进缓存，正是第一次构建残留的指纹。
+
+**根因**：该阶段 = build 主进程内的 eslint + 单线程 tsc，是构建里最重、最慢的部分，
+且与 quality 门禁完全重复（deploy job `needs: quality`，`pnpm lint` / `pnpm typecheck`
+同款命令已在 GitHub runner 上跑过一遍）。服务器构建与 PG/Redis/MinIO/app 同机，
+builder 的 `NODE_OPTIONS=--max-old-space-size=2048` 只保证「真超限干净 OOM」——
+在极限附近会长时间 GC 空转，表现就是挂死而非失败（本地实测 tsc 峰值 568MB、
+eslint 767MB 单独都不超限，但 Next 把 eslint 塞进主进程与 webpack 结构共享同一个
+heap，同机还要争内存/CPU）。挂死 → 被上层超时掐掉 → docker CLI 死而构建残留
+dockerd 继续吃资源，下一次部署再叠加，恶性循环。
+
+**修复**：
+
+1. `next.config.js` 加 `eslint.ignoreDuringBuilds` + `typescript.ignoreBuildErrors`：
+   构建只剩 webpack 编译（多核并行，事故中同机负载下 ~60s 即完成）
+2. `deploy-remote.sh` 的 docker build 包 `timeout ${BUILD_TIMEOUT:-30m}`：
+   病态挂起到点主动失败并输出明确错误，不再被上层 ssh-action 掐死留孤儿构建
+
+**教训**：
+
+1. 服务器构建里的每一步重活都要和「quality 门禁已覆盖」对账——重复校验要么砍掉、
+   要么有独立的超时墙兜底；
+2. ssh-action 的 command_timeout 保护的是 CI 资源，不是服务器——被杀的命令可能
+   在远端继续活着，杀脚本 ≠ 杀它起的进程。
+
+---
+
+## 14. 遗留事项与改进方向
 
 | 事项                            | 现状                                 | 建议                                                                                                                                                                                                              |
 | ------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -469,7 +502,7 @@ Type error: Module '"@/types"' has no exported member 'chatWithAgentProps'.
 
 ---
 
-## 14. 关键命令速查
+## 15. 关键命令速查
 
 ```bash
 # ── 本地 ──

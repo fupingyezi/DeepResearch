@@ -77,7 +77,12 @@ fi
 ensure_disk_space
 
 log "构建新镜像: $NEW_IMAGE（首次较慢，后续有 layer 缓存）"
-docker build -t "$NEW_IMAGE" . || fail "docker build 失败（见上方构建日志）"
+# 墙钟超时兜底：构建只剩 webpack 编译（lint/typecheck 在 quality 门禁跑，见 next.config），
+# 正常数分钟内完成。若因同机负载等病态挂起，到点主动终止 docker CLI 并以明确错误失败，
+# 而不是被上层 ssh-action 超时连脚本一起掐掉——那种死法构建会残留在 dockerd 继续吃资源，
+# 且下一次部署的构建层永远无缓存（被掐掉的层不进缓存）。
+timeout "${BUILD_TIMEOUT:-30m}" docker build -t "$NEW_IMAGE" . \
+  || fail "docker build 失败或超时 ${BUILD_TIMEOUT:-30m}（见上方构建日志）"
 
 log "以新镜像启动 app: $NEW_IMAGE"
 export APP_IMAGE="$NEW_IMAGE"

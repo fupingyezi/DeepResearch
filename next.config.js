@@ -9,6 +9,13 @@ const nextConfig = {
   // 自托管容器化：产出 .next/standalone 精简运行时，供 Docker runner 阶段直接 `node server.js`
   output: 'standalone',
 
+  // 构建期 lint/typecheck 关闭：这两个校验在 CI quality 门禁里已按同款命令独立执行
+  // （deploy job needs quality），docker build 里再跑一遍是纯冗余；且服务器构建与
+  // PG/Redis/MinIO/app 同机，build 主进程内的 eslint + 单线程 tsc 是构建里最重的
+  // 阶段——关掉后构建只剩 webpack 编译，同机负载与内存峰值都显著下降。
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
+
   experimental: {
     // ssh2 及其可选原生依赖（cpu-features）含动态 require，webpack 静态解析会失败；
     // 列为服务端外部包，运行期从 node_modules 直接 require（standalone 会一并追踪拷贝）。

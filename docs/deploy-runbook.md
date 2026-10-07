@@ -252,6 +252,12 @@ docker images --filter reference='deepresearch' --format '{{.CreatedAt}}\t{{.Tag
   | sort -r | tail -n +4 | awk '{print $NF}' | xargs -r docker rmi
 
 # ③ 清不出空间 / 内存打满时：控制台强制重启实例（容器 restart: unless-stopped 自动拉起）
+
+# ④ CI 超时掐掉部署脚本后，docker build 可能残留 dockerd 继续吃内存（app 通常仍健康：
+#    compose up 没执行到）。构建残留一般随客户端断开在几十秒内被 buildkit 取消，
+#    先看内存与构建缓存是否还在涨，长时间不消再重启 dockerd（会短暂中断所有容器网络）：
+free -m ; docker system df
+# sudo systemctl restart docker
 ```
 
 - 部署脚本已内置守卫：构建前根分区 <3G 会先自动清构建缓存、仍不足则**快速失败**（不会硬着头皮构建）；部署成功后自动回收（构建缓存留 2G、镜像留最近 3 版）
