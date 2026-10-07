@@ -75,11 +75,15 @@ export async function retrieveForInjection(
   // 管线内部回落 JS 扫描）；rerank 走 rerankWithFallback（工厂缺失 / API 失败
   // 返回 null，管线保持 RRF 序）。rerankQuery 用本轮单句——拼串会稀释语义。
   const storage = getMemoryStorage();
-  const vectorSearch = storage.vectorSearch;
   const vectorRecall: ((q: number[], n: number) => Promise<VectorSearchResult[]>) | null =
-    vectorSearch
+    storage.vectorSearch
       ? (queryVector, limit) =>
-          vectorSearch({ agentName: opts.agentName, userId: opts.userId }, queryVector, limit)
+          // 必须经 storage 接收者调用：解构后裸调用会丢 this（toScope 挂在实例上）
+          storage.vectorSearch!(
+            { agentName: opts.agentName, userId: opts.userId },
+            queryVector,
+            limit,
+          )
       : null;
   const result = await retrieveMemory(data, lexicalQuery, {
     topK: config.retrieveTopK,

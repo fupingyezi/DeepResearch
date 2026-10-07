@@ -10,7 +10,7 @@
 - 🔐 **用户认证系统**：JWT 鉴权 + OAuth 第三方登录（注册 / 登录 / 修改密码 / 会话管理），`x-user-id` 数据隔离；模型 API Key 由各用户在「设置-模型管理」自行配置，加密存库（`MODEL_KEY_ENC_SECRET`），主聊天链路不读服务端环境变量里的模型 Key。
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 PostgreSQL（`memory_state` jsonb + `memory_vectors` pgvector）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为 RAG 管线：pgvector 向量召回 + BM25 词面召回双路 → RRF 融合 → 智谱 rerank 精排（智谱 `embedding-3` 出向量）；无 Key 时静默降级为纯 BM25 词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
-- 🧩 **Skill 技能系统**：Prompt 注入式扩展能力，内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），扫描 `skills/public|custom/<name>/SKILL.md`，将技能说明注入系统提示；opt-in 默认关闭以节省 token。
+- 🧩 **Skill 技能系统（三层渐进披露）**：对齐主流 Agent Skills 架构——`SKILL.md`（frontmatter + 精简正文）+ `references/`（只读知识）+ `scripts/`（可执行脚本）。系统提示只注入名称/描述/资源目录（L1），模型按需经内置 `skill` 工具读取正文与参考资料、或在沙箱中执行脚本（脚本内容不进上下文）；内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），opt-in 默认关闭以节省 token。
 - 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 是每 run 一个的 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
 - 🔎 **子 agent 继承父线程上下文**：subagent 每次执行前，从父线程 checkpoint **只读**取历史并剪枝为纯文本背景块（4k 字符预算、剥离 base64 与上传文件正文、跳过纯工具调用消息），作为 SystemMessage 前置——与「子图状态不落 checkpoint」的决定正交，读取失败静默降级不阻断 task。
@@ -218,14 +218,16 @@ docs/                                   # 设计文档
 ├── deploy-runbook.md                   # 部署操作手册（GitHub 端 + 服务器端步骤）
 └── cicd-notes.md                       # 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）
 
-skills/                                 # 内置技能定义（7 种）
-├── deep-research/SKILL.md              # 深度研究（核心技能）
-├── consulting-analysis/SKILL.md        # 咨询分析
-├── code-documentation/SKILL.md         # 代码文档生成
-├── academic-paper-review/SKILL.md      # 学术论文评审
-├── newsletter-generation/SKILL.md      # 新闻稿生成
-├── frontend-design/SKILL.md            # 前端设计
-└── web-design-guidelines/SKILL.md      # Web 设计指南
+skills/                                 # 内置技能定义（7 种；public 内置 / custom 自定义）
+├── deep-research/                      # 深度研究（核心技能）
+│   ├── SKILL.md                        # frontmatter + 精简正文（L1 注入名称/描述/资源目录）
+│   └── references/                     # 按需读取的参考资料（L3）
+├── consulting-analysis/                # 咨询分析（同款结构，下略）
+├── code-documentation/                 # 代码文档生成
+├── academic-paper-review/              # 学术论文评审
+├── newsletter-generation/              # 新闻稿生成
+├── frontend-design/                    # 前端设计
+└── web-design-guidelines/              # Web 设计指南（薄包装 WebFetch 外部规则，无 references）
 ```
 
 ## 🚀 快速开始
@@ -409,7 +411,7 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/prompt/enhance`                         | POST          | 输入框「提示词增强」                                                              |
 | `/api/mcp`                                    | GET/POST      | MCP 服务器列表 / 新建                                                             |
 | `/api/mcp/[name]`                             | PATCH/DELETE  | 修改 / 删除 MCP 服务器 + 启停切换                                                 |
-| `/api/skills`                                 | GET/POST      | 技能列表 / 新建自定义 skill                                                       |
+| `/api/skills`                                 | GET/POST      | 技能列表（含 `resources` 资源目录与 `summary`）/ 新建自定义 skill                 |
 | `/api/skills/[name]`                          | PATCH         | 技能启用 / 禁用切换                                                               |
 | `/api/tools`                                  | GET           | 当前已绑定工具列表                                                                |
 | `/api/sandbox/stats`                          | GET           | 沙箱运行态快照（容器/并发统计，`DEERFLOW_SANDBOX_STATS_TOKEN` 门控）              |
@@ -572,12 +574,12 @@ OCR 把版面内容写成文本，同时（模型支持视觉时）以原图多�
 
 ### Skill 技能
 
-在设置「技能」页面中管理 Skills：
+在设置「技能」页面中管理 Skills，采用三层渐进披露架构：
 
-- 公共技能来自 `skills/public/` 目录，自定义技能存放在 `skills/custom/`
-- 每个 skill 由一个 `SKILL.md` 文件定义（含 YAML frontmatter 元信息）
-- 启用后其正文内容注入 lead-agent 系统提示
-- 默认 opt-in（关闭），启用会产生额外 token 消耗
+- 公共技能来自 `skills/public/` 目录，自定义技能存放在 `skills/custom/`；每个 skill 是一个目录：`SKILL.md`（frontmatter 的 name/description + 精简正文）+ 可选 `references/`（参考资料）+ 可选 `scripts/`（可执行脚本）
+- **L1**：启用后系统提示只注入技能的名称、描述与资源目录（路径 + 首标题摘要），正文不注入
+- **L2/L3**：模型按需调用内置 `skill` 工具——`skill(skill="<name>")` 读取正文、`skill(skill="<name>", resource="references/x.md")` 读取参考文件；`action=run` 会把 `scripts/` 下的脚本复制到沙箱工作区执行并返回 stdout（脚本内容不进上下文，超时默认 60s 可经 `DEERFLOW_SKILL_SCRIPT_TIMEOUT_MS` 调整；沙箱不可用时降级为返回脚本内容供模型参考）
+- 默认 opt-in（关闭）；skill 工具仅注入 lead-agent（subagent 不继承）
 
 ## 🛠️ 开发流程
 
@@ -629,6 +631,7 @@ MEMORY_DEBUG=1 pnpm dev
 - `DEERFLOW_EXTENSIONS_CONFIG_PATH` —— 扩展配置文件路径（默认 `{cwd}/extensions_config.json`）
 - `DEERFLOW_SANDBOX_DIR` —— 沙箱工作区根目录（默认 `{cwd}/.sandbox`；local 后端用）
 - `DEERFLOW_SKILLS_DIR` —— 技能目录（默认 `{cwd}/skills`）
+- `DEERFLOW_SKILL_SCRIPT_TIMEOUT_MS` —— skill 工具 `action=run` 的脚本执行超时（默认 60000ms；低于 100 按 100 处理）
 
 沙箱、护栏与多模态相关环境变量（详见 `.env.example`）：
 

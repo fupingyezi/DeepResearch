@@ -8,7 +8,7 @@ import { createBaseAgent } from './agents/factory';
 import { getExtraMiddlewares, getExtraMiddlewaresSignature } from './agents/extra-middlewares';
 import { createSummarizationMiddleware } from './agents/middlewares';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
-import { searchWebTool, askClarificationTool } from './tools';
+import { searchWebTool, askClarificationTool, skillTool } from './tools';
 import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
 import {
@@ -261,7 +261,7 @@ export class DeerFlowClient {
   ) {
     this.modelConfig = modelConfig;
     this.hasExplicitTools = Array.isArray(options?.tools);
-    this.defaultTools = options?.tools ?? [searchWebTool, askClarificationTool];
+    this.defaultTools = options?.tools ?? [searchWebTool, askClarificationTool, skillTool];
     this.explicitSystemPrompt = options?.systemPrompt;
     this.checkpointer = options?.checkpointer;
     this.baseOptions = {

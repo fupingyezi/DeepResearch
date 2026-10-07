@@ -59,6 +59,8 @@ interface ThreadState {
   warnedHashes: Set<string>;
   toolFreq: Map<string, number>;
   toolFreqWarned: Set<string>;
+  /** 硬停已触发次数（每线程）：首次跳回模型收尾，后续终止防循环。 */
+  hardStops: number;
 }
 
 /** 稳定 JSON 序列化：按 key 排序，保证 hash 与 fallback key 的确定性。 */
@@ -227,6 +229,7 @@ class LoopTracker {
       warnedHashes: new Set(),
       toolFreq: new Map(),
       toolFreqWarned: new Set(),
+      hardStops: 0,
     };
     this.threads.set(threadId, fresh);
     while (this.threads.size > this.maxTracked) {
@@ -261,18 +264,18 @@ function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
     return typeof tid === 'string' && tid ? tid : 'default';
   }
 
-  /** 跟踪 + 检测，返回 [warning, hardStop]。 */
+  /** 跟踪 + 检测，返回 [warning, hardStop, hardStops]（hardStops 为本次触发后的累计次数）。 */
   function trackAndCheck(
     state: { messages: BaseMessage[] },
     threadId: string,
-  ): [string | null, boolean] {
+  ): [string | null, boolean, number] {
     const messages = state.messages;
-    if (!messages || messages.length === 0) return [null, false];
+    if (!messages || messages.length === 0) return [null, false, 0];
 
     const last = messages[messages.length - 1];
-    if (!AIMessage.isInstance(last)) return [null, false];
+    if (!AIMessage.isInstance(last)) return [null, false, 0];
     const toolCalls = last.tool_calls;
-    if (!toolCalls || toolCalls.length === 0) return [null, false];
+    if (!toolCalls || toolCalls.length === 0) return [null, false, 0];
 
     const callHash = hashToolCalls(toolCalls);
     const ts = tracker.touch(threadId);
@@ -300,7 +303,8 @@ function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
         count,
         tools: toolNames,
       });
-      return [HARD_STOP_MSG, true];
+      ts.hardStops += 1;
+      return [HARD_STOP_MSG, true, ts.hardStops];
     }
 
     if (count >= warnThreshold && !ts.warnedHashes.has(callHash)) {
@@ -311,7 +315,7 @@ function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
         count,
         tools: toolNames,
       });
-      return [WARNING_MSG, false];
+      return [WARNING_MSG, false, 0];
     }
 
     // ── Layer 2: 频次层
@@ -327,7 +331,8 @@ function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
           toolName: name,
           count: next,
         });
-        return [toolFreqHardStop(name, next), true];
+        ts.hardStops += 1;
+        return [toolFreqHardStop(name, next), true, ts.hardStops];
       }
       if (next >= toolFreqWarn && !ts.toolFreqWarned.has(name)) {
         ts.toolFreqWarned.add(name);
@@ -336,35 +341,57 @@ function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
           toolName: name,
           count: next,
         });
-        return [toolFreqWarning(name, next), false];
+        return [toolFreqWarning(name, next), false, 0];
       }
     }
 
-    return [null, false];
+    return [null, false, 0];
   }
 
   const middleware = createMiddleware({
     name: 'LoopDetectionMiddleware',
 
-    afterModel: async (state, runtime) => {
-      const threadId = getThreadId(runtime);
-      const [warning, hardStop] = trackAndCheck(state, threadId);
+    afterModel: {
+      // canJumpTo: 硬停需要跳回模型再走一轮生成最终答案。直接 END 的话 run 会以
+      // 「只有工具活动、没有回答」的面目收场——中间件对 state 的改写不产生 SSE
+      // 事件，前端连强制收尾文案都看不到。
+      // 值必须是用户面 'model'（TS 类型 JumpToTarget = "model" | "tools" | "end"）：
+      // afterModel 路由对非 END/非 'tools' 的 jumpTo 一律 Send("model_request")，
+      // 'model' 命中该分支；'model_request' 虽在运行时通道 schema 里但不在 TS 类型
+      // 中，且 MiddlewareNode 校验要求 jumpTo ∈ canJumpTo，两边须一致。
+      // 端到端行为由 loop-detection.integration.test.ts 锁定。
+      canJumpTo: ['model'],
+      hook: async (state, runtime) => {
+        const threadId = getThreadId(runtime);
+        const [warning, hardStop, hardStops] = trackAndCheck(state, threadId);
 
-      if (hardStop) {
-        const messages = state.messages;
-        const last = messages[messages.length - 1] as AIMessage;
-        const content = appendText(last.content, warning ?? HARD_STOP_MSG);
-        const stripped = buildHardStopMessage(last, content);
-        return { messages: [stripped] };
-      }
+        if (hardStop) {
+          const last = state.messages[state.messages.length - 1] as AIMessage;
+          // 第一次硬停：剥离 tool_calls + 注入强制收尾指令，跳回模型节点
+          // 让模型基于已收集的结果产出最终答案（工具不再执行，避免继续刷量）。
+          if (hardStops === 1) {
+            return {
+              messages: [
+                buildHardStopMessage(last, last.content),
+                new HumanMessage({ content: warning ?? HARD_STOP_MSG, name: 'loop_hard_stop' }),
+              ],
+              jumpTo: 'model',
+            };
+          }
+          // 模型无视强制收尾仍继续调工具：终止图形防无限循环。
+          // 把收尾文案并入最后一条 AI 消息，保证 checkpoint 记录可读。
+          const content = appendText(last.content, warning ?? HARD_STOP_MSG);
+          return { messages: [buildHardStopMessage(last, content)] };
+        }
 
-      if (warning) {
-        return {
-          messages: [new HumanMessage({ content: warning, name: 'loop_warning' })],
-        };
-      }
+        if (warning) {
+          return {
+            messages: [new HumanMessage({ content: warning, name: 'loop_warning' })],
+          };
+        }
 
-      return undefined;
+        return undefined;
+      },
     },
   });
 

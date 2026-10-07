@@ -289,7 +289,7 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 ## 8. 后续扩展方向
 
 1. **Docker 隔离**：`DockerSandbox` + `DockerSandboxProvider` 已实现，并补齐多对话并行编排（详见 §10）
-2. **Skills 只读挂载**：参考 deer-flow，将 skills 目录只读挂载到沙箱
+2. **Skills 只读挂载**：~~参考 deer-flow，将 skills 目录只读挂载到沙箱~~ 已被 2026-10 的 skills 渐进披露方案取代：skill 工具按需读取（宿主读，不走沙箱）+ `action=run` 时把单个脚本复制进 workspace 沙箱执行（仅此一个文件进沙箱，无目录挂载）
 3. **bash 命令黑名单**：扩展 `security.ts`，支持危险命令检测
 4. **文件大小限制**：在 `write_file` 中增加文件大小上限（防 DOS）
 5. **操作审计日志**：记录所有文件操作，便于调试与审计

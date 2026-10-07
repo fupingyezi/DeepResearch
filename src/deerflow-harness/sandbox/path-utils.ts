@@ -71,7 +71,8 @@ function allowedRoots(threadData: ThreadDataState): string[] {
     .map((p) => path.resolve(p));
 }
 
-function isWithin(child: string, root: string): boolean {
+/** 判断 child 是否位于 root 内（含相等）；skill 工具做资源路径包含校验复用。 */
+export function isWithin(child: string, root: string): boolean {
   const rel = path.relative(root, child);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }

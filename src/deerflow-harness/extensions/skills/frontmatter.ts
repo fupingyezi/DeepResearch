@@ -23,14 +23,18 @@ function stripQuotes(value: string): string {
 }
 
 export function parseFrontmatter(content: string): Frontmatter | null {
-  const match = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(content);
+  // 正则锚定开头：带 BOM（Windows 保存常见）会导致整个 frontmatter 被跳过，先剥离
+  const match = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(content.replace(/^﻿/, ''));
   if (!match) return null;
 
   const block = match[1];
   const body = content.slice(match[0].length);
   const fields: Record<string, string> = {};
 
-  for (const line of block.split('\n')) {
+  for (const rawLine of block.split('\n')) {
+    // CRLF 行尾先剥 \r：`.` 不匹配行终止符，值尾部的 \r 会让 (.*)$ 整行失配
+    // 静默跳过（CRLF 文件所有字段都会丢），必须先归一
+    const line = rawLine.replace(/\r$/, '');
     // 仅解析顶层 key（无前导空白）；缩进行属于嵌套映射，忽略
     if (/^\s/.test(line)) continue;
     const fieldMatch = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
