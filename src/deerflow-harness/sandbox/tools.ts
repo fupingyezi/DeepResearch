@@ -32,7 +32,7 @@ interface SandboxRuntimeState {
   sandbox?: SandboxState | null;
 }
 
-interface ResolvedSandboxContext {
+export interface ResolvedSandboxContext {
   sandbox: Sandbox;
   threadData: ThreadDataState;
 }
@@ -103,7 +103,7 @@ function clampMaxResults(value: number | undefined, fallback: number, upperBound
   return Math.min(value, upperBound);
 }
 
-function resolveThreadId(runtime: ToolRuntime): string | null {
+export function resolveThreadId(runtime: ToolRuntime): string | null {
   const config = runtime.config as { configurable?: { thread_id?: unknown } } | undefined;
   const fromConfig = config?.configurable?.thread_id;
   if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
@@ -112,7 +112,7 @@ function resolveThreadId(runtime: ToolRuntime): string | null {
 }
 
 /** 解析本次工具调用的 threadData（含真实目录路径）：优先 state，缺失时按 threadId 推导。 */
-function resolveThreadData(runtime: ToolRuntime): ThreadDataState {
+export function resolveThreadData(runtime: ToolRuntime): ThreadDataState {
   // runtime.state 为外部注入的图状态，单层断言读取（project.md §2.2 外部边界例外）。
   const state = (runtime.state ?? {}) as SandboxRuntimeState;
   const fromState = state.threadData;
@@ -131,7 +131,7 @@ function resolveThreadData(runtime: ToolRuntime): ThreadDataState {
 }
 
 /** 惰性获取沙箱 + 解析 threadData + 创建 thread 目录。 */
-async function ensureSandbox(runtime: ToolRuntime): Promise<ResolvedSandboxContext> {
+export async function ensureSandbox(runtime: ToolRuntime): Promise<ResolvedSandboxContext> {
   const provider = getSandboxProvider();
   const threadData = resolveThreadData(runtime);
   await provider.ensureThreadDirectories({
@@ -148,7 +148,7 @@ async function ensureSandbox(runtime: ToolRuntime): Promise<ResolvedSandboxConte
   return { sandbox, threadData };
 }
 
-function truncateMiddle(output: string, maxChars: number): string {
+export function truncateMiddle(output: string, maxChars: number): string {
   if (output.length <= maxChars) return output;
   const marker = `\n... [middle truncated: ${output.length} chars skipped] ...\n`;
   const kept = Math.max(0, maxChars - marker.length);
@@ -158,7 +158,7 @@ function truncateMiddle(output: string, maxChars: number): string {
   return `${output.slice(0, headLen)}${marker}${tailLen > 0 ? output.slice(-tailLen) : ''}`;
 }
 
-function truncateHead(output: string, maxChars: number, hint: string): string {
+export function truncateHead(output: string, maxChars: number, hint: string): string {
   if (output.length <= maxChars) return output;
   const marker = `\n... [truncated: ${output.length} chars total. ${hint}] ...`;
   const kept = Math.max(0, maxChars - marker.length);
