@@ -25,6 +25,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # 给构建设个上限后，真不够会以明确的 "JavaScript heap out of memory" 失败，
 # 而不是拖死服务器。机器规格较大时可上调这个值。
 ENV NODE_OPTIONS=--max-old-space-size=2048
+# 构建 worker 数上限（进 next.config 的 experimental.cpus）：next build 的页面数据
+# 收集 / 静态生成默认 fork 8 个子进程（pages+app 池各 4），每个装载完整 app 模块图
+# （langchain 等），轻量服务器上与同机 PG / Redis / MinIO / app 互挤内存会触发 swap
+# 风暴——构建进程活着但几乎不前进，叠加 Next 默认关闭的 worker 超时（见
+# next.config 的 staticPageGenerationTimeout）表现为「Collecting page data 后静默挂
+# 死，被 30m 墙钟杀死」。压到 2 把 fork 内存尖峰减半以上；机器规格较大时
+# --build-arg NEXT_BUILD_CPUS=4 可上调。
+ARG NEXT_BUILD_CPUS=2
+ENV NEXT_BUILD_CPUS=$NEXT_BUILD_CPUS
 RUN pnpm build
 
 # ---- runner：仅拷贝 standalone 运行所需文件，非 root 运行 ----

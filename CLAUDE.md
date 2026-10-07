@@ -45,7 +45,7 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 关键约束（踩坑实录与排查见 `docs/cicd-notes.md`）：
 
 - **纯文档改动（`**.md`/`docs/**`）连流水线都不触发**：过滤写在 `on.push.paths-ignore`（触发层）。**不要改回 job 内判定**——dorny/paths-filter 在浅克隆 `fetch-depth: 1` 下算不出 push 的 diff，会退回「匹配」而失效；且全量构建会和 PG/Redis/MinIO/app 抢内存（2026-09 曾把整机压死）
-- **资源边界**：Dockerfile builder `NODE_OPTIONS=--max-old-space-size=2048`；deploy-remote.sh 构建前磁盘守卫（<3G 先清缓存）+ 成功后回收（构建缓存留 2G、镜像留最近 3 版）；docker build 带墙钟超时 `BUILD_TIMEOUT`（默认 30m，病态挂起到点主动失败，不被上层 ssh-action 掐死留孤儿构建）；compose 全部服务日志轮转 `max-size 10m / max-file 3`
+- **资源边界**：Dockerfile builder `NODE_OPTIONS=--max-old-space-size=2048`；**构建 worker 数压到 2**（Dockerfile `ARG NEXT_BUILD_CPUS=2` → next.config `experimental.cpus`——next build 页面数据/静态生成默认 fork 8 个子进程，轻量服务器上内存尖峰触发 swap 风暴曾静默挂死 38 分钟，见 §14）+ `staticPageGenerationTimeout: 120` 兜底超时（默认关闭，开了才自愈/快速点名失败）；deploy-remote.sh 构建前磁盘守卫（<3G 先清缓存）+ 成功后回收（构建缓存留 2G、镜像留最近 3 版）；docker build 带墙钟超时 `BUILD_TIMEOUT`（默认 30m，病态挂起到点主动失败，不被上层 ssh-action 掐死留孤儿构建）；compose 全部服务日志轮转 `max-size 10m / max-file 3`
 - **镜像不在 CI 构建、不走 registry**（跨境 scp 镜像 tar 与推 TCR 实测不可用）：服务器本地构建（国内源已配）；tag `deepresearch:<git sha 前 12 位>`，历史镜像服务器本地可手动回滚
 - 密钥分层：GitHub Secrets 只放 4 个 SSH 凭证；业务密钥只在服务器 `DEPLOY_PATH/.env.production`（compose 经 `--env-file` 插值，`:?` 强制非空）
 - **解包是干净同步（tar 覆盖解包只加不删，会残留已删除文件）**：CI 解包先对比新树与工作目录文件清单，删除白名单（`.env.production` / `.previous-image`）之外的遗留文件再覆盖——否则上次部署的死文件混进 docker build 上下文，报「模块无导出」这类幽灵 typecheck（见 `docs/cicd-notes.md` §12）

@@ -489,7 +489,52 @@ dockerd 继续吃资源，下一次部署再叠加，恶性循环。
 
 ---
 
-## 14. 遗留事项与改进方向
+## 14. 部署事故：docker build 在 Collecting page data 后静默挂死 38 分钟（2026-10）
+
+**现象**：PR #23（skills 渐进披露）合并后首次部署，`next build` 在「Collecting page
+data ...」与 3 条 `Database initialization failed: connect ECONNREFUSED`（layout.tsx
+的 initialDB，无 DATABASE_URL 属预期）之后**零输出** 38 分钟，被墙钟杀死
+（`#12 2347.0 Killed` + `[deploy][ERROR] docker build 失败或超时 30m`）。
+同一 commit 的构建在 GitHub Actions quality 门禁（86s）与本地 macOS 均正常完成，
+本地 docker build（Linux）同样正常——不是代码死锁，是服务器资源触发。
+
+**根因**（两层叠加）：
+
+1. **8 个 worker fork 的内存尖峰**：webpack 编译完成（66s，主进程单打，2GB 堆上限
+   内）后，next build 进入页面数据收集——`createStaticWorker` 对 pages+app 两个池
+   各 `new jest-worker(numWorkers=4)`，jest-worker 构造时**立即 fork 全部子进程**，
+   每个子进程装载完整 app 模块图（langchain 等）。8 个 fork 的尖峰与同机
+   PG/Redis/MinIO/app 互挤，轻量服务器上触发 swap 风暴：进程活着但几乎不前进。
+2. **Next 14 的 worker 超时默认关闭**：`staticPageGenerationTimeout` 缺省 0 →
+   `next/dist/lib/worker.js` 不装 `onHanging` 重启定时器，一次卡死的调用**永远不
+   报错不重试**。且 jest-worker 对 SIGKILL/SIGTERM 退出（137/143）的 worker 不重发
+   请求——无论是「worker 死了」还是「worker 活着但不动」，主进程都无限等。
+   死 worker 反而会快失败（next 的 lib/worker 对非 SIGINT 退出直接 `process.exit`），
+   静默挂死的判定特征正是「无 `Next.js build worker exited` 日志」。
+
+**修复**：
+
+1. `next.config.js` 加 `staticPageGenerationTimeout: 120`：超时 SIGTERM 重启 worker
+   农场并重试该调用（页面数据 2 次 / 静态生成 3 次），再不行以
+   「Collecting page data for X is still timing out」明确报错快速失败——把静默挂死
+   变成「自愈或 ~5 分钟内点名失败」
+2. `next.config.js` 加 `experimental.cpus`（读 `NEXT_BUILD_CPUS`，缺省不设）+
+   Dockerfile builder `ARG NEXT_BUILD_CPUS=2`：服务器构建 fork 数 8→4（2+2），
+   内存尖峰减半以上；CI / 本机保持 Next 默认并行度不受影响
+
+**教训**：
+
+1. 构建挂死看「静默」特征比看日志更准：无 worker exit 日志 = 进程活着但不动，
+   指向资源饥饿（swap 风暴）而非崩溃；崩溃路径会打日志并快失败
+2. Next 的构建兜底超时（`staticPageGenerationTimeout`）默认关闭，自托管且构建机
+   资源紧张的项目应显式打开；CI 里跑得再快也证明不了轻量服务器上同样快
+3. 服务器构建的每个阶段都要对照峰值进程数核算内存：webpack 编译是单主进程（已有
+   NODE_OPTIONS 上限），页面数据/静态生成是 fork 风暴（堆上限会被 Next 主动剥掉，
+   只能靠 worker 数上限控制）
+
+---
+
+## 15. 遗留事项与改进方向
 
 | 事项                            | 现状                                 | 建议                                                                                                                                                                                                              |
 | ------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -502,7 +547,7 @@ dockerd 继续吃资源，下一次部署再叠加，恶性循环。
 
 ---
 
-## 15. 关键命令速查
+## 16. 关键命令速查
 
 ```bash
 # ── 本地 ──
