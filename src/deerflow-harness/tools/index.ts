@@ -13,7 +13,13 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import { taskTool, searchWebTool, viewImageTool } from './builtins';
 import { SANDBOX_TOOLS } from '../sandbox';
 
-export { taskTool, askClarificationTool, searchWebTool, viewImageTool } from './builtins';
+export {
+  taskTool,
+  askClarificationTool,
+  searchWebTool,
+  viewImageTool,
+  skillTool,
+} from './builtins';
 export {
   SANDBOX_TOOLS,
   bashTool,
@@ -36,6 +42,12 @@ export interface GetAvailableToolsOptions {
 
 /**
  * 工具名 → 实例映射。新增工具在此处登记即可被 getAvailableTools 发现。
+ *
+ * skillTool 刻意不入注册表：v1 lead 独占（经 client defaultTools 注入）。
+ * subagent 继承注册表工具集，拿到 skill 工具既无 L1 技能目录可用（父历史
+ * 只读注入不含 system prompt），还会多一层「读技能 → 再委派」的间接。
+ * 未来若开放给 subagent：在此登记 + 给 subagent prompt 注入 L1 段，并确认
+ * 与 MCP 工具（带 server 前缀）无撞名（当前内置工具无 'skill'）。
  */
 function buildToolRegistry(): Map<string, StructuredToolInterface> {
   const registry = new Map<string, StructuredToolInterface>();

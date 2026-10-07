@@ -77,6 +77,15 @@ describe('buildConfigKey —— extra-middlewares 签名折入', () => {
   });
 });
 
+describe('buildConfigKey —— skill 签名折入', () => {
+  it('仅 skill 签名不同即改变缓存键（L1 注入内容变化 → agent 重建）', () => {
+    const extraSig = getExtraMiddlewaresSignature('lead');
+    const withSkillSig = (sig: string) =>
+      buildConfigKey(modelConfig, baseOpts, 'mcp-sig', sig, extraSig);
+    expect(withSkillSig('skill-sig-A')).not.toBe(withSkillSig('skill-sig-B'));
+  });
+});
+
 describe('collectRecentHumanTexts', () => {
   const human = (content: unknown) => ({ _getType: () => 'human', content });
   const ai = (content: unknown) => ({ _getType: () => 'ai', content });

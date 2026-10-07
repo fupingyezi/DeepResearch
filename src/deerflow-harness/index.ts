@@ -10,7 +10,7 @@ export {
   type RegisterExtraMiddlewareOptions,
 } from './agents/extra-middlewares';
 export { Next, Prev, type MiddlewareAnchor } from './agents/features';
-export { searchWebTool, taskTool, viewImageTool, getAvailableTools } from './tools';
+export { searchWebTool, taskTool, viewImageTool, skillTool, getAvailableTools } from './tools';
 export {
   SubagentExecutor,
   registerSubagent,
