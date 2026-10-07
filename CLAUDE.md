@@ -33,6 +33,8 @@ docker-compose up -d    # 本地基础设施（PostgreSQL + Redis + MinIO）
 
 **提交校验（husky，需先 `pnpm install` 激活）**：`pre-commit` lint-staged（eslint --fix + prettier）；`commit-msg` commitlint（Conventional Commits；中文 subject 已放宽，type-enum 见 `commitlint.config.mjs`）。
 
+**分阶段提交（Claude Code 协作约定）**：多阶段改动按执行阶段拆分成多个语义完整的 commit（如 loader → 工具接线 → 前端 → 内容迁移 → 文档），不合并成单一巨型 commit；每阶段完成后即提交，不必等用户指示。
+
 ## CI/CD 自动部署
 
 push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/mini-deepresearch`）：
@@ -278,7 +280,7 @@ harness → 永不 import @/server 或 @/app（反向 import 会 lint error）
 ### 8.5 MCP 与 Skill 扩展（extensions）
 
 - **统一配置**：`extensions_config.json`（`DEERFLOW_EXTENSIONS_CONFIG_PATH` 可覆盖，默认 `{cwd}/extensions_config.json`），含 `mcpServers` + `skills` 两个 map，模板见 `extensions_config.example.json`。`FileExtensionsConfigStore` 基于 JSON 文件存储：mtime 缓存 + 原子写（tmp→rename）+ schema 校验失败回退空配置。文件与 `skills/custom` 为运行期状态，已 gitignore
-- **Skill**（Prompt 注入式，无沙箱）：扫描 `skills/public|custom/<name>/SKILL.md`，自写最小 frontmatter 解析器提取 name/description，正文用于 prompt 注入。`loadEnabledSkills()` 合并配置中的 enabled 状态；**默认禁用（opt-in）**——启用即注入系统提示，有 token 成本。注入点：`buildLeadAgentSystemPrompt()`（顺序：BASE_SYSTEM_PROMPT → skills → memory），skill 加载失败降级为无 skill
+- **Skill（三层渐进披露架构）**：每个 skill 是一个目录——`SKILL.md`（frontmatter name/description + 精简正文）+ 可选 `references/`（只读知识）+ 可选 `scripts/`（可执行）。loader 扫描 `skills/public|custom/<name>/`，自写最小 frontmatter 解析器提取 name/description，并枚举 resources（`references`/`scripts` 递归，每 skill 上限 50 文件、路径 POSIX 归一排序）+ 每个资源首标题摘要。**L1**：`buildSkillsSection()` 注入系统提示的只有 name + description + 资源目录（路径 + 摘要），正文不进 prompt；`getEnabledSkillsSignature()` 为 L1 内容全签名（name/description/summary/resources），进 `buildConfigKey()`——内容编辑后 agent 自动重建（缓存键还纳入每 skill 目录最大文件 mtime）。**L2/L3**：内置 `skill` 工具按需读取（`skill(skill, resource?)` 返回正文/参考文件，100KB 截断；只允许 **enabled** skill，resource 经归一 + realpath 双重包含校验防逃逸）；`action=run` 把 `scripts/` 下脚本复制到沙箱 workspace 经沙箱执行并返回 stdout（脚本内容不进上下文；宿主非隔离无 host-bash 时降级返回脚本内容，绝不宿主执行；超时 `DEERFLOW_SKILL_SCRIPT_TIMEOUT_MS` 默认 60s，底层进程由沙箱 600s 兜底；finally `rm -f` 清理副本）。**skill 工具 lead-only**（client defaultTools，不进 buildToolRegistry，subagent 不继承）。`loadEnabledSkills()` 合并配置中的 enabled 状态；**默认禁用（opt-in）**。注入点：`buildLeadAgentSystemPrompt()`（顺序：BASE_SYSTEM_PROMPT → skills → memory），skill 加载失败降级为无 skill。custom skill 在服务器侧放 references/scripts 子目录即可（下次加载生效，缓存键含 mtime 无需重启）；docker 沙箱镜像若需跑 skill 脚本须含 python3/node（v1 内置 7 个 skill 均无 scripts）
 - **MCP**（端到端，依赖 `@langchain/mcp-adapters`）：按启用 server 构建 `MultiServerMCPClient` 加载工具；`env`/`headers` 中 `$VAR` 用 process.env 解析（未命中替换为空串）。**关键不变量：`throwOnLoadError: false`**（单 server 失败跳过，不阻断对话）；`prefixToolNameWithServerName: true`（防与内置工具重名）；按「启用 server 配置签名」缓存 client，签名变化才重连。接入：`DeerFlowClient.ensureAgent()` 在 stream 首帧前 await `loadMcpTools()` 并入工具集；`buildConfigKey()` 纳入 MCP/skill 启用签名，配置变更后 agent 自动重建。stdio server 需 spawn 子进程，相关 API 路由显式 `runtime='nodejs'`
 - 管理 API：`/api/mcp` 族（写后 `resetMcpClient()` 失效缓存）、`/api/skills` 族 + 设置弹窗「技能」「工具」页
 
@@ -384,7 +386,8 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 - `src/deerflow-harness/vision/image-fetcher.ts` / `vision-middleware.ts`——图片字节注入 + 多模态 content 构造 / 历史图片压缩
 - `src/deerflow-harness/tools/builtins/`——内置工具（task / search_web / clarification / view_image）
 - `src/lib/files/file-parser.ts`——上传文件解析（PDF/DOCX/文本 + 图片 OCR）
-- `src/deerflow-harness/extensions/config-store.ts` / `skills/loader.ts` / `mcp/client.ts`——扩展配置存储 / skill 加载器 / MCP 客户端
+- `src/deerflow-harness/extensions/config-store.ts` / `skills/loader.ts` / `skills/prompt.ts` / `mcp/client.ts`——扩展配置存储 / skill 加载器（resources 枚举 + 缓存键 mtime）/ L1 注入段构建 / MCP 客户端
+- `src/deerflow-harness/tools/builtins/skill-tool.ts`——skill 按需读取/脚本执行工具（lead-only，L2/L3 渐进披露入口）
 - `src/deerflow-harness/sandbox/provider-factory.ts` + `docker/` + `remote/`——沙箱后端工厂 + Docker 后端 + Remote 后端
 - `src/store/chat-session-store.ts`——前端聊天会话状态（sessionRuntimes 分桶并行）
 - `src/events/context/agent-event-context.tsx`——AgentEventProvider（每 session 泵 + sink 挂载）
