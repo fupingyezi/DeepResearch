@@ -86,7 +86,29 @@ function withCallLog<M extends AgentMiddleware>(
 
   for (const hook of HOOKS) {
     const original = mw[hook];
-    if (typeof original !== 'function') continue;
+    if (typeof original !== 'function') {
+      // 生命周期 hook 支持对象形态 { hook, canJumpTo }（如 loop-detection 的
+      // 硬停跳回 model_request）：包内层 hook 打日志，canJumpTo 约束原样保留。
+      const hookObj = original as
+        | { hook?: (state: any, runtime: any) => any; canJumpTo?: string[] }
+        | undefined;
+      if (hookObj && typeof hookObj.hook === 'function') {
+        const wrapped = async function wrappedObjectHook(state: any, runtime: any) {
+          const elapsed = startTimer();
+          logger.info(`${tag} ${hook} ▶ enter`);
+          try {
+            const result = await hookObj.hook!(state, runtime);
+            logger.info(`${tag} ${hook} ◀ exit (${elapsed()})`);
+            return result;
+          } catch (err) {
+            logger.error(`${tag} ${hook} ✗ error (${elapsed()}): ${describeErr(err)}`);
+            throw err;
+          }
+        };
+        decorated[hook] = { ...hookObj, hook: wrapped };
+      }
+      continue;
+    }
 
     if (hook === 'wrapModelCall' || hook === 'wrapToolCall') {
       // wrap-style: (request, handler) => Promise<result>
