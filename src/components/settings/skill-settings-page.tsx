@@ -8,11 +8,20 @@ import apiClient from '@/utils/request/api';
 
 type SkillCategory = 'public' | 'custom';
 
+interface SkillResource {
+  path: string;
+  summary: string;
+  kind: 'reference' | 'script';
+}
+
 interface Skill {
   name: string;
   description: string;
   category: SkillCategory;
   enabled: boolean;
+  /** 渐进披露：SKILL.md 正文首行摘要与 references/scripts 资源清单。 */
+  summary?: string;
+  resources?: SkillResource[];
 }
 
 const CATEGORY_META: Record<SkillCategory, { label: string; color: string }> = {
@@ -22,17 +31,21 @@ const CATEGORY_META: Record<SkillCategory, { label: string; color: string }> = {
 
 const CUSTOM_SKILL_TEMPLATE = `---
 name: my-skill
-description: 描述这个技能的用途，以及在什么情况下应当使用它。
+description: 描述这个技能的用途，以及在什么情况下应当使用它（触发场景与关键词）。
 ---
 
 # My Skill
 
-在这里写下技能的工作流与使用说明。
+在这里写下技能的核心工作流（精简，只保留恒相关的部分）。
+
+更详细的说明拆到 references/ 子目录，模型会在需要时按需读取；
+可复用的脚本放 scripts/ 子目录，模型经 skill 工具在沙箱中执行。
 `;
 
 /**
- * 设置弹窗「技能」页：分内置/自定义两组展示，每项含名称、描述与启用开关。
- * 启用的技能元数据会注入研究智能体的系统提示。支持新建自定义技能。
+ * 设置弹窗「技能」页：分内置/自定义两组展示，每项含名称、结构徽标、描述与
+ * 启用开关。技能采用渐进披露：系统提示只注入名称/描述/资源目录（L1），正文与
+ * references/scripts 由模型按需经 skill 工具读取。支持新建自定义技能。
  */
 export function SkillSettingsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -109,7 +122,8 @@ export function SkillSettingsPage() {
       <div>
         <h2 className="mb-1 text-[18px] font-semibold text-[#111827]">技能</h2>
         <p className="text-[13px] text-[#9ca3af]">
-          技能（Skill）为研究智能体提供领域工作流。启用后，技能说明会注入智能体的系统提示，使其在匹配场景下据此行动。
+          技能（Skill）为研究智能体提供领域工作流。启用后仅注入名称、描述与资源目录；正文与参考资料由模型按需经
+          skill 工具读取，脚本可在沙箱中执行。
         </p>
       </div>
 
@@ -167,7 +181,9 @@ export function SkillSettingsPage() {
               style={{ fontFamily: 'monospace', fontSize: 12 }}
             />
             <p className="mt-1 text-[12px] text-[#9ca3af]">
-              frontmatter 的 name 必须与上方技能名称一致，且需包含 description。
+              frontmatter 的 name 必须与上方技能名称一致，且需包含 description。正文保持精简；
+              详细知识可拆到 references/ 子目录，可执行脚本放 scripts/ 子目录（模型经 skill
+              工具按需读取或执行）。
             </p>
           </div>
         </div>
@@ -193,6 +209,18 @@ function SkillGroup({
       <SkillList skills={skills} togglingName={togglingName} onToggle={onToggle} />
     </section>
   );
+}
+
+/** 结构徽标：`{refs} 参考 · {scripts} 脚本`；均为 0（或旧数据无 resources）不渲染。 */
+function structureBadge(skill: Skill): string | null {
+  const resources = skill.resources ?? [];
+  const refs = resources.filter((r) => r.kind === 'reference').length;
+  const scripts = resources.filter((r) => r.kind === 'script').length;
+  if (refs === 0 && scripts === 0) return null;
+  const parts = [];
+  if (refs > 0) parts.push(`${refs} 参考`);
+  if (scripts > 0) parts.push(`${scripts} 脚本`);
+  return parts.join(' · ');
 }
 
 function SkillList({
@@ -223,6 +251,11 @@ function SkillList({
               <Tag color={CATEGORY_META[skill.category].color} style={{ margin: 0 }}>
                 {CATEGORY_META[skill.category].label}
               </Tag>
+              {structureBadge(skill) && (
+                <Tag style={{ margin: 0, background: '#f3f4f6', color: '#6b7280', border: 'none' }}>
+                  {structureBadge(skill)}
+                </Tag>
+              )}
             </div>
             <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-[#6b7280]">
               {skill.description || '暂无描述'}
