@@ -65,6 +65,22 @@ export async function logout(): Promise<void> {
   await fetch(`${getApiBase()}/api/auth/logout`, { method: 'POST', credentials: 'include' });
 }
 
+export async function verifyEmail(token: string): Promise<void> {
+  await postJson('/api/auth/verify-email', { token });
+}
+
+export async function resendVerification(): Promise<void> {
+  await postJson('/api/auth/resend-verification', {});
+}
+
+export async function forgotPassword(email: string): Promise<void> {
+  await postJson('/api/auth/forgot-password', { email });
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await postJson('/api/auth/reset-password', { token, new_password: newPassword });
+}
+
 export async function fetchMe(): Promise<UserResponse | null> {
   const res = await fetch(`${getApiBase()}/api/auth/me`, { credentials: 'include' });
   if (!res.ok) return null;

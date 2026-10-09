@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+import EmailVerifyBanner from '@/components/auth/email-verify-banner';
 import Sider from '@/components/sider/sider';
 import { useAuthStore } from '@/store/auth-store';
 import { AgentEventProvider } from '@/events/context';
@@ -15,6 +16,7 @@ import { AgentEventProvider } from '@/events/context';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -29,6 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <AgentEventProvider>
+      {user && !user.emailVerified && <EmailVerifyBanner />}
       <Sider />
       {children}
     </AgentEventProvider>

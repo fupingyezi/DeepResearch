@@ -198,6 +198,21 @@ export async function initialDB() {
         alter table users add column if not exists selected_model varchar(64);
         -- 记忆注入模式：'inject'（全量注入，默认）| 'retrieve'（按本轮输入检索 top-K）
         alter table users add column if not exists memory_mode varchar(16);
+        -- 邮箱验证状态：存量行回落 true（SMTP 验证是新增能力，老账号不追溯补验）
+        alter table users add column if not exists email_verified boolean not null default true;
+
+        -- 邮箱令牌（验证邮箱 / 重置密码）：库存 sha256 哈希，单次使用、24h 过期
+        create table if not exists email_tokens (
+          id         uuid primary key,
+          user_id    uuid not null references users(id) on delete cascade,
+          purpose    varchar(20) not null check (purpose in ('verify_email','reset_password')),
+          token_hash varchar(64) not null,
+          expires_at timestamptz not null,
+          used_at    timestamptz,
+          created_at timestamptz not null default now()
+        );
+        create index if not exists idx_email_tokens_hash on email_tokens(token_hash);
+        create index if not exists idx_email_tokens_user on email_tokens(user_id);
 
         -- 用户级模型 API Key：按 (user_id, provider) 维度保存，仅存密文/IV/authTag/掩码，
         -- 绝不存明文。一个 provider 的 Key 可服务该 provider 下多个预设模型。

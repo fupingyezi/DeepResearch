@@ -16,6 +16,7 @@ interface UserRow {
   password_hash: string | null;
   system_role: SystemRole;
   needs_setup: boolean;
+  email_verified: boolean;
   token_version: number;
   created_at: string | Date;
   updated_at: string | Date;
@@ -28,6 +29,7 @@ function rowToUser(row: UserRow): UserRecord {
     passwordHash: row.password_hash,
     systemRole: row.system_role,
     needsSetup: row.needs_setup,
+    emailVerified: row.email_verified,
     tokenVersion: Number(row.token_version),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -57,6 +59,8 @@ export interface CreateUserInput {
   passwordHash: string | null;
   systemRole: SystemRole;
   needsSetup?: boolean;
+  /** 缺省 true：SMTP 未配置 / 内部建号时无需走验证流程 */
+  emailVerified?: boolean;
 }
 
 /** 唯一冲突（邮箱已存在）时抛出，code='EMAIL_EXISTS' */
@@ -71,10 +75,17 @@ export async function createUser(input: CreateUserInput): Promise<UserRecord> {
   const id = uuidv4();
   try {
     const res = await query(
-      `insert into users (id, email, password_hash, system_role, needs_setup)
-       values ($1, $2, $3, $4, $5)
+      `insert into users (id, email, password_hash, system_role, needs_setup, email_verified)
+       values ($1, $2, $3, $4, $5, $6)
        returning *;`,
-      [id, input.email, input.passwordHash, input.systemRole, input.needsSetup ?? false],
+      [
+        id,
+        input.email,
+        input.passwordHash,
+        input.systemRole,
+        input.needsSetup ?? false,
+        input.emailVerified ?? true,
+      ],
     );
     return rowToUser(res.rows[0] as UserRow);
   } catch (e) {
@@ -88,6 +99,7 @@ export interface UpdateUserInput {
   email?: string;
   passwordHash?: string | null;
   needsSetup?: boolean;
+  emailVerified?: boolean;
   tokenVersion?: number;
 }
 
@@ -106,6 +118,10 @@ export async function updateUser(id: string, patch: UpdateUserInput): Promise<Us
   if (patch.needsSetup !== undefined) {
     sets.push(`needs_setup = $${i++}`);
     params.push(patch.needsSetup);
+  }
+  if (patch.emailVerified !== undefined) {
+    sets.push(`email_verified = $${i++}`);
+    params.push(patch.emailVerified);
   }
   if (patch.tokenVersion !== undefined) {
     sets.push(`token_version = $${i++}`);

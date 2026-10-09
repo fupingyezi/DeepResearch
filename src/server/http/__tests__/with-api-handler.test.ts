@@ -21,6 +21,7 @@ const user = {
   passwordHash: 'x',
   systemRole: 'user',
   needsSetup: false,
+  emailVerified: true,
   tokenVersion: 1,
   createdAt: '',
   updatedAt: '',

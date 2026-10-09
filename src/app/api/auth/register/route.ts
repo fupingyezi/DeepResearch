@@ -14,7 +14,9 @@ import {
   toUserResponse,
   validateStrongPassword,
 } from '@deerflow-harness/auth';
+import { sendVerificationEmail } from '@deerflow-harness/auth/email-flow';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
+import { isMailConfigured } from '@/lib/mailer';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { credentialsSchema } from '@/server/validation/schemas';
@@ -39,7 +41,13 @@ export const POST = withApiHandler(
     }
 
     try {
-      const user = await registerUser(email, password, 'user');
+      // SMTP 未配置时直接置已验证（发信功能缺失不阻断注册）；
+      // 配置了则发验证邮件，用户先以未验证状态登录，前端提示补验
+      const emailVerified = !isMailConfigured();
+      const user = await registerUser(email, password, 'user', { emailVerified });
+      if (!emailVerified) {
+        await sendVerificationEmail(user);
+      }
       const token = createAccessToken(user.id, user.tokenVersion);
       const response = NextResponse.json(toUserResponse(user), { status: 201 });
       setSessionCookie(response, token);

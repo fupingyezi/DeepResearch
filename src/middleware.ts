@@ -13,7 +13,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const COOKIE_NAME = 'access_token';
 
-const PUBLIC_PAGES = ['/login', '/setup'];
+// verify-email / reset-password 是邮件令牌页：用户点邮件链接时多半未登录，必须公开可达
+const PUBLIC_PAGES = ['/login', '/setup', '/verify-email', '/reset-password'];
 
 function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/api/auth/')) return true;

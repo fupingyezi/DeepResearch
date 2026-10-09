@@ -10,11 +10,12 @@ import {
   AuthRequestError,
   demoLogin,
   fetchSetupStatus,
+  forgotPassword,
   login as loginRequest,
   register as registerRequest,
 } from '@/utils/auth/client';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,6 +24,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // forgot 模式提交成功后的提示（服务端响应恒定，防枚举）
+  const [sentMessage, setSentMessage] = useState('');
   const [loading, setLoading] = useState(false);
   // 服务器配置了体验账号（AUTH_DEMO_EMAIL/PASSWORD）时为该邮箱，否则 null
   const [demoEmail, setDemoEmail] = useState<string | null>(null);
@@ -37,6 +40,12 @@ export default function LoginPage() {
       setRegistrationEnabled(status.registration.enabled);
     });
   }, [router]);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError('');
+    setSentMessage('');
+  };
 
   const runLogin = async (action: () => Promise<UserResponse>) => {
     setError('');
@@ -55,19 +64,34 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mode === 'forgot') {
+      setError('');
+      setLoading(true);
+      try {
+        await forgotPassword(email);
+        setSentMessage('如果该邮箱已注册，重置邮件已发送');
+      } catch (err) {
+        setError(err instanceof AuthRequestError ? err.message : 'Network error, please try again');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     await runLogin(() =>
       mode === 'login' ? loginRequest(email, password) : registerRequest(email, password),
     );
   };
+
+  const title = mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建账号' : '找回密码';
+  const submitLabel =
+    mode === 'login' ? '登录' : mode === 'register' ? '注册并登录' : '发送重置邮件';
 
   return (
     <div className="flex h-screen w-full items-center justify-center bg-[#f9fafb]">
       <div className="w-[380px] rounded-2xl border border-[#e5e7eb] bg-white p-8 shadow-[0_8px_30px_rgba(16,24,40,0.08)]">
         <div className="mb-6 flex flex-col items-center gap-2">
           <Image src="/四叶草.svg" alt="logo" width={48} height={48} className="rounded-xl" />
-          <h1 className="text-[20px] font-semibold text-[#111827]">
-            {mode === 'login' ? '欢迎回来' : '创建账号'}
-          </h1>
+          <h1 className="text-[20px] font-semibold text-[#111827]">{title}</h1>
           <p className="text-[13px] text-[#9ca3af]">mini-DeepResearch</p>
         </div>
 
@@ -80,28 +104,31 @@ export default function LoginPage() {
             required
             className="h-11 rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6]"
           />
-          <input
-            type="password"
-            placeholder="密码（至少 8 位）"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            className="h-11 rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6]"
-          />
+          {mode !== 'forgot' && (
+            <input
+              type="password"
+              placeholder="密码（至少 8 位）"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              className="h-11 rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6]"
+            />
+          )}
 
           {error && <p className="text-[13px] text-[#dc2626]">{error}</p>}
+          {sentMessage && <p className="text-[13px] text-[#0f766e]">{sentMessage}</p>}
 
           <button
             type="submit"
             disabled={loading}
             className="mt-1 h-11 rounded-xl bg-[#0f766e] text-[14px] font-medium text-white transition-all hover:bg-[#0d655e] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
+            {loading ? '请稍候…' : submitLabel}
           </button>
         </form>
 
-        {demoEmail !== null && (
+        {demoEmail !== null && mode !== 'forgot' && (
           <>
             <div className="mt-5 flex items-center gap-3" aria-hidden>
               <span className="h-px flex-1 bg-[#e5e7eb]" />
@@ -127,10 +154,7 @@ export default function LoginPage() {
                   还没有账号？
                   <button
                     type="button"
-                    onClick={() => {
-                      setMode('register');
-                      setError('');
-                    }}
+                    onClick={() => switchMode('register')}
                     className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
                   >
                     注册
@@ -139,21 +163,23 @@ export default function LoginPage() {
               ) : (
                 <>注册暂未开放</>
               )}
-            </>
-          ) : (
-            <>
-              已有账号？
+              <span className="mx-2">·</span>
               <button
                 type="button"
-                onClick={() => {
-                  setMode('login');
-                  setError('');
-                }}
-                className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
+                onClick={() => switchMode('forgot')}
+                className="cursor-pointer font-medium text-[#0f766e] hover:underline"
               >
-                去登录
+                忘记密码
               </button>
             </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              className="cursor-pointer font-medium text-[#0f766e] hover:underline"
+            >
+              {mode === 'register' ? '已有账号？去登录' : '返回登录'}
+            </button>
           )}
         </div>
       </div>

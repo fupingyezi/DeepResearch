@@ -166,6 +166,22 @@ export const changePasswordSchema = z.object({
   new_email: z.string().optional(),
 });
 
+/** 邮箱验证 / 重置密码共用的令牌 body。 */
+export const emailTokenSchema = z.object({
+  token: z.string().min(1),
+});
+
+/** 忘记密码：只收邮箱。宽松 schema 是刻意的——响应恒定 200 防用户枚举。 */
+export const forgotPasswordSchema = z.object({
+  email: z.string().min(1),
+});
+
+/** 重置密码：令牌 + 新密码（强度校验在 handler 内，与其余 auth 路由一致）。 */
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  new_password: z.string().min(1),
+});
+
 // ---- 查询参数（统一请求管线 query 槽） ----
 
 /** 重复 query key 折叠为首值：对齐 searchParams.get 语义，防数组把合法请求打成 400。 */

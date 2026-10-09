@@ -32,9 +32,16 @@ export async function registerUser(
   email: string,
   password: string,
   systemRole: SystemRole = 'user',
+  options?: { emailVerified?: boolean },
 ): Promise<UserRecord> {
   const passwordHash = await hashPassword(password);
-  return createUser({ email: normalizeEmail(email), passwordHash, systemRole, needsSetup: false });
+  return createUser({
+    email: normalizeEmail(email),
+    passwordHash,
+    systemRole,
+    needsSetup: false,
+    emailVerified: options?.emailVerified ?? true,
+  });
 }
 
 export async function adminExists(): Promise<boolean> {
@@ -89,6 +96,17 @@ export async function changePassword(
     ...(newEmail ? { email: normalizeEmail(newEmail) } : {}),
   });
   return { ok: true, user: updated };
+}
+
+/**
+ * 忘记密码重置：换哈希并自增 tokenVersion（该用户全部既有 JWT 随之失效）。
+ * 入口已由 reset-password 路由核销令牌确认身份，这里不再校验旧密码。
+ */
+export async function resetPassword(userId: string, newPassword: string): Promise<UserRecord> {
+  const user = await getUserById(userId);
+  if (!user) throw new Error(`user not found: ${userId}`);
+  const passwordHash = await hashPassword(newPassword);
+  return updateUser(userId, { passwordHash, tokenVersion: user.tokenVersion + 1 });
 }
 
 export { getUserById };
