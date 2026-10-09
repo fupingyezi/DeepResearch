@@ -12,6 +12,7 @@ import {
   AuthErrorCode,
   authenticate,
   createAccessToken,
+  createSession,
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
@@ -41,7 +42,8 @@ export const POST = withApiHandler({ auth: 'none', rateLimit: demoLoginRateLimit
     );
   }
 
-  const token = createAccessToken(user.id, user.tokenVersion);
+  const session = await createSession(user.id);
+  const token = createAccessToken(user.id, user.tokenVersion, session.id);
   const response = NextResponse.json(toUserResponse(user));
   setSessionCookie(response, token);
   return response;

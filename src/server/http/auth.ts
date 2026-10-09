@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { decodeToken, getTokenExpiryDays } from '@deerflow-harness/auth';
 import { getUserById } from '@deerflow-harness/auth';
+import { isSessionActive } from '@deerflow-harness/auth';
 import type { UserRecord } from '@deerflow-harness/auth';
 
 export const COOKIE_NAME = 'access_token';
@@ -49,7 +50,7 @@ export function clearSessionCookie(response: NextResponse): void {
 
 /**
  * 从请求 cookie 解析当前用户。无 cookie / 验签失败 / 用户不存在 / token_version
- * 不匹配 均返回 null。
+ * 不匹配 / 会话已吊销或过期 均返回 null。
  */
 export async function getCurrentUser(request: NextRequest): Promise<UserRecord | null> {
   const token = request.cookies.get(COOKIE_NAME)?.value;
@@ -60,6 +61,9 @@ export async function getCurrentUser(request: NextRequest): Promise<UserRecord |
 
   const user = await getUserById(payload.sub);
   if (!user || user.tokenVersion !== payload.ver) return null;
+
+  // 会话吊销校验：登出 / 服务端吊销后立即失效，不依赖 JWT 过期
+  if (!(await isSessionActive(payload.sid))) return null;
 
   return user;
 }

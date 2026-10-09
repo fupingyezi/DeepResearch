@@ -214,6 +214,17 @@ export async function initialDB() {
         create index if not exists idx_email_tokens_hash on email_tokens(token_hash);
         create index if not exists idx_email_tokens_user on email_tokens(user_id);
 
+        -- 登录会话：JWT 带 sid，每次鉴权校验未吊销未过期——登出即吊销，即时生效
+        create table if not exists sessions (
+          id         uuid primary key,
+          user_id    uuid not null references users(id) on delete cascade,
+          expires_at timestamptz not null,
+          revoked_at timestamptz,
+          created_at timestamptz not null default now()
+        );
+        create index if not exists idx_sessions_user on sessions(user_id);
+        create index if not exists idx_sessions_expires on sessions(expires_at);
+
         -- 用户级模型 API Key：按 (user_id, provider) 维度保存，仅存密文/IV/authTag/掩码，
         -- 绝不存明文。一个 provider 的 Key 可服务该 provider 下多个预设模型。
         create table if not exists user_model_keys (

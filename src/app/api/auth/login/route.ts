@@ -11,6 +11,7 @@ import {
   AuthErrorCode,
   authenticate,
   createAccessToken,
+  createSession,
   toUserResponse,
 } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
@@ -37,7 +38,8 @@ export const POST = withApiHandler(
     }
 
     await loginFailures.clear(body.email);
-    const token = createAccessToken(user.id, user.tokenVersion);
+    const session = await createSession(user.id);
+    const token = createAccessToken(user.id, user.tokenVersion, session.id);
     const response = NextResponse.json(toUserResponse(user));
     setSessionCookie(response, token);
     return response;

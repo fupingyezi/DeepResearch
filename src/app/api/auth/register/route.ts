@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 import {
   AuthErrorCode,
   createAccessToken,
+  createSession,
   isRegistrationEnabled,
   registerUser,
   toUserResponse,
@@ -48,7 +49,8 @@ export const POST = withApiHandler(
       if (!emailVerified) {
         await sendVerificationEmail(user);
       }
-      const token = createAccessToken(user.id, user.tokenVersion);
+      const session = await createSession(user.id);
+      const token = createAccessToken(user.id, user.tokenVersion, session.id);
       const response = NextResponse.json(toUserResponse(user), { status: 201 });
       setSessionCookie(response, token);
       return response;

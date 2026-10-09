@@ -10,6 +10,7 @@ import {
   AuthErrorCode,
   changePassword,
   createAccessToken,
+  createSession,
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
@@ -46,7 +47,9 @@ export const POST = withApiHandler(
       return jsonError(AuthErrorCode.INVALID_CREDENTIALS, 'Current password is incorrect', 400);
     }
 
-    const token = createAccessToken(result.user.id, result.user.tokenVersion);
+    // 改密自增 tokenVersion 已使旧 token 全失效；新 token 挂新会话
+    const session = await createSession(result.user.id);
+    const token = createAccessToken(result.user.id, result.user.tokenVersion, session.id);
     const response = NextResponse.json({ message: 'Password changed successfully' });
     setSessionCookie(response, token);
     return response;

@@ -11,6 +11,7 @@ import {
   AuthErrorCode,
   adminExists,
   createAccessToken,
+  createSession,
   initializeAdmin,
   toUserResponse,
   validateStrongPassword,
@@ -44,7 +45,8 @@ export const POST = withApiHandler(
 
     try {
       const admin = await initializeAdmin(email, password);
-      const token = createAccessToken(admin.id, admin.tokenVersion);
+      const session = await createSession(admin.id);
+      const token = createAccessToken(admin.id, admin.tokenVersion, session.id);
       const response = NextResponse.json(toUserResponse(admin), { status: 201 });
       setSessionCookie(response, token);
       return response;
