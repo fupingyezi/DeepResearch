@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { adminExists, getDemoAccount } from '@deerflow-harness/auth';
+import { adminExists, getDemoAccount, isRegistrationEnabled } from '@deerflow-harness/auth';
 import { withApiHandler } from '@/server/http';
 
 // 每次实时查询 admin 是否存在，禁止静态预渲染缓存
@@ -19,5 +19,6 @@ export const GET = withApiHandler({ auth: 'none' }, async () => {
   return NextResponse.json({
     needs_setup: !exists,
     demo_login: { enabled: demo !== null, email: demo?.email ?? null },
+    registration: { enabled: isRegistrationEnabled() },
   });
 });

@@ -17,32 +17,46 @@ import {
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { createRateLimiter } from '@/server/http/rate-limit';
 import { credentialsSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
 
-export const POST = withApiHandler({ auth: 'none', body: credentialsSchema }, async ({ body }) => {
-  const { email, password } = body;
+const initializeRateLimit = createRateLimiter({
+  bucket: 'initialize',
+  max: 5,
+  windowMs: 15 * 60_000,
+});
 
-  const weak = validateStrongPassword(password);
-  if (weak) {
-    return jsonError(AuthErrorCode.WEAK_PASSWORD, weak, 400);
-  }
+export const POST = withApiHandler(
+  { auth: 'none', body: credentialsSchema, rateLimit: initializeRateLimit },
+  async ({ body }) => {
+    const { email, password } = body;
 
-  if (await adminExists()) {
-    return jsonError(AuthErrorCode.SYSTEM_ALREADY_INITIALIZED, 'System already initialized', 409);
-  }
+    const weak = validateStrongPassword(password);
+    if (weak) {
+      return jsonError(AuthErrorCode.WEAK_PASSWORD, weak, 400);
+    }
 
-  try {
-    const admin = await initializeAdmin(email, password);
-    const token = createAccessToken(admin.id, admin.tokenVersion);
-    const response = NextResponse.json(toUserResponse(admin), { status: 201 });
-    setSessionCookie(response, token);
-    return response;
-  } catch (e) {
-    if (e instanceof EmailExistsError) {
+    if (await adminExists()) {
       return jsonError(AuthErrorCode.SYSTEM_ALREADY_INITIALIZED, 'System already initialized', 409);
     }
-    throw e;
-  }
-});
+
+    try {
+      const admin = await initializeAdmin(email, password);
+      const token = createAccessToken(admin.id, admin.tokenVersion);
+      const response = NextResponse.json(toUserResponse(admin), { status: 201 });
+      setSessionCookie(response, token);
+      return response;
+    } catch (e) {
+      if (e instanceof EmailExistsError) {
+        return jsonError(
+          AuthErrorCode.SYSTEM_ALREADY_INITIALIZED,
+          'System already initialized',
+          409,
+        );
+      }
+      throw e;
+    }
+  },
+);

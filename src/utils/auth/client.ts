@@ -79,12 +79,20 @@ export interface SetupStatus {
     /** 展示用邮箱；未配置时为 null（密码永远不下发） */
     email: string | null;
   };
+  /** 注册开关（REGISTRATION_ENABLED）：关闭时登录页隐藏注册入口 */
+  registration: {
+    enabled: boolean;
+  };
 }
 
 export async function fetchSetupStatus(): Promise<SetupStatus> {
   const res = await fetch(`${getApiBase()}/api/auth/setup-status`, { credentials: 'include' });
   if (!res.ok) {
-    return { needs_setup: false, demo_login: { enabled: false, email: null } };
+    return {
+      needs_setup: false,
+      demo_login: { enabled: false, email: null },
+      registration: { enabled: false },
+    };
   }
   const data = (await res.json()) as Partial<SetupStatus>;
   return {
@@ -92,6 +100,9 @@ export async function fetchSetupStatus(): Promise<SetupStatus> {
     demo_login: {
       enabled: Boolean(data.demo_login?.enabled),
       email: typeof data.demo_login?.email === 'string' ? data.demo_login.email : null,
+    },
+    registration: {
+      enabled: data.registration?.enabled !== false,
     },
   };
 }

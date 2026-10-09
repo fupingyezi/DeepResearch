@@ -26,12 +26,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   // 服务器配置了体验账号（AUTH_DEMO_EMAIL/PASSWORD）时为该邮箱，否则 null
   const [demoEmail, setDemoEmail] = useState<string | null>(null);
+  // REGISTRATION_ENABLED 关闭时隐藏注册入口
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
 
   // 无 admin 时引导到首启设置页
   useEffect(() => {
     fetchSetupStatus().then((status) => {
       if (status.needs_setup) router.replace('/setup');
       if (status.demo_login.enabled) setDemoEmail(status.demo_login.email);
+      setRegistrationEnabled(status.registration.enabled);
     });
   }, [router]);
 
@@ -119,17 +122,23 @@ export default function LoginPage() {
         <div className="mt-5 text-center text-[13px] text-[#9ca3af]">
           {mode === 'login' ? (
             <>
-              还没有账号？
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('register');
-                  setError('');
-                }}
-                className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
-              >
-                注册
-              </button>
+              {registrationEnabled ? (
+                <>
+                  还没有账号？
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setError('');
+                    }}
+                    className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
+                  >
+                    注册
+                  </button>
+                </>
+              ) : (
+                <>注册暂未开放</>
+              )}
             </>
           ) : (
             <>
