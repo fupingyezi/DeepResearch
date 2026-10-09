@@ -1,3 +1,5 @@
+import { getApiBase } from './base-url';
+
 interface ApiClientOptions {
   headers?: Record<string, string>;
   [key: string]: any;
@@ -15,7 +17,7 @@ class ApiClient {
   constructor(baseURL: string = '', defaultOptions: ApiClientOptions = {}) {
     this.baseURL = baseURL;
     this.defaultOptions = {
-      // 同源携带 HttpOnly 会话 cookie，后端按用户隔离数据
+      // 携带 HttpOnly 会话 cookie（同源直发；跨域经 CORS Allow-Credentials + SameSite=None）
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
@@ -130,6 +132,6 @@ class ApiClient {
   }
 }
 
-const apiClient = new ApiClient('/api');
+const apiClient = new ApiClient(`${getApiBase()}/api`);
 export { ApiClient };
 export default apiClient;

@@ -5,6 +5,7 @@
  *   try/catch 全包裹
  *     → auth（'cookie' 缺省 = getCurrentUser；'none'；自定义 resolver，null → 401）
  *     → guard（sandbox token 等非用户主体门禁，false → 401）
+ *     → origin 校验（非 GET/HEAD/OPTIONS 且带 Origin 不在白名单 → 403，防 CSRF）
  *     → userIdHeader（threads 的 x-user-id → ctx.userId，可空不 401）
  *     → rateLimit（占位钩子，非 null Response 短路）
  *     → body 解析（ZodType → parseJsonBody；函数 → 自定义解析如 multipart）
@@ -25,6 +26,7 @@ import type { ZodType } from 'zod';
 
 import { parseJsonBody, parseSearchParams, type ParseResult } from '@/server/validation';
 import { getCurrentUser } from './auth';
+import { applyCorsHeaders, isOriginAllowed } from './cors';
 import { jsonError, toHttpError } from './errors';
 import { logHttpError, logHttpRequest } from './logger';
 import { noopRateLimit, type RateLimitHook } from './rate-limit';
@@ -83,10 +85,11 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     const startedAt = Date.now();
 
     const finish = (response: Response, userId?: string): Response => {
-      // 安全响应头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
+      // 安全响应头 + CORS 头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
       response.headers.set('X-Content-Type-Options', 'nosniff');
       response.headers.set('X-Frame-Options', 'DENY');
       response.headers.set('Referrer-Policy', 'no-referrer');
+      applyCorsHeaders(request, response);
       logHttpRequest({
         method,
         path,
@@ -114,16 +117,28 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         return finish(jsonError('UNAUTHENTICATED', 'Not authenticated', 401), user?.id);
       }
 
-      // 3) 可选 user_id 头（threads 的 x-user-id）
+      // 3) CSRF：SameSite=None 后 cookie 可被跨域请求携带，状态变更请求必须校验
+      // Origin。浏览器总为跨域 POST 附 Origin；无 Origin 的非浏览器客户端放行
+      // （鉴权在前面仍是生效门槛）。
+      if (
+        method !== 'GET' &&
+        method !== 'HEAD' &&
+        method !== 'OPTIONS' &&
+        !isOriginAllowed(request)
+      ) {
+        return finish(jsonError('INVALID_ORIGIN', 'Origin not allowed', 403), user?.id);
+      }
+
+      // 4) 可选 user_id 头（threads 的 x-user-id）
       const headerUserId = options.userIdHeader
         ? (request.headers.get(options.userIdHeader) ?? undefined)
         : undefined;
 
-      // 4) 限流（占位）
+      // 5) 限流（占位）
       const limited = await rateLimit(request);
       if (limited) return finish(limited, user?.id ?? headerUserId);
 
-      // 5) body 解析（wrapper 是唯一读取方）
+      // 6) body 解析（wrapper 是唯一读取方）
       let body: TBody = undefined as TBody;
       if (typeof options.body === 'function') {
         const parsed = await options.body(request);
@@ -135,7 +150,7 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         body = parsed.data;
       }
 
-      // 6) query 解析
+      // 7) query 解析
       let query: TQuery = undefined as TQuery;
       if (options.query) {
         const parsed = parseSearchParams(request.nextUrl.searchParams, options.query);
@@ -143,7 +158,7 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         query = parsed.data;
       }
 
-      // 7) handler
+      // 8) handler
       const ctx: ApiContext<TBody, TQuery> = {
         user,
         userId: headerUserId,

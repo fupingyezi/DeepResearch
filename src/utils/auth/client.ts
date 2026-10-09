@@ -6,6 +6,8 @@
 
 import type { UserResponse } from '@deerflow-harness/auth/types';
 
+import { getApiBase } from '@/utils/request/base-url';
+
 export class AuthRequestError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -15,7 +17,7 @@ export class AuthRequestError extends Error {
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${getApiBase()}${url}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -60,11 +62,11 @@ export async function changePassword(
 }
 
 export async function logout(): Promise<void> {
-  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  await fetch(`${getApiBase()}/api/auth/logout`, { method: 'POST', credentials: 'include' });
 }
 
 export async function fetchMe(): Promise<UserResponse | null> {
-  const res = await fetch('/api/auth/me', { credentials: 'include' });
+  const res = await fetch(`${getApiBase()}/api/auth/me`, { credentials: 'include' });
   if (!res.ok) return null;
   return (await res.json()) as UserResponse;
 }
@@ -80,7 +82,7 @@ export interface SetupStatus {
 }
 
 export async function fetchSetupStatus(): Promise<SetupStatus> {
-  const res = await fetch('/api/auth/setup-status', { credentials: 'include' });
+  const res = await fetch(`${getApiBase()}/api/auth/setup-status`, { credentials: 'include' });
   if (!res.ok) {
     return { needs_setup: false, demo_login: { enabled: false, email: null } };
   }

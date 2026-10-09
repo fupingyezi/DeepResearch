@@ -19,6 +19,7 @@ import {
   type SseStreamEvents,
 } from '../protocol/client-event';
 import { createSseFrameParser } from './sse-frame-parser';
+import { getApiBase } from '@/utils/request/base-url';
 
 export interface AgentEventStreamOptions {
   /** 后端 SSE endpoint（例如 `/api/threads/:tid/runs/:rid/stream`） */
@@ -75,12 +76,12 @@ export async function* createAgentEventStream(opts: AgentEventStreamOptions): Ss
         ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         ...headers,
       },
-      // 同源携带 HttpOnly 会话 cookie，后端 getCurrentUser 解析鉴权
+      // 携带 HttpOnly 会话 cookie（同源直发；跨域经 CORS Allow-Credentials + SameSite=None）
       credentials: 'include',
       signal,
     };
     if (method === 'POST') init.body = JSON.stringify(body);
-    response = await fetch(endpoint, init);
+    response = await fetch(`${getApiBase()}${endpoint}`, init);
   } catch (err) {
     // AbortError 不视为异常，但仍以 ERROR 事件统一通知消费者
     const message = err instanceof Error ? err.message : String(err);

@@ -17,6 +17,8 @@ import {
 } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler({ auth: 'none' }, async () => {
   const demo = getDemoAccount();
   if (!demo) {

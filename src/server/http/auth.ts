@@ -20,24 +20,28 @@ import type { UserRecord } from '@deerflow-harness/auth';
 export const COOKIE_NAME = 'access_token';
 
 export function setSessionCookie(response: NextResponse, token: string): void {
-  const isSecure = process.env.NODE_ENV === 'production' && !process.env.DISABLE_SECURE_COOKIE;
   response.cookies.set({
     name: COOKIE_NAME,
     value: token,
     httpOnly: true,
-    secure: isSecure,
-    sameSite: 'lax',
+    // 前后端分离后 cookie 跨站发送必须 SameSite=None，而浏览器强制 None 必须配
+    // Secure。localhost/127.0.0.1 属可信源，dev 下 http 也能读写 Secure cookie；
+    // 生产必须已上 TLS，否则浏览器拒收该 cookie、登录直接失效。
+    secure: true,
+    sameSite: 'none',
     path: '/',
     maxAge: getTokenExpiryDays() * 24 * 3600,
   });
 }
 
 export function clearSessionCookie(response: NextResponse): void {
+  // name/path 与写入时一致才会被浏览器删除；SameSite/Secure 同参保险
   response.cookies.set({
     name: COOKIE_NAME,
     value: '',
     httpOnly: true,
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
     path: '/',
     maxAge: 0,
   });

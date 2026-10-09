@@ -15,6 +15,8 @@ import {
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { changePasswordSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler({ body: changePasswordSchema }, async ({ user, body }) => {
   const {
     current_password: currentPassword,

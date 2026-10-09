@@ -4,6 +4,8 @@ import { withApiHandler } from '@/server/http';
 import { getExtensionService } from '@/server/services/extension-service';
 import { upsertMcpServerSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const runtime = 'nodejs';
 
 /** 读取 MCP 服务器配置（不解析 env 占位，原样返回供编辑）。 */

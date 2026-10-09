@@ -89,12 +89,14 @@
 1. CORS 层（`src/server/http/api-handler.ts`）：`CORS_ALLOWED_ORIGINS` 精确 origin 白名单（禁通配）、OPTIONS 预检、`Allow-Credentials: true`；两条 SSE 路由（v3/chat、threads streams）的 Response 手动补同一组头
 2. Cookie 改 `SameSite=None; Secure`（`src/server/http/auth.ts`）
 3. CSRF 显式化：lax 的同站保护失效 → 服务端对非 GET 校验 `Origin ∈ 白名单`（与 CORS 用同一处单一出处）
-4. 前端 API 基址：`api.ts` 单例、SSE endpoint、`utils/auth/client.ts` 改从基址组装；注入方式待定（见四、决策记录）
+4. 前端 API 基址：`api.ts` 单例、SSE endpoint、`utils/auth/client.ts` 改从基址组装（运行时注入：layout 服务端读 env 输出 `window.__API_BASE__`）
 5. OAuth 回跳预留：redirect target 校验 origin 白名单（Phase 3 直接用）
 
 验收：app 域登录 → 跨域 POST `/api/v3/chat` 带 cookie → SSE 流正常 → 上传/图片正常；第三方 origin 被 CORS 拒绝。
 
 风险：SSE 过 nginx 必须关 buffering；web（只出页面）/ api（只出 /api）两个 Next.js 实例共用同一镜像不同 env。
+
+实施记录：预检由各路由一行 `export { OPTIONS } from '@/server/http/preflight'` 承接（middleware 只放行 OPTIONS——Edge 运行时读不到非 NEXT*PUBLIC* env，白名单校验必须留在 Node 层）；CORS 头与 CSRF 的 Origin 校验共用 `src/server/http/cors.ts` 单一出处；第 5 点 OAuth 回跳白名单复用其 `isOriginAllowed`。
 
 ### Phase 2 — 账号加固（3-5d，可与 Phase 1 并行开发）
 
@@ -166,11 +168,11 @@
 - 开放注册 + 加固
 - OAuth = GitHub / Google / QQ
 - 需要 PAT
+- 前端基址注入 = 运行时注入（layout 服务端读 env 输出 `window.__API_BASE__`，单镜像免双构建）
 
 实施时拍板：
 
 - **SMTP 有没有**——决定 Phase 2 邮箱验证/找回密码的时点；没有就先做限流 + 注册开关，验证与找回延后
-- **前端基址注入方式**——运行时注入（layout 服务端读 env 输出 `window.__API_BASE__`，单镜像免双构建，推荐）vs `NEXT_PUBLIC_*` 双构建
 - **threads v1 REST 是否还有外部调用方**——没有的话 Phase 0 直接切 cookie 鉴权，零兼容负担
 - **自定义 baseURL 开放范围**——建议仅限可信用户或域名白名单（SSRF 是真实风险）
 

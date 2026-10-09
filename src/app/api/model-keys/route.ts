@@ -14,6 +14,8 @@ import { withApiHandler } from '@/server/http';
 import { getModelKeyService } from '@/server/services/model-key-service';
 import { patchSelectedModelSchema, putModelKeySchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

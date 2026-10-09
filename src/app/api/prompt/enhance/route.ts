@@ -10,6 +10,8 @@ import { withApiHandler } from '@/server/http';
 import { getPromptEnhanceService } from '@/server/services/prompt-enhance-service';
 import { enhancePromptSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   { body: enhancePromptSchema, fallbackMessage: '增强失败' },
   async ({ body }) => {

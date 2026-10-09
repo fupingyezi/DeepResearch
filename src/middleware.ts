@@ -24,6 +24,10 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
+  // 跨域预检请求不带 cookie（浏览器规范），放行到路由层 OPTIONS handler 自行校验 Origin
+  if (request.method === 'OPTIONS') {
+    return NextResponse.next();
+  }
   const { pathname } = request.nextUrl;
 
   if (isPublicPath(pathname)) {

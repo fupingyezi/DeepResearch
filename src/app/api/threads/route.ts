@@ -14,6 +14,8 @@ import { withApiHandler } from '@/server/http';
 import { createThreadSchema, listQuerySchema } from '@/server/validation/schemas';
 import { getThreadService } from '@/server/wiring';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   {
     body: createThreadSchema,

@@ -10,6 +10,8 @@ import { jsonError, withApiHandler } from '@/server/http';
 import { getThreadQuerySchema } from '@/server/validation/schemas';
 import { getThreadService } from '@/server/wiring';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const GET = withApiHandler(
   {
     query: getThreadQuerySchema,

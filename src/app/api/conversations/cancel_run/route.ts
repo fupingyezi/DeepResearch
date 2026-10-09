@@ -16,6 +16,8 @@ import { withApiHandler } from '@/server/http';
 import { getConversationService } from '@/server/services/conversation-service';
 import { sessionIdBodySchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   { body: sessionIdBodySchema, fallbackMessage: 'failed to cancel run' },
   async ({ user, body }) => {

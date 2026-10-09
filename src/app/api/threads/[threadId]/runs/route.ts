@@ -11,6 +11,8 @@ import { withApiHandler, jsonError } from '@/server/http';
 import { listQuerySchema, submitRunSchema } from '@/server/validation/schemas';
 import { getRunStore, getThreadService } from '@/server/wiring';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   {
     body: submitRunSchema,

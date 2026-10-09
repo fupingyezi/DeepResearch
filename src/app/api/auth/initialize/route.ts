@@ -19,6 +19,8 @@ import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { credentialsSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler({ auth: 'none', body: credentialsSchema }, async ({ body }) => {
   const { email, password } = body;
 

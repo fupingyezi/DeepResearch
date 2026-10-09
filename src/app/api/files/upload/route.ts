@@ -5,6 +5,8 @@ import { jsonError, withApiHandler } from '@/server/http';
 import { getFileService } from '@/server/services/file-service';
 import type { ParseResult } from '@/server/validation';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 /**
  * multipart 自定义解析：ensureBucket 必须最先执行（现状顺序：ensureBucket →
  * formData → 校验 → upload，倒置会让桶不存在时先读 body 抛 500）。

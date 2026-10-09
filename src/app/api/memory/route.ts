@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { withApiHandler } from '@/server/http';
 import { getMemoryService } from '@/server/services/memory-service';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 /** 读取当前用户的记忆（结构化 summary + facts）。 */
 export const GET = withApiHandler({ fallbackMessage: 'Get memory failed' }, async ({ user }) => {
   const data = await getMemoryService().getMemory(user!.id);
