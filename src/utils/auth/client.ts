@@ -101,6 +101,29 @@ export interface SetupStatus {
   };
 }
 
+export type OAuthProviderName = 'github' | 'google' | 'qq';
+
+/**
+ * 已配置的 OAuth provider 列表（登录页据此渲染第三方登录按钮）。
+ * 请求失败 / 响应形状不符一律返回空数组——按钮隐藏，登录流程不受影响。
+ */
+export async function fetchOAuthProviders(): Promise<OAuthProviderName[]> {
+  const res = await fetch(`${getApiBase()}/api/auth/oauth/providers`, {
+    credentials: 'include',
+  });
+  if (!res.ok) return [];
+  const data = (await res.json().catch(() => ({}))) as { providers?: unknown };
+  if (!Array.isArray(data.providers)) return [];
+  return data.providers.filter(
+    (p): p is OAuthProviderName => typeof p === 'string' && ['github', 'google', 'qq'].includes(p),
+  );
+}
+
+/** OAuth 登录入口 URL：顶层导航（window.location.href）跳转，302 链走完回来。 */
+export function oauthLoginUrl(provider: OAuthProviderName): string {
+  return `${getApiBase()}/api/auth/oauth/${provider}`;
+}
+
 export async function fetchSetupStatus(): Promise<SetupStatus> {
   const res = await fetch(`${getApiBase()}/api/auth/setup-status`, { credentials: 'include' });
   if (!res.ok) {

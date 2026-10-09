@@ -9,13 +9,32 @@ import type { UserResponse } from '@deerflow-harness/auth/types';
 import {
   AuthRequestError,
   demoLogin,
+  fetchOAuthProviders,
   fetchSetupStatus,
   forgotPassword,
   login as loginRequest,
+  oauthLoginUrl,
   register as registerRequest,
+  type OAuthProviderName,
 } from '@/utils/auth/client';
 
 type Mode = 'login' | 'register' | 'forgot';
+
+/** OAuth 回调失败回跳 /login?oauth_error=X 的文案映射（后端错误码 → 用户话术） */
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  PROVIDER_DISABLED: '该登录方式未配置',
+  STATE_MISMATCH: '登录校验失败，请重新发起登录',
+  EXCHANGE_FAILED: '第三方授权失败，请稍后重试',
+  NO_EMAIL: '该账号未提供可用邮箱，无法登录',
+  EMAIL_TAKEN: '该邮箱已注册本地账号，为安全起见未自动关联，请使用邮箱密码登录',
+  PROVIDER_ERROR: '第三方登录被取消或失败，请重试',
+};
+
+const OAUTH_PROVIDER_LABELS: Record<OAuthProviderName, string> = {
+  github: 'GitHub 登录',
+  google: 'Google 登录',
+  qq: 'QQ 登录',
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,6 +50,8 @@ export default function LoginPage() {
   const [demoEmail, setDemoEmail] = useState<string | null>(null);
   // REGISTRATION_ENABLED 关闭时隐藏注册入口
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  // 已配置的 OAuth 第三方登录（未配置任何平台时为空，按钮隐藏）
+  const [oauthProviders, setOauthProviders] = useState<OAuthProviderName[]>([]);
 
   // 无 admin 时引导到首启设置页
   useEffect(() => {
@@ -40,6 +61,22 @@ export default function LoginPage() {
       setRegistrationEnabled(status.registration.enabled);
     });
   }, [router]);
+
+  // OAuth 按钮：只渲染服务端确认已配置的平台
+  useEffect(() => {
+    fetchOAuthProviders().then(setOauthProviders);
+  }, []);
+
+  // OAuth 回调失败回跳：读一次 oauth_error 提示并剥掉参数，刷新不会重复提示。
+  // 必须在 useEffect 里读 window：SSR 阶段 window 不存在
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('oauth_error');
+    if (!code) return;
+    setError(OAUTH_ERROR_MESSAGES[code] ?? 'OAuth 登录失败，请重试');
+    const next = new URL(window.location.href);
+    next.searchParams.delete('oauth_error');
+    window.history.replaceState(null, '', next.pathname + next.search);
+  }, []);
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -128,21 +165,38 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {demoEmail !== null && mode !== 'forgot' && (
+        {(demoEmail !== null || oauthProviders.length > 0) && mode !== 'forgot' && (
           <>
             <div className="mt-5 flex items-center gap-3" aria-hidden>
               <span className="h-px flex-1 bg-[#e5e7eb]" />
               <span className="text-[12px] text-[#9ca3af]">或</span>
               <span className="h-px flex-1 bg-[#e5e7eb]" />
             </div>
-            <button
-              type="button"
-              onClick={() => runLogin(demoLogin)}
-              disabled={loading}
-              className="mt-3 h-11 w-full rounded-xl border border-[#14b8a6] bg-white text-[14px] font-medium text-[#0f766e] transition-all hover:bg-[#f0fdfa] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {demoEmail ? `一键体验（${demoEmail}）` : '一键体验登录'}
-            </button>
+            {demoEmail !== null && (
+              <button
+                type="button"
+                onClick={() => runLogin(demoLogin)}
+                disabled={loading}
+                className="mt-3 h-11 w-full rounded-xl border border-[#14b8a6] bg-white text-[14px] font-medium text-[#0f766e] transition-all hover:bg-[#f0fdfa] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {demoEmail ? `一键体验（${demoEmail}）` : '一键体验登录'}
+              </button>
+            )}
+            {oauthProviders.map((provider) => (
+              <button
+                key={provider}
+                type="button"
+                // 顶层导航跳转：302 链（begin → provider 授权页 → callback → 首页）
+                // 走完浏览器自然回到应用，不能走 fetch（会拿不到 cookie 域语义）
+                onClick={() => {
+                  window.location.href = oauthLoginUrl(provider);
+                }}
+                disabled={loading}
+                className="mt-3 h-11 w-full rounded-xl border border-[#e5e7eb] bg-white text-[14px] font-medium text-[#374151] transition-all hover:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {OAUTH_PROVIDER_LABELS[provider]}
+              </button>
+            ))}
           </>
         )}
 
