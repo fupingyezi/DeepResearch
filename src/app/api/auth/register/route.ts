@@ -8,18 +8,16 @@ import { NextResponse } from 'next/server';
 
 import {
   AuthErrorCode,
-  createAccessToken,
-  createSession,
   isRegistrationEnabled,
   registerUser,
   toUserResponse,
   validateStrongPassword,
 } from '@deerflow-harness/auth';
-import { sendVerificationEmail } from '@deerflow-harness/auth/email-flow';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
 import { isMailConfigured } from '@/lib/mailer';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
@@ -47,10 +45,9 @@ export const POST = withApiHandler(
       const emailVerified = !isMailConfigured();
       const user = await registerUser(email, password, 'user', { emailVerified });
       if (!emailVerified) {
-        await sendVerificationEmail(user);
+        await getAuthService().sendVerificationEmail(user);
       }
-      const session = await createSession(user.id);
-      const token = createAccessToken(user.id, user.tokenVersion, session.id);
+      const token = await getAuthService().issueSessionToken(user);
       const response = NextResponse.json(toUserResponse(user), { status: 201 });
       setSessionCookie(response, token);
       return response;

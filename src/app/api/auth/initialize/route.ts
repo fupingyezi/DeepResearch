@@ -10,8 +10,6 @@ import { NextResponse } from 'next/server';
 import {
   AuthErrorCode,
   adminExists,
-  createAccessToken,
-  createSession,
   initializeAdmin,
   toUserResponse,
   validateStrongPassword,
@@ -19,6 +17,7 @@ import {
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
@@ -45,8 +44,7 @@ export const POST = withApiHandler(
 
     try {
       const admin = await initializeAdmin(email, password);
-      const session = await createSession(admin.id);
-      const token = createAccessToken(admin.id, admin.tokenVersion, session.id);
+      const token = await getAuthService().issueSessionToken(admin);
       const response = NextResponse.json(toUserResponse(admin), { status: 201 });
       setSessionCookie(response, token);
       return response;

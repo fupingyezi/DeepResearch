@@ -6,10 +6,10 @@
 
 import { NextResponse } from 'next/server';
 
-import { sendVerificationEmail } from '@deerflow-harness/auth/email-flow';
 import { isMailConfigured } from '@/lib/mailer';
 import { jsonError, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 
 export { OPTIONS } from '@/server/http/preflight';
 
@@ -26,6 +26,6 @@ export const POST = withApiHandler({ rateLimit: resendRateLimit }, async ({ user
   if (!isMailConfigured()) {
     return jsonError('MAIL_NOT_CONFIGURED', 'Email service is not configured', 503);
   }
-  await sendVerificationEmail(user!);
+  await getAuthService().sendVerificationEmail(user!);
   return NextResponse.json({ message: 'Verification email sent' });
 });

@@ -7,11 +7,10 @@
 
 import { NextResponse } from 'next/server';
 
-import { sendPasswordResetEmail } from '@deerflow-harness/auth/email-flow';
-import { getUserByEmail } from '@deerflow-harness/auth/user-repository';
 import { isMailConfigured } from '@/lib/mailer';
 import { jsonError, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { forgotPasswordSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
@@ -28,10 +27,7 @@ export const POST = withApiHandler(
     if (!isMailConfigured()) {
       return jsonError('MAIL_NOT_CONFIGURED', 'Email service is not configured', 503);
     }
-    const user = await getUserByEmail(body.email.trim().toLowerCase());
-    if (user) {
-      await sendPasswordResetEmail(user);
-    }
+    await getAuthService().forgotPassword(body.email);
     return NextResponse.json({ message: '如果该邮箱已注册，重置邮件已发送' });
   },
 );

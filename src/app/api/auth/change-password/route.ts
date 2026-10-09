@@ -6,15 +6,10 @@
 
 import { NextResponse } from 'next/server';
 
-import {
-  AuthErrorCode,
-  changePassword,
-  createAccessToken,
-  createSession,
-  validateStrongPassword,
-} from '@deerflow-harness/auth';
+import { AuthErrorCode, changePassword, validateStrongPassword } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { changePasswordSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
@@ -48,8 +43,7 @@ export const POST = withApiHandler(
     }
 
     // 改密自增 tokenVersion 已使旧 token 全失效；新 token 挂新会话
-    const session = await createSession(result.user.id);
-    const token = createAccessToken(result.user.id, result.user.tokenVersion, session.id);
+    const token = await getAuthService().issueSessionToken(result.user);
     const response = NextResponse.json({ message: 'Password changed successfully' });
     setSessionCookie(response, token);
     return response;

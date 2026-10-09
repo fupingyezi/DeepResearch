@@ -7,15 +7,10 @@
 
 import { NextResponse } from 'next/server';
 
-import {
-  AuthErrorCode,
-  authenticate,
-  createAccessToken,
-  createSession,
-  toUserResponse,
-} from '@deerflow-harness/auth';
+import { AuthErrorCode, authenticate, toUserResponse } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter, loginFailures } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
 
 export { OPTIONS } from '@/server/http/preflight';
@@ -38,8 +33,7 @@ export const POST = withApiHandler(
     }
 
     await loginFailures.clear(body.email);
-    const session = await createSession(user.id);
-    const token = createAccessToken(user.id, user.tokenVersion, session.id);
+    const token = await getAuthService().issueSessionToken(user);
     const response = NextResponse.json(toUserResponse(user));
     setSessionCookie(response, token);
     return response;

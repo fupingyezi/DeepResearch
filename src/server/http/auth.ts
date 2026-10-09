@@ -15,8 +15,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { decodeToken, getTokenExpiryDays } from '@deerflow-harness/auth';
 import { getUserById } from '@deerflow-harness/auth';
-import { isSessionActive } from '@deerflow-harness/auth';
 import type { UserRecord } from '@deerflow-harness/auth';
+
+import { getAuthService } from '@/server/services/auth-service';
 
 export const COOKIE_NAME = 'access_token';
 
@@ -63,7 +64,7 @@ export async function getCurrentUser(request: NextRequest): Promise<UserRecord |
   if (!user || user.tokenVersion !== payload.ver) return null;
 
   // 会话吊销校验：登出 / 服务端吊销后立即失效，不依赖 JWT 过期
-  if (!(await isSessionActive(payload.sid))) return null;
+  if (!(await getAuthService().isSessionActive(payload.sid))) return null;
 
   return user;
 }

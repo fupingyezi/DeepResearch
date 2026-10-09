@@ -11,13 +11,12 @@ import { NextResponse } from 'next/server';
 import {
   AuthErrorCode,
   authenticate,
-  createAccessToken,
-  createSession,
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
 import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 
 export { OPTIONS } from '@/server/http/preflight';
 
@@ -42,8 +41,7 @@ export const POST = withApiHandler({ auth: 'none', rateLimit: demoLoginRateLimit
     );
   }
 
-  const session = await createSession(user.id);
-  const token = createAccessToken(user.id, user.tokenVersion, session.id);
+  const token = await getAuthService().issueSessionToken(user);
   const response = NextResponse.json(toUserResponse(user));
   setSessionCookie(response, token);
   return response;
