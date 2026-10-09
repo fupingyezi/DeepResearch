@@ -3,7 +3,8 @@
  *  - POST: 创建 thread
  *  - GET:  列表
  *
- * user_id 取自 header `x-user-id`（可空，本期未启用鉴权）
+ * cookie 鉴权：user_id 取当前登录用户。x-user-id 透传头已废弃——
+ * 无签名、空值放行.
  */
 
 import { NextResponse } from 'next/server';
@@ -15,16 +16,14 @@ import { getThreadService } from '@/server/wiring';
 
 export const POST = withApiHandler(
   {
-    auth: 'none',
-    userIdHeader: 'x-user-id',
     body: createThreadSchema,
     fallbackMessage: 'failed to create thread',
   },
-  async ({ userId, body }) => {
+  async ({ user, body }) => {
     const service = await getThreadService();
     const { thread_id } = await service.createThread({
       thread_id: body.thread_id,
-      user_id: userId,
+      user_id: user!.id,
       assistant_id: body.assistant_id,
       display_name: body.display_name,
       metadata: body.metadata,
@@ -35,15 +34,13 @@ export const POST = withApiHandler(
 
 export const GET = withApiHandler(
   {
-    auth: 'none',
-    userIdHeader: 'x-user-id',
     query: listQuerySchema,
     fallbackMessage: 'failed to list threads',
   },
-  async ({ userId, query }) => {
+  async ({ user, query }) => {
     const service = await getThreadService();
     const list = await service.listThreads({
-      user_id: userId,
+      user_id: user!.id,
       limit: query.limit,
       offset: query.offset,
       status: query.status as ThreadStatus | undefined,

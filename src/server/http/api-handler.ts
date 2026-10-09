@@ -83,6 +83,10 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     const startedAt = Date.now();
 
     const finish = (response: Response, userId?: string): Response => {
+      // 安全响应头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      response.headers.set('X-Frame-Options', 'DENY');
+      response.headers.set('Referrer-Policy', 'no-referrer');
       logHttpRequest({
         method,
         path,

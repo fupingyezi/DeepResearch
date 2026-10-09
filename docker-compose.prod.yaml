@@ -38,7 +38,8 @@ services:
       # 进程就被 Next 直接退出，instrumentation 的排水序列根本跑不完
       NEXT_MANUAL_SIG_HANDLE: '1'
     ports:
-      - '3000:3000'
+      # 只绑本机回环：公网 80/443 由宿主机 nginx 进入，与中间件同款策略
+      - '127.0.0.1:3000:3000'
     depends_on:
       postgres:
         condition: service_healthy

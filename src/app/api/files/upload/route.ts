@@ -24,7 +24,7 @@ async function parseUploadBody(
   return { ok: true, data: { file, fileId } };
 }
 
-export const POST = withApiHandler({ auth: 'none', body: parseUploadBody }, async ({ body }) => {
-  const result = await getFileService().uploadFile(body.file, body.fileId);
+export const POST = withApiHandler({ body: parseUploadBody }, async ({ body, user }) => {
+  const result = await getFileService().uploadFile(body.file, body.fileId, user!.id);
   return NextResponse.json(result, { status: 200 });
 });

@@ -255,7 +255,8 @@ export async function initialDB() {
               check (status in ('pending', 'parsing', 'success', 'failed')),
           error_message text,
           created_at timestamptz not null default now(),
-          updated_at timestamptz not null default now()
+          updated_at timestamptz not null default now(),
+          user_id uuid not null
         );
 
         alter table file_content add column if not exists file_id uuid;

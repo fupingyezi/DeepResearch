@@ -71,7 +71,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
   async get(thread_id: string, opts?: { user_id?: string | null }): Promise<ThreadMeta | null> {
     const userId = opts?.user_id ?? null;
     const sql = userId
-      ? `select * from threads_meta where thread_id = $1 and (user_id = $2 or user_id is null)`
+      ? `select * from threads_meta where thread_id = $1 and user_id = $2`
       : `select * from threads_meta where thread_id = $1`;
     const params = userId ? [thread_id, userId] : [thread_id];
     const res = await query(sql, params);
@@ -165,7 +165,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
     if (user_id == null || user_id === '') return true;
     const row = await this.get(thread_id);
     if (!row) return !opts?.require_existing;
-    if (row.user_id == null) return true; // 历史/匿名记录不限制
+    if (row.user_id == null) return false; // 匿名行对带 user_id 的主体一律不可见
     return row.user_id === user_id;
   }
 

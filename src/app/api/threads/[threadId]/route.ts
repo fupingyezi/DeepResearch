@@ -12,16 +12,14 @@ import { getThreadService } from '@/server/wiring';
 
 export const GET = withApiHandler(
   {
-    auth: 'none',
-    userIdHeader: 'x-user-id',
     query: getThreadQuerySchema,
     fallbackMessage: 'failed to get thread',
   },
-  async ({ userId, query, params }) => {
+  async ({ user, query, params }) => {
     const service = await getThreadService();
     const result = await service.getThread({
       thread_id: params.threadId,
-      user_id: userId,
+      user_id: user!.id,
       includeCheckpoint: query.include === 'checkpoint',
     });
     if (!result) return jsonError('NOT_FOUND', 'not found', 404);
@@ -30,12 +28,12 @@ export const GET = withApiHandler(
 );
 
 export const DELETE = withApiHandler(
-  { auth: 'none', userIdHeader: 'x-user-id', fallbackMessage: 'failed to delete thread' },
-  async ({ userId, params }) => {
+  { fallbackMessage: 'failed to delete thread' },
+  async ({ user, params }) => {
     const service = await getThreadService();
     await service.deleteThread({
       thread_id: params.threadId,
-      user_id: userId,
+      user_id: user!.id,
     });
     return NextResponse.json({ ok: true }, { status: 200 });
   },
