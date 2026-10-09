@@ -16,6 +16,7 @@ import {
   type UserRecord,
 } from '@deerflow-harness/auth';
 import { getUserByEmail, updateUser } from '@deerflow-harness/auth/user-repository';
+import { appBaseUrl } from '@/lib/app-origin';
 import { isMailConfigured, sendMail } from '@/lib/mailer';
 import { PgEmailTokenStore, type EmailTokenStore } from '@/server/daos/email-token';
 import { PgSessionStore, type SessionStore } from '@/server/daos/session';
@@ -45,17 +46,6 @@ export interface AuthService {
 export function createAuthService(deps: AuthServiceDeps = {}): AuthService {
   const sessions = deps.sessionStore ?? new PgSessionStore();
   const emailTokens = deps.emailTokenStore ?? new PgEmailTokenStore();
-
-  /** 邮件链接的 app 域基址：APP_BASE_URL 优先，回落 CORS 白名单第一项。 */
-  const appBaseUrl = (): string => {
-    const explicit = process.env.APP_BASE_URL?.trim();
-    const source = explicit || process.env.CORS_ALLOWED_ORIGINS?.split(',')[0]?.trim();
-    if (!source) {
-      console.warn('[mailer] APP_BASE_URL 未配置，邮件链接将是相对路径，收件人无法点击');
-      return '';
-    }
-    return source.replace(/\/+$/, '');
-  };
 
   const safeSend = async (opts: { to: string; subject: string; html: string }): Promise<void> => {
     try {

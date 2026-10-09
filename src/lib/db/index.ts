@@ -225,6 +225,18 @@ export async function initialDB() {
         create index if not exists idx_sessions_user on sessions(user_id);
         create index if not exists idx_sessions_expires on sessions(expires_at);
 
+        -- OAuth 第三方登录绑定：provider_user_id 命中即登录；
+        -- 唯一约束防同一 provider 账号重复绑定（并发回调的兜底在 service 层回查）
+        create table if not exists oauth_accounts (
+          id               uuid primary key,
+          user_id          uuid not null references users(id) on delete cascade,
+          provider         varchar(20) not null check (provider in ('github','google','qq')),
+          provider_user_id varchar(255) not null,
+          created_at       timestamptz not null default now(),
+          unique (provider, provider_user_id)
+        );
+        create index if not exists idx_oauth_accounts_user on oauth_accounts(user_id);
+
         -- 用户级模型 API Key：按 (user_id, provider) 维度保存，仅存密文/IV/authTag/掩码，
         -- 绝不存明文。一个 provider 的 Key 可服务该 provider 下多个预设模型。
         create table if not exists user_model_keys (
