@@ -4,6 +4,7 @@
  * 成功返回增强后的文本；失败抛错，调用方自行降级（输入框保持原内容即可）。
  */
 
+import { dispatchUnauthorized } from '@/utils/auth/unauthorized-event';
 import { getApiBase } from '@/utils/request/base-url';
 
 export async function enhancePrompt(input: string): Promise<string> {
@@ -13,6 +14,9 @@ export async function enhancePrompt(input: string): Promise<string> {
     credentials: 'include',
     body: JSON.stringify({ input }),
   });
+  if (res.status === 401) {
+    dispatchUnauthorized();
+  }
   const data = (await res.json().catch(() => ({}))) as { enhanced?: unknown; message?: unknown };
   if (!res.ok || typeof data.enhanced !== 'string') {
     throw new Error(typeof data.message === 'string' ? data.message : 'Enhance failed');

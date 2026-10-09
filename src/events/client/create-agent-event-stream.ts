@@ -19,6 +19,7 @@ import {
   type SseStreamEvents,
 } from '../protocol/client-event';
 import { createSseFrameParser } from './sse-frame-parser';
+import { dispatchUnauthorized } from '@/utils/auth/unauthorized-event';
 import { getApiBase } from '@/utils/request/base-url';
 
 export interface AgentEventStreamOptions {
@@ -94,6 +95,10 @@ export async function* createAgentEventStream(opts: AgentEventStreamOptions): Ss
   }
 
   if (!response.ok) {
+    // SSE 端点全部会话门禁：401 即会话失效，广播全局事件触发登出跳转
+    if (response.status === 401) {
+      dispatchUnauthorized();
+    }
     yield makeErrorEvent(
       'AGENT_STREAM_HTTP_ERROR',
       `HTTP ${response.status} ${response.statusText}`,

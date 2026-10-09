@@ -1,3 +1,5 @@
+import { dispatchUnauthorized } from '@/utils/auth/unauthorized-event';
+
 import { getApiBase } from './base-url';
 
 interface ApiClientOptions {
@@ -61,6 +63,10 @@ class ApiClient {
       const response = await fetch(url, config);
 
       if (!response.ok) {
+        // 业务 API 的 401 即会话失效（服务端吊销/过期）：广播全局事件触发登出跳转
+        if (response.status === 401) {
+          dispatchUnauthorized();
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
