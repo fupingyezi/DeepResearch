@@ -112,6 +112,14 @@
 
 验收：同 IP 狂试登录被限流/锁定；登出后旧 JWT 立即失效；忘记密码全流程；会话过期自动弹回登录页。
 
+实施记录（已完成，按 ①限流+注册开关 ②邮箱验证+忘记密码 ③会话表 ④前端 401 分阶段提交）：
+
+- 限流为 Redis 固定窗口（INCR+EXPIRE，跨进程），未配置/失败降级进程内 Map；账号锁（5 次/15min）判定放在 bcrypt 之前，锁定期不消耗算力；`DEERFLOW_RATE_LIMIT_ENABLED='0'` 显式关
+- 邮箱令牌单表 `email_tokens`（计划里的两张表合并）：`purpose check ('verify_email','reset_password')` 区分，库存 sha256、单次使用、24h 过期，发放时顺带清该用户过期旧令牌；注册时 SMTP 未配置 → `email_verified=true` 直接通过（与限流兜底一致）；SMTP 已配置 → 发验证邮件，用户以未验证态登录，应用区悬浮 banner 可重发
+- 忘记密码防枚举：forgot-password 响应恒定（真实用户才发信）；SMTP 未配置时该端点 503（不发「无法发信」的差别响应泄露账号存在性）；reset 令牌核销成功才改密
+- 会话：`createAccessToken(userId, tokenVersion, sessionId)` 三参；getCurrentUser 在 tokenVersion 校验后追加 `isSessionActive(sid)` 查库；logout 用 `jwt.decode`（不验签）取 sid 吊销——token 可能已过期，吊销幂等，恒清 cookie 恒 200；会话过期时长与 JWT 同一 env 同步
+- 前端 401 经 `window CustomEvent`（auth:unauthorized）解耦：ApiClient / SSE 生成器 / 提示词增强三处派发（auth 族走独立 client 裸 fetch，登录失败 401 不误触发）；AuthProvider 监听，仅已登录态响应（并发 401 幂等），清态后硬导航 /login
+
 ### Phase 3 — OAuth：GitHub / Google / QQ（4-6d）
 
 改动点：
