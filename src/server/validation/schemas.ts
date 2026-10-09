@@ -213,3 +213,15 @@ export const getThreadQuerySchema = z.object({
 export const sandboxStatsQuerySchema = z.object({
   stats: z.preprocess(firstValue, z.string().optional()),
 });
+
+/**
+ * OAuth 回调 query：code/state 来自 provider 回跳；error/error_description
+ * 为 provider 侧失败（access_denied 等，用户取消也走这里）。宽松 optional——
+ * 缺什么由 service 层给对应错误码，不在 schema 层加码。
+ */
+export const oauthCallbackQuerySchema = z.object({
+  code: z.preprocess(firstValue, z.string().optional()),
+  state: z.preprocess(firstValue, z.string().optional()),
+  error: z.preprocess(firstValue, z.string().optional()),
+  error_description: z.preprocess(firstValue, z.string().optional()),
+});

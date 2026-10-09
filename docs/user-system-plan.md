@@ -133,6 +133,18 @@
 
 验收：三平台新老用户登录、绑定冲突确认、回调 origin 校验生效。
 
+#### Phase 3 实施记录（已完成，2026-10）
+
+- **绑定策略修订**：原计划「email 命中已有账号 → 要求登录确认绑定」。实施改为**安全拒绝（EMAIL_TAKEN）**——确认绑定需要跨回调轮次的服务端中间态，v1 不引入；邮箱撞本地账号时直接拒绝并提示用邮箱密码登录，攻击者无法借 OAuth 抢占他人账号。
+- **合成邮箱**（provider 语义，适配器内完成）：GitHub 无 verified 邮箱 → `${id}+${login}@users.noreply.github.com`（官方转发，`emailVerified:false`，重发验证闭环可用）；QQ 永不返回邮箱 → `${openid}@oauth.qq.local`（`emailVerified:true`，改邮箱走 change-password 的 newEmail）；Google 无邮箱不合成 → NO_EMAIL。
+- **openid vs unionid**：QQ 用 openid 作 providerUserId。unionid 是同一开发者多应用共享的身份，本应用只有一个 QQ 应用，openid 恒定；若未来多应用共享身份再迁 unionid（需迁移既有绑定行）。
+- **state 只存 httpOnly cookie**（`oauth_state`，sameSite=lax、path=/api/auth/oauth、600s TTL）：攻击者无法在 api 域种 cookie，回调 state 匹配 ⟺ 必然流经 begin 端点（CSRF 防线）。无服务端存储，不引入一次性 state 表。回调所有路径都清 cookie 防重放。
+- **无事务注记**：harness `createUser` 不收 db 参数，建号与绑定 insert 无法同事务。顺序保证孤儿不可达：同 provider 用户 ⇒ 同邮箱 ⇒ 并发输家在建号 insert（23505）先于绑定 insert 失败；绑定 insert 的 23505 由 OAuthAccountExistsError 捕转后回查绑定登录兜底。
+- **open redirect 从构造上关闭**：回调 302 目标恒为 env 决定的 app 域（`OAUTH_BASE_URL → APP_BASE_URL → CORS_ALLOWED_ORIGINS[0] → 请求 origin`），不读任何用户可控的 redirect/return_to 参数。
+- **回调必须 GET**：顶层导航（302 链）不携带 Origin 头，GET 跳过 withApiHandler 的 Origin 校验；POST 会被 Origin 校验误杀。middleware 已放行 `/api/auth/*`，无需改动。
+- **未配置 provider 恒报 PROVIDER_DISABLED**：未知 provider 与「已注册但未配置」同码，不泄露平台枚举。
+- **已知风险（v1 不处理）**：Safari ITP 可能丢跨站重定向链上的 state cookie（仅跨域部署受影响，同源部署无碍）。观察确认后回落服务端一次性 state 存储。
+
 ### Phase 4 — API Token / PAT（2-3d）
 
 改动点：

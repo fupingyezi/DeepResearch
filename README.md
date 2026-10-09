@@ -423,7 +423,9 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/auth/initialize`                        | POST          | 初始化管理员账户                                                                  |
 | `/api/auth/setup-status`                      | GET           | 查询初始化状态                                                                    |
 | `/api/auth/demo-login`                        | POST          | 体验账号一键登录（凭据取自服务端环境变量，未配置则 404）                          |
-| `/api/auth/oauth/[provider]`                  | GET           | OAuth 第三方登录回调                                                              |
+| `/api/auth/oauth/[provider]`                  | GET           | OAuth 登录入口（302 到第三方授权页并种 state cookie）                             |
+| `/api/auth/oauth/[provider]/callback`         | GET           | OAuth 回调（换 token、绑定/登录、种会话 cookie、302 回应用）                      |
+| `/api/auth/oauth/providers`                   | GET           | 已配置的 OAuth provider 列表（登录页据此渲染按钮）                                |
 
 **主聊天请求体：**
 
