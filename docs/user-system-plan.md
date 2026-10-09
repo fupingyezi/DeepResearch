@@ -169,10 +169,10 @@
 - OAuth = GitHub / Google / QQ
 - 需要 PAT
 - 前端基址注入 = 运行时注入（layout 服务端读 env 输出 `window.__API_BASE__`，单镜像免双构建）
+- SMTP 已就绪——Phase 2 邮箱验证与忘记密码按完整方案做（env 契约见 `.env.example` 的 `SMTP_*` / `APP_BASE_URL`）
 
 实施时拍板：
 
-- **SMTP 有没有**——决定 Phase 2 邮箱验证/找回密码的时点；没有就先做限流 + 注册开关，验证与找回延后
 - **threads v1 REST 是否还有外部调用方**——没有的话 Phase 0 直接切 cookie 鉴权，零兼容负担
 - **自定义 baseURL 开放范围**——建议仅限可信用户或域名白名单（SSRF 是真实风险）
 
