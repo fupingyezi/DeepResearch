@@ -6,7 +6,7 @@ import { UsageRecordingHandler } from '../runtime/usage/usage-accounting';
 export function inferProvider(config: ModelConfig): ModelProvider {
   if (config.provider) return config.provider;
 
-  const url = (config.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? '').toLowerCase();
+  const url = (config.baseUrl ?? '').toLowerCase();
   const name = (config.modelName ?? '').toLowerCase();
 
   if (url.includes('dashscope') || url.includes('aliyun') || name.startsWith('qwen')) {
@@ -37,15 +37,15 @@ export function createChatModel(config: ModelConfig) {
   // 全部 provider 默认流式（streaming 仅作显式关闭通道）
   const streaming = config.streaming ?? true;
 
-  const baseUrl = config?.baseUrl ?? process.env.DEEPSEEK_BASE_URL;
-  const apiKey = config?.apiKey ?? process.env.DEEPSEEK_API_KEY;
+  const baseUrl = config?.baseUrl;
+  const apiKey = config?.apiKey;
   const rawModelName = config?.modelName;
   const isInheritPlaceholder = rawModelName === 'inherit';
   if (isInheritPlaceholder) {
     console.warn(
       `[createChatModel] modelName='inherit' detected — inheritedModelConfig was ` +
         `not propagated to subagent (likely lost across LangGraph ToolNode async ` +
-        `boundary). Falling back to env default model.`,
+        `boundary). Falling back to default model.`,
     );
   }
   // 兜底模型名用官方名：deepseek-chat 已不在 GET /models 清单内（旧兼容名）。

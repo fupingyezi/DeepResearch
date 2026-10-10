@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisDistLock } from '../dist-lock';
+import { setRedisClientFactory } from '../../coordination/redis-client-factory';
 
 /**
  * RedisDistLock 集成测试：真实 Redis 上的互斥语义（两个独立实例共享同一把锁，
@@ -48,11 +49,14 @@ describe.skipIf(!hasRedis)('RedisDistLock · 真实 Redis', () => {
 
   beforeAll(() => {
     if (!REDIS_URL) return;
+    // 生产组件经工厂取连接：注册 url 注入，socket 选项由组件自带
+    setRedisClientFactory((opts) => createClient({ url: REDIS_URL, ...opts }));
     // 两个实例 = 两个进程的视角：连接独立，锁语义完全靠 Redis
     locks.push(new RedisDistLock(), new RedisDistLock());
   });
 
   afterAll(async () => {
+    setRedisClientFactory(null);
     for (const lock of locks) {
       await lock.close();
     }

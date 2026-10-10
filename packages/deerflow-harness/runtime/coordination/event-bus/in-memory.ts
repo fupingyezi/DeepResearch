@@ -39,8 +39,12 @@ export class InMemoryRunEventBus implements RunEventBus {
   /** 已释放 run 的墓碑：key → releasedAt。 */
   private readonly releasedAt = new Map<string, number>();
 
-  constructor(bridge?: StreamBridge<StampedClientAgentEvent>) {
-    this.bridge = bridge ?? new StreamBridge<StampedClientAgentEvent>((s) => s.event.eventType);
+  constructor(bridge?: StreamBridge<StampedClientAgentEvent>, options?: { bufferMax?: number }) {
+    this.bridge =
+      bridge ??
+      new StreamBridge<StampedClientAgentEvent>((s) => s.event.eventType, {
+        bufferMax: options?.bufferMax,
+      });
   }
 
   publish(threadId: string, runId: string, event: ClientAgentEvent): Promise<void> {

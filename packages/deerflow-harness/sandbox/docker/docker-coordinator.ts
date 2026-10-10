@@ -12,13 +12,15 @@
  *   对话（对齐 lib/cache 连接失败返回 null 不抛错的现状）。降级仅告警一次。
  * - 计数用 Lua 脚本做「读上限 + 判断 + 自增」的原子占位，杜绝多进程竞态超配。
  *
- * 复用现有 redis 依赖与 REDIS_URL；不污染 lib/cache 通用缓存（其对 value 做
- * JSON stringify/parse，不适合整数计数与原子命令），故独立建连接。
+ * 连接由宿主注入的 RedisClientFactory 提供（host 侧注入 url 等部署参数）；
+ * 工厂未注册 = 宿主未配置 Redis，降级进程内协调。独立建连接而非复用宿主
+ * 缓存客户端：协调命令（整数计数 / Lua / 锁）与其通用缓存用途不重叠。
  */
 
-import { createClient } from 'redis';
-
-type RedisClient = ReturnType<typeof createClient>;
+import {
+  getRedisClientFactory,
+  type RedisClient,
+} from '../../runtime/coordination/redis-client-factory';
 
 const KEY_PREFIX = 'deerflow:sandbox:';
 const CONTAINERS_COUNT_KEY = `${KEY_PREFIX}containers:count`;
@@ -521,14 +523,14 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
   }
 
   /**
-   * 懒连接 Redis。REDIS_URL 未配置或连接失败时返回 null（走进程内降级）。
-   * 首次降级打印一次告警，避免刷屏。
+   * 懒连接 Redis。RedisClientFactory 未注册（宿主未配置 Redis）或连接失败时
+   * 返回 null（走进程内降级）。首次降级打印一次告警，避免刷屏。
    */
   private async ensureClient(): Promise<RedisClient | null> {
     if (this.degraded) return null;
     if (this.connected && this.client) return this.client;
-    if (!process.env.REDIS_URL) {
-      this.enterDegraded('REDIS_URL 未配置');
+    if (!getRedisClientFactory()) {
+      this.enterDegraded('RedisClientFactory 未注册（宿主未配置 Redis）');
       return null;
     }
     if (!this.connecting) {
@@ -539,8 +541,7 @@ class RedisSandboxCoordinator implements SandboxCoordinator {
 
   private async connect(): Promise<RedisClient | null> {
     try {
-      const client = createClient({
-        url: process.env.REDIS_URL,
+      const client = await getRedisClientFactory()!({
         socket: {
           keepAlive: true,
           connectTimeout: 10_000,

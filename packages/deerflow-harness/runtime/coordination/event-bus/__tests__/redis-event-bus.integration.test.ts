@@ -1,7 +1,8 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisEventBus } from '../redis';
+import { setRedisClientFactory } from '../../redis-client-factory';
 import { describeRunEventBusContract } from '../../../__tests__/helpers/contract-cases';
 import {
   ClientAgentEventType,
@@ -52,6 +53,12 @@ const chunkTexts = (stamped: StampedClientAgentEvent[]): string[] =>
 
 const created: RedisEventBus[] = [];
 const usedKeys: string[] = [];
+
+beforeAll(() => {
+  if (!hasRedis) return;
+  // 生产组件经工厂取连接：注册 url 注入，socket 选项由组件自带
+  setRedisClientFactory((opts) => createClient({ url: process.env.REDIS_URL, ...opts }));
+});
 
 /** 每用例独立 key：stream 是追加结构，键跨用例残留会让回放断言互相污染。 */
 const makeKeys = (): { threadId: string; runId: string } => {
@@ -110,6 +117,7 @@ describe.skipIf(!hasRedis)('RedisEventBus 跨实例语义（集成）', () => {
 });
 
 afterAll(async () => {
+  setRedisClientFactory(null);
   if (!hasRedis) return;
   await Promise.all(created.map((b) => b.close().catch(() => undefined)));
   // 清理用例写入的 stream 键（有 24h TTL 兜底，主动清理避免污染本机开发库）

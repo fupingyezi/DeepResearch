@@ -3,6 +3,29 @@ import { TavilySearchAPIRetriever } from '@langchain/community/retrievers/tavily
 
 import z from 'zod';
 
+/**
+ * Tavily API Key 注入面：宿主部署配置（TAVILY_API_KEY env），harness 不自读 env。
+ * 未注册时 searchWebTool 以 apiKey: undefined 调用（Tavily 无 Key 必失败，
+ * 错误透传给模型，由 ToolErrorHandling 兜底）。
+ * dev 下挂 globalThis：理由同 memory/storage.ts（Next 按路由分包编译，模块级
+ * 变量会分裂成多份导致注入静默失效）。
+ */
+let _apiKey: string | null | undefined = undefined;
+
+const globalForTavilyKey =
+  process.env.NODE_ENV === 'production'
+    ? null
+    : (globalThis as unknown as { __tavilyApiKey?: string | null | undefined });
+
+export function setTavilyApiKey(key: string | null | undefined): void {
+  if (globalForTavilyKey) globalForTavilyKey.__tavilyApiKey = key;
+  else _apiKey = key;
+}
+
+function getTavilyApiKey(): string | undefined {
+  return globalForTavilyKey?.__tavilyApiKey ?? _apiKey ?? undefined;
+}
+
 export const searchWebTool = tool(
   async (input) => {
     const question = (input?.question ?? '').trim();
@@ -15,7 +38,7 @@ export const searchWebTool = tool(
     }
 
     const tavy = new TavilySearchAPIRetriever({
-      apiKey: process.env.TAVILY_API_KEY,
+      apiKey: getTavilyApiKey(),
     });
     const response = await tavy.invoke(question);
     if (!Array.isArray(response) || response.length === 0) {

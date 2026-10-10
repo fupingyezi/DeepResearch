@@ -1,6 +1,5 @@
 import { Pool } from 'pg';
 import { ChatSessionType, ChatMessageType } from '@/types';
-import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 
 // 用 globalThis 在 Next.js dev HMR 下复用同一个 pool，避免每次模块重载都新建连接池
 const globalForPg = globalThis as unknown as {
@@ -8,7 +7,8 @@ const globalForPg = globalThis as unknown as {
   __dbInitPromise?: Promise<void>;
 };
 
-const pool =
+// 具名导出供 harness 注入面（checkpointer / SqlExecutor）复用同一连接池
+export const pool =
   globalForPg.__pgPool ??
   new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -43,36 +43,6 @@ export const query = async (text: string, params?: any[] | ChatMessageType | Cha
     client.release();
   }
 };
-
-let checkpointer: PostgresSaver | null = null;
-let checkpointerSetupPromise: Promise<void> | null = null;
-
-const globalForCheckpointer = globalThis as unknown as {
-  __checkpointer?: PostgresSaver;
-  __checkpointerSetupPromise?: Promise<void>;
-};
-
-export async function getCheckpointer() {
-  if (!checkpointer) {
-    checkpointer =
-      globalForCheckpointer.__checkpointer ??
-      PostgresSaver.fromConnString(process.env.DATABASE_URL!);
-    if (process.env.NODE_ENV !== 'production') {
-      globalForCheckpointer.__checkpointer = checkpointer;
-    }
-  }
-
-  if (!checkpointerSetupPromise) {
-    checkpointerSetupPromise =
-      globalForCheckpointer.__checkpointerSetupPromise ?? checkpointer.setup();
-    if (process.env.NODE_ENV !== 'production') {
-      globalForCheckpointer.__checkpointerSetupPromise = checkpointerSetupPromise;
-    }
-  }
-  await checkpointerSetupPromise;
-
-  return checkpointer;
-}
 
 export const getClient = async () => {
   const client = await pool.connect();

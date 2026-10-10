@@ -1,9 +1,10 @@
 /**
  * chat_session 表 —— 会话（对话侧栏项）域类型与 Store 契约。
  *
- * ⚠️ 本 store 不是该表的唯一读写入口：harness 的 TitleMiddleware（title-middleware）
- * 会绕过本 store 直接读（left join threads_meta）写（update chat_session set title）
- * 该表 —— 修改表结构时必须同步检查那一处 SQL。
+ * ⚠️ 本 store 不是该表的唯一读写入口：harness 的 TitleMiddleware 经
+ * backend/harness-adapters/title-store.ts 绕过本 store 直接读（left join
+ * threads_meta）写（update chat_session set title）该表 —— 修改表结构时
+ * 必须同步检查那一处 SQL。
  */
 
 import type { SqlExecutor } from '../shared';

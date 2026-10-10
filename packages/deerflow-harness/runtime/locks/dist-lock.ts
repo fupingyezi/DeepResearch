@@ -5,15 +5,14 @@
  * 进程崩溃后的兜底回收，不做续期；临界区变长应该拆细，而不是给锁加续期循环。
  * 释放必须校验 token：TTL 过期后他人可能已拿上同一把锁，裸 DEL 会误删别人的锁。
  *
- * Redis 降级语义与 run-registry / docker-coordinator 一致：REDIS_URL 未配置、
- * 连接失败、任一操作失败 → 永久降级进程内实现（只告警一次）。降级后单进程
- * 内互斥仍正确，跨进程互斥失效。
+ * Redis 降级语义与 run-registry / docker-coordinator 一致：RedisClientFactory
+ * 未注册（宿主未配置 Redis）、连接失败、任一操作失败 → 永久降级进程内实现
+ * （只告警一次）。降级后单进程内互斥仍正确，跨进程互斥失效。
  */
 
 import { randomUUID } from 'node:crypto';
-import { createClient } from 'redis';
 
-type RedisClient = ReturnType<typeof createClient>;
+import { getRedisClientFactory, type RedisClient } from '../coordination/redis-client-factory';
 
 const LOG = '[dist-lock]';
 
@@ -107,8 +106,8 @@ export class RedisDistLock implements DistLock {
   private async ensureClient(): Promise<RedisClient | null> {
     if (this.degraded) return null;
     if (this.connected && this.client) return this.client;
-    if (!process.env.REDIS_URL) {
-      this.enterDegraded('REDIS_URL 未配置');
+    if (!getRedisClientFactory()) {
+      this.enterDegraded('RedisClientFactory 未注册（宿主未配置 Redis）');
       return null;
     }
     if (!this.connecting) {
@@ -119,8 +118,7 @@ export class RedisDistLock implements DistLock {
 
   private async connect(): Promise<RedisClient | null> {
     try {
-      const client = createClient({
-        url: process.env.REDIS_URL,
+      const client = await getRedisClientFactory()!({
         socket: {
           keepAlive: true,
           connectTimeout: 10_000,
@@ -163,10 +161,10 @@ export class RedisDistLock implements DistLock {
 
 let _instance: DistLock | null = null;
 
-/** 模块级懒单例：配置了 REDIS_URL 用 Redis 锁（连接失败自降级），否则进程内锁。 */
+/** 模块级懒单例：RedisClientFactory 已注册用 Redis 锁（连接失败自降级），否则进程内锁。 */
 export function getDistLock(): DistLock {
   if (_instance) return _instance;
-  _instance = process.env.REDIS_URL ? new RedisDistLock() : new InMemoryDistLock();
+  _instance = getRedisClientFactory() ? new RedisDistLock() : new InMemoryDistLock();
   return _instance;
 }
 

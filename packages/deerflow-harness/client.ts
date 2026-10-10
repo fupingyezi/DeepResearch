@@ -20,7 +20,7 @@ import { buildThreadConfig } from './runtime/checkpointer';
 import { getContext } from './runtime/context';
 import { loadMcpTools, getEnabledMcpSignature, buildMcpToolsSection } from './extensions/mcp';
 import { getEnabledSkillsSignature } from './extensions/skills';
-import { extractMessageContentText } from '@/utils/common';
+import { extractMessageContentText } from './utils/common';
 import {
   buildHumanMessageContent,
   extractContentTextBlocks,

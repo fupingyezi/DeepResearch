@@ -43,11 +43,9 @@ const ALL_EVENT_TYPES = Object.values(ClientAgentEventType) as ClientAgentEventT
  * buffer 上限（条）。超限时丢弃最旧的非关键帧，防止超长运行线程的内存无界膨胀。
  * 触发条件：单 run 事件数超过上限；后果：晚订阅回放只能拿到裁剪后的尾部历史；
  * 对策：关键帧（START/ERROR/END/HUMAN_INTERRUPT）永不丢弃，保证回放语义完整。
+ * 默认 2000，宿主可经构造 options.bufferMax 覆盖（env 解析归宿主 wiring）。
  */
-const DEFAULT_BUFFER_MAX = (() => {
-  const raw = Number(process.env.STREAM_BRIDGE_BUFFER_MAX);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
-})();
+const DEFAULT_BUFFER_MAX = 2000;
 
 /** 关键帧：影响订阅/回放语义，裁剪时必须保留。 */
 const CRITICAL_EVENT_TYPES = new Set<ClientAgentEventType>([
@@ -216,7 +214,10 @@ export class ThreadChannel<T> extends EventEmitter<ChannelEventMap<T>> {
 export class StreamBridge<T> {
   private readonly channels = new Map<string, ThreadChannel<T>>();
 
-  constructor(private readonly eventNameOf: (payload: T) => ClientAgentEventType) {}
+  constructor(
+    private readonly eventNameOf: (payload: T) => ClientAgentEventType,
+    private readonly options?: { bufferMax?: number },
+  ) {}
 
   private static key(threadId: string, runId: string): string {
     return `${threadId}:${runId}`;
@@ -226,7 +227,7 @@ export class StreamBridge<T> {
     const k = StreamBridge.key(threadId, runId);
     let ch = this.channels.get(k);
     if (!ch) {
-      ch = new ThreadChannel(threadId, runId, this.eventNameOf);
+      ch = new ThreadChannel(threadId, runId, this.eventNameOf, this.options);
       this.channels.set(k, ch);
     }
     return ch;

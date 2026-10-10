@@ -2,9 +2,9 @@
  * PgRunStore —— Postgres 版 RunStore 实现
  */
 
-import { query } from '@/lib/db';
 import type { Run, RunCreateInput, RunListOptions, RunStatus, RunStore } from './types';
-import { toIso } from '@/utils/common';
+import type { SqlExecutor } from '../sql';
+import { toIso } from '../../utils/common';
 
 const ALLOWED_STATUS = new Set<RunStatus>([
   'pending',
@@ -39,6 +39,8 @@ const rowToRun = (r: RunRow): Run => ({
 });
 
 export class PgRunStore implements RunStore {
+  constructor(private readonly sql: SqlExecutor) {}
+
   async create(input: RunCreateInput): Promise<Run> {
     const sql = `
       insert into runs
@@ -53,24 +55,23 @@ export class PgRunStore implements RunStore {
       input.user_id ?? null,
       JSON.stringify(input.input ?? null),
     ];
-    const res = await query(sql, params);
-    return rowToRun(res.rows[0] as RunRow);
+    const res = await this.sql.query(sql, params);
+    return rowToRun(res.rows[0] as unknown as RunRow);
   }
 
   async setStatus(run_id: string, status: RunStatus, error?: string | null): Promise<void> {
     if (!ALLOWED_STATUS.has(status)) {
       throw new Error(`invalid run status: ${status}`);
     }
-    await query(`update runs set status = $1, error = $2, updated_at = now() where run_id = $3`, [
-      status,
-      error ?? null,
-      run_id,
-    ]);
+    await this.sql.query(
+      `update runs set status = $1, error = $2, updated_at = now() where run_id = $3`,
+      [status, error ?? null, run_id],
+    );
   }
 
   async get(run_id: string): Promise<Run | null> {
-    const res = await query(`select * from runs where run_id = $1`, [run_id]);
-    return res.rows.length ? rowToRun(res.rows[0] as RunRow) : null;
+    const res = await this.sql.query(`select * from runs where run_id = $1`, [run_id]);
+    return res.rows.length ? rowToRun(res.rows[0] as unknown as RunRow) : null;
   }
 
   async listByStatus(status: RunStatus, opts?: { limit?: number }): Promise<Run[]> {
@@ -78,11 +79,11 @@ export class PgRunStore implements RunStore {
       throw new Error(`invalid run status: ${status}`);
     }
     const limit = Math.max(1, Math.min(opts?.limit ?? 200, 1000));
-    const res = await query(
+    const res = await this.sql.query(
       `select * from runs where status = $1 order by created_at desc limit $2`,
       [status, limit],
     );
-    return (res.rows as RunRow[]).map(rowToRun);
+    return (res.rows as unknown as RunRow[]).map(rowToRun);
   }
 
   async listByThread(thread_id: string, opts?: RunListOptions): Promise<Run[]> {
@@ -110,7 +111,7 @@ export class PgRunStore implements RunStore {
       order by created_at desc
       limit $${limitIdx} offset $${offsetIdx}
     `;
-    const res = await query(sql, params);
-    return (res.rows as RunRow[]).map(rowToRun);
+    const res = await this.sql.query(sql, params);
+    return (res.rows as unknown as RunRow[]).map(rowToRun);
   }
 }

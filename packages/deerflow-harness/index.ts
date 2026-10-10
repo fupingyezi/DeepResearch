@@ -240,6 +240,8 @@ export {
   makeCheckpointer,
   type CheckpointerKind,
   type CheckpointerHandle,
+  type PostgresCheckpointerOptions,
+  type MakeCheckpointerOptions,
   type ThreadConfig,
 } from './runtime/checkpointer';
 
@@ -249,12 +251,19 @@ export { runWithContext, getContext, type RuntimeContext } from './runtime/conte
 // runtime/stream-bridge
 export { StreamBridge, ThreadChannel } from './runtime/stream-bridge';
 
-// runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）
+// runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）+ Redis 注入面
 export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/coordination/contracts';
 export { InMemoryRunRegistry } from './runtime/coordination/run-registry/in-memory';
 export { RedisRunRegistry } from './runtime/coordination/run-registry/redis';
 export { InMemoryRunEventBus } from './runtime/coordination/event-bus/in-memory';
 export { RedisEventBus } from './runtime/coordination/event-bus/redis';
+export {
+  setRedisClientFactory,
+  getRedisClientFactory,
+  type RedisClientFactory,
+  type RedisClientOptions,
+  type RedisClient,
+} from './runtime/coordination/redis-client-factory';
 
 // runtime/locks（互斥锁：进程内 / Redis 双实现）
 export {
@@ -302,3 +311,19 @@ export {
   type RunCreateInput,
   type RunListOptions,
 } from './persistence/runs';
+
+// persistence/sql —— 宿主注入的最小 SQL 执行面（单查询 + 事务）
+export type { SqlExecutor } from './persistence/sql';
+
+// 宿主注入面：标题存储 / 上传文件 / Tavily Key（实现归宿主，harness 只消费接口）
+export {
+  setTitleStoreProvider,
+  getTitleStoreProvider,
+  type TitleStoreProvider,
+} from './agents/middlewares/title-store';
+export {
+  setUploadedFilesProvider,
+  getUploadedFilesProvider,
+  type UploadedFilesProvider,
+} from './agents/middlewares/uploaded-files';
+export { setTavilyApiKey } from './tools/builtins/search-web-tool';

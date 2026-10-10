@@ -1,11 +1,10 @@
 /**
  * PgThreadMetaStore
  *
- * 安全：所有写入都走 `query(text, $1..$n)` 参数化 SQL；jsonb 字段通过
+ * 安全：所有写入都走 `this.sql.query(text, $1..$n)` 参数化 SQL；jsonb 字段通过
  * `::jsonb` 显式 cast；列名硬编码白名单，绝不拼字符串。
  */
 
-import { query } from '@/lib/db';
 import type {
   ThreadMeta,
   ThreadMetaCreateInput,
@@ -13,7 +12,8 @@ import type {
   ThreadMetaStore,
   ThreadStatus,
 } from './types';
-import { toIso } from '@/utils/common';
+import type { SqlExecutor } from '../sql';
+import { toIso } from '../../utils/common';
 
 const ALLOWED_STATUS = new Set<ThreadStatus>(['idle', 'running', 'error', 'interrupted']);
 
@@ -50,6 +50,8 @@ const rowToMeta = (r: ThreadMetaRow): ThreadMeta => ({
 });
 
 export class PgThreadMetaStore implements ThreadMetaStore {
+  constructor(private readonly sql: SqlExecutor) {}
+
   async create(input: ThreadMetaCreateInput): Promise<ThreadMeta> {
     const sql = `
       insert into threads_meta
@@ -64,8 +66,8 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       input.display_name ?? 'New thread',
       JSON.stringify(input.metadata ?? {}),
     ];
-    const res = await query(sql, params);
-    return rowToMeta(res.rows[0] as ThreadMetaRow);
+    const res = await this.sql.query(sql, params);
+    return rowToMeta(res.rows[0] as unknown as ThreadMetaRow);
   }
 
   async get(thread_id: string, opts?: { user_id?: string | null }): Promise<ThreadMeta | null> {
@@ -74,8 +76,8 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       ? `select * from threads_meta where thread_id = $1 and user_id = $2`
       : `select * from threads_meta where thread_id = $1`;
     const params = userId ? [thread_id, userId] : [thread_id];
-    const res = await query(sql, params);
-    return res.rows.length ? rowToMeta(res.rows[0] as ThreadMetaRow) : null;
+    const res = await this.sql.query(sql, params);
+    return res.rows.length ? rowToMeta(res.rows[0] as unknown as ThreadMetaRow) : null;
   }
 
   async search(opts: ThreadMetaSearchOptions): Promise<ThreadMeta[]> {
@@ -112,8 +114,8 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       limit $${limitIdx} offset $${offsetIdx}
     `;
 
-    const res = await query(sql, params);
-    return (res.rows as ThreadMetaRow[]).map(rowToMeta);
+    const res = await this.sql.query(sql, params);
+    return (res.rows as unknown as ThreadMetaRow[]).map(rowToMeta);
   }
 
   async updateDisplayName(
@@ -122,7 +124,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
     opts?: { user_id?: string | null },
   ): Promise<void> {
     await this.assertOwner(thread_id, opts?.user_id);
-    await query(
+    await this.sql.query(
       `update threads_meta set display_name = $1, updated_at = now() where thread_id = $2`,
       [name, thread_id],
     );
@@ -137,10 +139,10 @@ export class PgThreadMetaStore implements ThreadMetaStore {
       throw new Error(`invalid status: ${status}`);
     }
     await this.assertOwner(thread_id, opts?.user_id);
-    await query(`update threads_meta set status = $1, updated_at = now() where thread_id = $2`, [
-      status,
-      thread_id,
-    ]);
+    await this.sql.query(
+      `update threads_meta set status = $1, updated_at = now() where thread_id = $2`,
+      [status, thread_id],
+    );
   }
 
   async updateMetadata(
@@ -150,7 +152,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
   ): Promise<void> {
     await this.assertOwner(thread_id, opts?.user_id);
     // 利用 PG 的 jsonb 合并语义（||）：右侧覆盖左侧的同 key
-    await query(
+    await this.sql.query(
       `update threads_meta set metadata = metadata || $1::jsonb, updated_at = now() where thread_id = $2`,
       [JSON.stringify(patch ?? {}), thread_id],
     );
@@ -171,7 +173,7 @@ export class PgThreadMetaStore implements ThreadMetaStore {
 
   async delete(thread_id: string, opts?: { user_id?: string | null }): Promise<void> {
     await this.assertOwner(thread_id, opts?.user_id);
-    await query(`delete from threads_meta where thread_id = $1`, [thread_id]);
+    await this.sql.query(`delete from threads_meta where thread_id = $1`, [thread_id]);
   }
 
   private async assertOwner(thread_id: string, user_id?: string | null): Promise<void> {

@@ -13,11 +13,9 @@
  *   连接中断退避后以同一游标重发——XREAD 幂等，断点续读不丢不重
  * - 无 END 的悬挂流（owner 崩溃）本实现不终止订阅，由重连路由按 runs 终态补尾
  *
- * 降级语义：REDIS_URL 未配置 / 连接失败 / 操作失败 → 永久降级进程内实现
- * （只告警一次）。降级后单进程内语义完整，跨进程回放失效。
+ * 降级语义：RedisClientFactory 未注册（宿主未配置 Redis）/ 连接失败 / 操作失败
+ * → 永久降级进程内实现（只告警一次）。降级后单进程内语义完整，跨进程回放失效。
  */
-
-import { createClient } from 'redis';
 
 import {
   ClientAgentEventType,
@@ -25,9 +23,8 @@ import {
   type StampedClientAgentEvent,
 } from '../../sse/client-event';
 import type { RunEventBus } from '../contracts';
+import { getRedisClientFactory, type RedisClient } from '../redis-client-factory';
 import { InMemoryRunEventBus } from './in-memory';
-
-type RedisClient = ReturnType<typeof createClient>;
 
 const LOG = '[event-bus]';
 
@@ -39,10 +36,8 @@ const XREAD_COUNT = 64;
 /** 游标形态：XADD 自增 id（`{毫秒}-{序号}`）；非法游标按全量回放。 */
 const CURSOR_RE = /^\d+-\d+$/;
 
-const DEFAULT_MAXLEN = (() => {
-  const raw = Number(process.env.STREAM_BRIDGE_BUFFER_MAX);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
-})();
+/** 默认流长上限：与进程内 buffer 上限对齐；宿主可经构造 options.maxlen 覆盖。 */
+const DEFAULT_MAXLEN = 2000;
 
 const streamKeyOf = (threadId: string, runId: string): string =>
   `${STREAM_KEY_PREFIX}${threadId}:${runId}`;
@@ -55,7 +50,7 @@ export class RedisEventBus implements RunEventBus {
   private connected = false;
   private degraded = false;
   private degradeWarned = false;
-  private readonly fallback = new InMemoryRunEventBus();
+  private readonly fallback: InMemoryRunEventBus;
   private readonly maxlen: number;
   private readonly blockMs: number;
 
@@ -66,6 +61,8 @@ export class RedisEventBus implements RunEventBus {
     }
     this.maxlen = options?.maxlen ?? DEFAULT_MAXLEN;
     this.blockMs = options?.blockMs ?? 5000;
+    // 降级路径的进程内 bus 与 redis 流长同一上限（宿主 STREAM_BRIDGE_BUFFER_MAX）
+    this.fallback = new InMemoryRunEventBus(undefined, { bufferMax: this.maxlen });
   }
 
   async ready(): Promise<void> {
@@ -246,14 +243,14 @@ export class RedisEventBus implements RunEventBus {
   }
 
   /**
-   * 懒连接 Redis。REDIS_URL 未配置或连接失败时返回 null（走进程内降级）。
-   * 首次降级打印一次告警，避免刷屏。
+   * 懒连接 Redis。工厂未注册（宿主未配置 Redis）或连接失败时返回 null（走进程内
+   * 降级）。首次降级打印一次告警，避免刷屏。
    */
   private async ensureClient(): Promise<RedisClient | null> {
     if (this.degraded) return null;
     if (this.connected && this.client) return this.client;
-    if (!process.env.REDIS_URL) {
-      this.enterDegraded('REDIS_URL 未配置');
+    if (!getRedisClientFactory()) {
+      this.enterDegraded('RedisClientFactory 未注册（宿主未配置 Redis）');
       return null;
     }
     if (!this.connecting) {
@@ -264,8 +261,7 @@ export class RedisEventBus implements RunEventBus {
 
   private async connect(): Promise<RedisClient | null> {
     try {
-      const client = createClient({
-        url: process.env.REDIS_URL,
+      const client = await getRedisClientFactory()!({
         socket: {
           keepAlive: true,
           connectTimeout: 10_000,

@@ -15,7 +15,7 @@
  * 不写任何状态、不动 buildSubagentStreamConfig。
  */
 
-import { extractMessageContentText } from '@/utils/common';
+import { extractMessageContentText } from '../utils/common';
 
 /**
  * 由 app 层注册（checkpointer.getTuple 实现）；未注册时子 agent 不带父历史运行。

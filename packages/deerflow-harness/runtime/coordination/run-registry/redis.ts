@@ -11,23 +11,20 @@
  * - `deerflow:run:cancel`：Pub/Sub 频道 —— 取消请求广播，各进程订阅后查本地
  *   句柄表，owner 才真正 abort。node-redis 断线重连后自动重新订阅。
  *
- * 降级语义：REDIS_URL 未配置 / 连接失败 / 任一操作失败 → 永久降级为进程内
- * 实现（只告警一次）。降级后单进程内语义仍完整（取消直接回调 handler），
- * 跨进程协调失效（多进程部署下变为尽力而为）。
+ * 降级语义：RedisClientFactory 未注册（宿主未配置 Redis）/ 连接失败 / 任一操作
+ * 失败 → 永久降级为进程内实现（只告警一次）。降级后单进程内语义仍完整（取消
+ * 直接回调 handler），跨进程协调失效（多进程部署下变为尽力而为）。
  *
  * requestCancel 返回「投递数」而非「命中数」：跨进程无法同步拿到远端 handler
  * 回报，owner 登记存在且消息已发布即计 1（僵尸 owner 留下的悬挂登记由 TTL 兜底）。
  * 短窗口去重（SET NX）：同一 run 的重复取消请求只广播一次，重复点击停止返回 0。
  */
 
-import { createClient } from 'redis';
-
 import type { RunOwnerInfo, RunRegistry } from '../contracts';
 import { InMemoryRunRegistry } from './in-memory';
+import { getRedisClientFactory, type RedisClient } from '../redis-client-factory';
 import { getInstanceOwner } from '../../lifecycle/instance-id';
 import { OWNER_DEAD_AFTER_MS } from '../../lifecycle/liveness';
-
-type RedisClient = ReturnType<typeof createClient>;
 
 const LOG = '[run-registry]';
 
@@ -264,14 +261,14 @@ export class RedisRunRegistry implements RunRegistry {
   }
 
   /**
-   * 懒连接 Redis。REDIS_URL 未配置或连接失败时返回 null（走进程内降级）。
-   * 首次降级打印一次告警，避免刷屏。
+   * 懒连接 Redis。工厂未注册（宿主未配置 Redis）或连接失败时返回 null（走进程内
+   * 降级）。首次降级打印一次告警，避免刷屏。
    */
   private async ensureClient(): Promise<RedisClient | null> {
     if (this.degraded) return null;
     if (this.connected && this.client) return this.client;
-    if (!process.env.REDIS_URL) {
-      this.enterDegraded('REDIS_URL 未配置');
+    if (!getRedisClientFactory()) {
+      this.enterDegraded('RedisClientFactory 未注册（宿主未配置 Redis）');
       return null;
     }
     if (!this.connecting) {
@@ -282,8 +279,7 @@ export class RedisRunRegistry implements RunRegistry {
 
   private async connect(): Promise<RedisClient | null> {
     try {
-      const client = createClient({
-        url: process.env.REDIS_URL,
+      const client = await getRedisClientFactory()!({
         socket: {
           keepAlive: true,
           connectTimeout: 10_000,

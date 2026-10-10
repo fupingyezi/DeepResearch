@@ -5,9 +5,9 @@ import type { SqlExecutor } from '../shared';
 /**
  * file_metadata 表 —— 消息与上传文件的关联元信息。
  *
- * ⚠️ 本 store 不是该表的唯一读写入口：harness 的 thread-data-middleware 会绕过本
- * store 直接读该表（按 thread_id 查询装载 uploadedFiles），修改表结构时必须同步
- * 检查那一处 SQL。
+ * ⚠️ 本 store 不是该表的唯一读写入口：harness 的 thread-data-middleware 经
+ * backend/harness-adapters/uploaded-files.ts 绕过本 store 直接读该表（按
+ * thread_id 查询装载 uploadedFiles），修改表结构时必须同步检查那一处 SQL。
  */
 
 /** 已上传文件的最小元信息（chat 落库 / history 加载共用的单一出处）。 */

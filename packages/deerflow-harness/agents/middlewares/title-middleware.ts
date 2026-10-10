@@ -2,9 +2,9 @@ import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/m
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createMiddleware } from 'langchain';
 
-import { query } from '@/lib/db';
 import { getContext } from '../../runtime/context';
 import { publishTitleUpdate } from './title-bus';
+import { getTitleStoreProvider, type TitleStoreProvider } from './title-store';
 
 /**
  * TitleMiddleware（features.autoTitle 启用）
@@ -23,8 +23,11 @@ import { publishTitleUpdate } from './title-bus';
  * LLM 模型：
  * - 通过 `setTitleModelFactory` 注入（同 memory 子系统模式）。app 层（src/server/wiring.ts）
  *   调用一次 `setTitleModelFactory(modelName => createChatModel(buildModelConfigFromPreset(...)))`，
- * - `TITLE_MODEL` env 用作"模型名 hint"传给 factory（factory 自行决定如何映射，
- *   通常是 preset key 或 modelName）；缺省时 factory 走默认 preset。
+ *   modelName hint 传 null——宿主工厂自行按 env（TITLE_MODEL）决定缺省模型。
+ *
+ * 标题落库：
+ * - 通过 `setTitleStoreProvider` 注入（app 层实现，直写 chat_session + threads_meta
+ *   两表）；未注入时整体跳过生成（warn 一次）。
  *
  * 错误隔离：整段 try/catch，任何异常仅 `console.error`，不影响主流程。
  */
@@ -72,7 +75,7 @@ let titleModelInstance: BaseChatModel | null = null;
 /**
  * lazy 单例：title 生成模型独立于 agent 主模型，整个进程共享一份连接。
  * - factory 未注册：返回 null（首次 warn 一次），调用方据此跳过 LLM 调用。
- * - factory 已注册：用 `process.env.TITLE_MODEL` 作为 hint 传给 factory。
+ * - factory 已注册：hint 传 null，缺省模型由宿主工厂决定（如 TITLE_MODEL env）。
  */
 function getTitleModel(): BaseChatModel | null {
   if (titleModelInstance) return titleModelInstance;
@@ -88,8 +91,7 @@ function getTitleModel(): BaseChatModel | null {
     return null;
   }
   try {
-    const modelName = process.env.TITLE_MODEL ?? null;
-    titleModelInstance = factory(modelName);
+    titleModelInstance = factory(null);
     return titleModelInstance;
   } catch (e) {
     console.error('[titleMiddleware] TitleModelFactory threw:', e);
@@ -100,9 +102,9 @@ function getTitleModel(): BaseChatModel | null {
 let enhanceModelInstance: BaseChatModel | null = null;
 
 /**
- * 提示词增强模型：复用标题生成的模型入口（同一 factory + TITLE_MODEL hint，
- * 即同一条"副链路小模型"），仅放宽 maxTokens / temperature 以适配长文本改写。
- * 与 title 单例分开缓存：两者采样参数不同，互不影响。
+ * 提示词增强模型：复用标题生成的模型入口（同一 factory，即同一条"副链路小模型"），
+ * 仅放宽 maxTokens / temperature 以适配长文本改写。与 title 单例分开缓存：
+ * 两者采样参数不同，互不影响。
  */
 export function getPromptEnhanceModel(): BaseChatModel | null {
   if (enhanceModelInstance) return enhanceModelInstance;
@@ -118,8 +120,7 @@ export function getPromptEnhanceModel(): BaseChatModel | null {
     return null;
   }
   try {
-    const modelName = process.env.TITLE_MODEL ?? null;
-    enhanceModelInstance = factory(modelName, { maxTokens: 2048, temperature: 0.5 });
+    enhanceModelInstance = factory(null, { maxTokens: 2048, temperature: 0.5 });
     return enhanceModelInstance;
   } catch (e) {
     console.error('[promptEnhance] TitleModelFactory threw:', e);
@@ -296,23 +297,25 @@ function isPlaceholder(value: string | null | undefined, userSnippet: string): b
   return false;
 }
 
+let warnedNoTitleStore = false;
+
+/** 标题落库 provider（app 层注入）；未注入时返回 null 并 warn 一次。 */
+function getTitleStoreOrWarn(): TitleStoreProvider | null {
+  const provider = getTitleStoreProvider();
+  if (!provider && !warnedNoTitleStore) {
+    console.warn(
+      '[titleMiddleware] no TitleStoreProvider registered; title persistence skipped. ' +
+        'Call setTitleStoreProvider() at app bootstrap.',
+    );
+    warnedNoTitleStore = true;
+  }
+  return provider;
+}
+
 async function loadCurrentTitle(threadId: string): Promise<TitleConfigRow | null> {
-  // chat_session 与 threads_meta 都按 id = threadId 主键查询；left join 以兼容
-  // 仅在其中一边存在的 race（理论上 v3/chat 路由两边都会创建）。
-  const res = await query(
-    `select cs.title as title, tm.display_name as display_name
-       from threads_meta tm
-       left join chat_session cs on cs.id = tm.thread_id
-      where tm.thread_id = $1
-      limit 1;`,
-    [threadId],
-  );
-  const row = res.rows?.[0] as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    title: row.title == null ? null : String(row.title),
-    display_name: row.display_name == null ? null : String(row.display_name),
-  };
+  const provider = getTitleStoreOrWarn();
+  if (!provider) return null;
+  return provider.loadCurrentTitle(threadId);
 }
 
 async function invokeTitleLlm(model: BaseChatModel, firstUserText: string): Promise<string> {
@@ -372,23 +375,7 @@ function sanitizeTitle(raw: string): string {
 }
 
 async function persistTitle(threadId: string, title: string): Promise<void> {
-  // 两条独立 query，任一失败仅 console.error，不阻塞另一条。
-  // chat_session 是前端 sider 列表数据源；threads_meta 是 deerflow-harness 的
-  // 元信息表，未来 deer-flow 风格 worker 收尾或 ownership 校验也会用到。
-  try {
-    await query(`update chat_session set title = $1, updated_at = now() where id = $2;`, [
-      title,
-      threadId,
-    ]);
-  } catch (e) {
-    console.error('[titleMiddleware] update chat_session.title failed:', e);
-  }
-  try {
-    await query(
-      `update threads_meta set display_name = $1, updated_at = now() where thread_id = $2;`,
-      [title, threadId],
-    );
-  } catch (e) {
-    console.error('[titleMiddleware] update threads_meta.display_name failed:', e);
-  }
+  const provider = getTitleStoreOrWarn();
+  if (!provider) return;
+  await provider.persistTitle(threadId, title);
 }

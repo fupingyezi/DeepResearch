@@ -274,7 +274,7 @@ export function formatMemoryForInjection(
 
 // formatConversationForUpdate
 
-import { extractMessageContentText } from '@/utils/common';
+import { extractMessageContentText } from '../../utils/common';
 
 const UPLOAD_BLOCK_RE = /<uploaded_files>[\s\S]*?<\/uploaded_files>\n*/gi;
 

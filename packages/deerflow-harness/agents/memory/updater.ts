@@ -28,7 +28,7 @@ import {
   SectionData,
   utcNowIsoZ,
 } from './types';
-import { casefold, extractMessageContentText } from '@/utils/common';
+import { casefold, extractMessageContentText } from '../../utils/common';
 
 // Model factory injection
 export type MemoryModelFactory = (modelName: string | null | undefined) => BaseChatModel;

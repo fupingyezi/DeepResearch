@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisEventBus } from '../redis';
+import { setRedisClientFactory } from '../../redis-client-factory';
 import {
   ClientAgentEventType,
   createClientAgentEvent,
@@ -387,10 +388,9 @@ describe('RedisEventBus（假客户端）', () => {
     warn.mockRestore();
   });
 
-  it('未配置 REDIS_URL 且未注入客户端 → 直接降级兜底，不尝试连接', async () => {
+  it('RedisClientFactory 未注册且未注入客户端 → 直接降级兜底，不尝试连接', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const saved = process.env.REDIS_URL;
-    delete process.env.REDIS_URL;
+    setRedisClientFactory(null); // 显式清空：防集成套件同池残留注册
     try {
       const bus = new RedisEventBus();
       expect(bus.isDistributed()).toBe(false);
@@ -398,9 +398,10 @@ describe('RedisEventBus（假客户端）', () => {
       await bus.publish('t', 'r', end());
       const stamped = await collectAll(bus.subscribe('t', 'r'));
       expect(chunkTexts(stamped)).toEqual(['a']);
-      expect(warn.mock.calls.some(([msg]) => String(msg).includes('REDIS_URL 未配置'))).toBe(true);
+      expect(
+        warn.mock.calls.some(([msg]) => String(msg).includes('RedisClientFactory 未注册')),
+      ).toBe(true);
     } finally {
-      if (saved !== undefined) process.env.REDIS_URL = saved;
       warn.mockRestore();
     }
   });

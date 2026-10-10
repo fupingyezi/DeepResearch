@@ -10,20 +10,13 @@
 
 import { createEmptyMemory } from './types';
 import type { MemoryData } from './types';
+import type { SqlExecutor } from '../../persistence/sql';
 
 /**
- * harness 侧的最小 SQL 接口（query + transaction），由 app 层包装 @/lib/db 的
- * 连接池注入（模式同 checkpointer/factory）。harness 不反向依赖 app 层，
- * 也不依赖 pg 驱动的具体类型。
+ * 过渡期别名：SQL 最小接口统一收编到 persistence/sql.ts 的 SqlExecutor。
+ * 存量消费者（wiring）可直接换用 SqlExecutor，此导出保留至迁移完成。
  */
-export interface MemorySqlExecutor {
-  query(
-    text: string,
-    params?: unknown[],
-  ): Promise<{ rows: Record<string, unknown>[]; rowCount?: number | null }>;
-  /** BEGIN/COMMIT/ROLLBACK 语义；fn 抛错时自动回滚并原样上抛。不支持嵌套。 */
-  transaction<T>(fn: (tx: MemorySqlExecutor) => Promise<T>): Promise<T>;
-}
+export type MemorySqlExecutor = SqlExecutor;
 
 /** pgvector 向量召回结果（按余弦相似度降序）。 */
 export interface VectorSearchResult {

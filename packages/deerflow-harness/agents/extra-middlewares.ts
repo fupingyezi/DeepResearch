@@ -9,8 +9,8 @@ import { resolveMiddlewareAnchor, anchorDisplayName, middlewareDisplayName } fro
  *
  * 用法：
  * ```ts
- * import { Next, registerExtraMiddleware } from '@/deerflow-harness';
- * import { toolErrorHandlingMiddleware } from '@/deerflow-harness/agents/middlewares';
+ * import { Next, registerExtraMiddleware } from '@deerflow/harness';
+ * import { toolErrorHandlingMiddleware } from '@deerflow/harness/agents/middlewares';
  *
  * const audit = createMiddleware({ name: 'AuditMiddleware', ...hooks });
  * registerExtraMiddleware(audit);                                  // lead + subagent

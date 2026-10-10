@@ -28,16 +28,23 @@ import {
   setMemoryRerankerFactory,
   setMemoryStorage,
   setParentHistoryProvider,
+  setRedisClientFactory,
+  setTavilyApiKey,
   setThreadImageFetcher,
   setTitleModelFactory,
-  type MemorySqlExecutor,
+  setTitleStoreProvider,
+  setUploadedFilesProvider,
+  type SqlExecutor,
   type ThreadService,
   type ModelConfig,
 } from '@deerflow-harness';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { getClient, initialMemoryDb, query } from '@/lib/db';
+import { createClient } from 'redis';
+import { getClient, initialMemoryDb, pool, query } from '@/lib/db';
 import { getFile, getMimeType } from '@/lib/storage';
 import { createZhipuReranker } from '@/lib/zhipu-rerank';
+import { titleStoreProvider } from '@/backend/harness-adapters/title-store';
+import { uploadedFilesProvider } from '@/backend/harness-adapters/uploaded-files';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,
@@ -105,12 +112,15 @@ function ensureMemoryModelFactory(): void {
 export function ensureTitleModelFactory(): void {
   if (titleFactoryRegistered) return;
   setTitleModelFactory((modelName, options) => {
+    // harness 侧不再读 TITLE_MODEL env（middleware 恒传 null hint），
+    // env 缺省在这里解析：预设键命中优先，其次视为 modelName，否则默认 preset。
+    const hint = modelName ?? process.env.TITLE_MODEL ?? null;
     let base: ModelConfig;
-    if (modelName && MODEL_PRESETS[modelName as ModelPresetName]) {
-      base = buildModelConfigFromPreset(modelName as ModelPresetName);
-    } else if (modelName) {
+    if (hint && MODEL_PRESETS[hint as ModelPresetName]) {
+      base = buildModelConfigFromPreset(hint as ModelPresetName);
+    } else if (hint) {
       const fallback = resolveModelConfig();
-      base = { ...fallback, modelName };
+      base = { ...fallback, modelName: hint };
     } else {
       base = resolveModelConfig();
     }
@@ -193,17 +203,17 @@ export function ensureMemoryRerankerFactory(): void {
 
 /**
  * 把 lib/db 的连接池包装成 harness 的最小 SQL 接口（query + transaction），
- * 供 PgMemoryStorage 使用。transaction 语义：fn 抛错 → ROLLBACK 后原样上抛；
- * 不支持嵌套（记忆存储不嵌套事务，显式抛错防误用）。
+ * 供 PgMemoryStorage / PgThreadMetaStore / PgRunStore 复用。transaction 语义：
+ * fn 抛错 → ROLLBACK 后原样上抛；不支持嵌套（显式抛错防误用）。
  */
-function makeMemorySqlExecutor(): MemorySqlExecutor {
-  const txExecutor = (client: Awaited<ReturnType<typeof getClient>>): MemorySqlExecutor => ({
+function makePoolSqlExecutor(): SqlExecutor {
+  const txExecutor = (client: Awaited<ReturnType<typeof getClient>>): SqlExecutor => ({
     query: async (text, params) => {
       const result = await client.query(text, (params ?? []) as any[]);
       return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount };
     },
     transaction: async () => {
-      throw new Error('[wiring] nested memory transactions are not supported');
+      throw new Error('[wiring] nested transactions are not supported');
     },
   });
   return {
@@ -257,7 +267,7 @@ export async function ensureMemoryStorage(): Promise<void> {
       const { embeddingDimensions } = getMemoryConfig();
       const init = await initialMemoryDb(embeddingDimensions);
       if (init.ok) {
-        setMemoryStorage(new PgMemoryStorage(makeMemorySqlExecutor()));
+        setMemoryStorage(new PgMemoryStorage(makePoolSqlExecutor()));
       } else {
         console.warn(`[wiring] pgvector unavailable, memory disabled: ${init.reason}`);
       }
@@ -341,7 +351,26 @@ function getDefaultModelConfig(): ModelConfig {
 }
 
 async function build(): Promise<ThreadService> {
-  const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres' });
+  const { saver: checkpointer } = await makeCheckpointer({ kind: 'postgres', postgres: { pool } });
+
+  // harness 注入面（host → SDK 依赖方向）：标题存储 / 上传文件读取 / Redis 连接 /
+  // Tavily Key 全部由 app 侧提供，harness 不读宿主 env、不碰宿主 DB。
+  setTitleStoreProvider(titleStoreProvider);
+  setUploadedFilesProvider(uploadedFilesProvider);
+  // 工厂按 REDIS_URL 存在与否注册：未注册 = 宿主未配置 Redis，harness 的
+  // 跨进程组件（event-bus / run-registry / dist-lock / docker-coordinator）
+  // 据此走「未配置」降级路径（与旧版组件自读 REDIS_URL 的语义一致）
+  const redisEnabled = Boolean(process.env.REDIS_URL);
+  if (redisEnabled) {
+    setRedisClientFactory((opts) => createClient({ url: process.env.REDIS_URL, ...opts }));
+  }
+  setTavilyApiKey(process.env.TAVILY_API_KEY);
+
+  // 事件缓冲上限：env 解析归宿主，harness 侧只有常量默认（2000）
+  const bufferMax = (() => {
+    const raw = Number(process.env.STREAM_BRIDGE_BUFFER_MAX);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+  })();
 
   // 记忆存储后端：pgvector 就绪则切 PG（含旧文件懒迁移），否则保留文件后端
   await ensureMemoryStorage();
@@ -398,17 +427,20 @@ async function build(): Promise<ThreadService> {
     return next;
   };
 
-  // REDIS_URL 配置时用跨进程登记表（连接失败自降级进程内、只告警一次），
-  // 未配置直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点。
-  // 事件总线同口径：Redis Stream 回放 / 断点续读，否则进程内 buffer 回放。
-  const registry = process.env.REDIS_URL ? new RedisRunRegistry() : new InMemoryRunRegistry();
-  const eventBus = process.env.REDIS_URL ? new RedisEventBus() : new InMemoryRunEventBus();
+  // redisEnabled 时用跨进程登记表（连接失败自降级进程内、只告警一次），
+  // 否则直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点。
+  // 事件总线同口径：Redis Stream 回放 / 断点续读，否则进程内 buffer 回放；
+  // bufferMax 同步两实现（redis 流长与进程内 buffer 同一上限）。
+  const registry = redisEnabled ? new RedisRunRegistry() : new InMemoryRunRegistry();
+  const eventBus = redisEnabled
+    ? new RedisEventBus({ maxlen: bufferMax })
+    : new InMemoryRunEventBus(undefined, { bufferMax });
 
   return createThreadService({
     client,
     checkpointer,
-    threads: new PgThreadMetaStore(),
-    runs: new PgRunStore(),
+    threads: new PgThreadMetaStore(makePoolSqlExecutor()),
+    runs: new PgRunStore(makePoolSqlExecutor()),
     createClientForModel,
     registry,
     eventBus,
@@ -437,6 +469,6 @@ export async function getThreadService(): Promise<ThreadService> {
 let runStore: PgRunStore | null = null;
 
 export function getRunStore(): PgRunStore {
-  if (!runStore) runStore = new PgRunStore();
+  if (!runStore) runStore = new PgRunStore(makePoolSqlExecutor());
   return runStore;
 }

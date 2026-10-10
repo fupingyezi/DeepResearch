@@ -1,7 +1,8 @@
-import { afterAll, describe } from 'vitest';
+import { afterAll, beforeAll, describe } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisRunRegistry } from '../redis';
+import { setRedisClientFactory } from '../../redis-client-factory';
 import { describeRunRegistryContract } from '../../../__tests__/helpers/contract-cases';
 
 /**
@@ -27,6 +28,12 @@ const hasRedis = await (async (): Promise<boolean> => {
 
 const created: RedisRunRegistry[] = [];
 
+beforeAll(() => {
+  if (!hasRedis) return;
+  // 生产组件经工厂取连接：注册 url 注入，socket 选项由组件自带
+  setRedisClientFactory((opts) => createClient({ url: process.env.REDIS_URL, ...opts }));
+});
+
 describe.skipIf(!hasRedis)('RunRegistry 契约一致性：RedisRunRegistry（集成）', () => {
   describeRunRegistryContract({
     name: 'RedisRunRegistry',
@@ -40,6 +47,7 @@ describe.skipIf(!hasRedis)('RunRegistry 契约一致性：RedisRunRegistry（集
 });
 
 afterAll(async () => {
+  setRedisClientFactory(null);
   await Promise.all(created.map((r) => r.close().catch(() => undefined)));
   // 清理用例写入的登记键（残留有 TTL 兜底，主动清理避免污染本机开发库）
   try {
