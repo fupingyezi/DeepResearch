@@ -281,7 +281,7 @@ export async function ensureMemoryStorage(): Promise<void> {
 /**
  * 把「MinIO 图片字节读取器」注入给 vision 子系统（多模态 HumanMessage 构造）。
  *
- * 依赖方向约束：harness 层不反向依赖 app 层（MinIO 客户端在 src/lib/storage），
+ * 依赖方向约束：harness 层不反向依赖 app 层（MinIO 客户端在 src/backend/lib/storage），
  * 故由 app 层注入，模式对齐 setMemoryModelFactory / setTitleModelFactory。
  * 未注册 / minioKey 缺失 / 读取失败 → 返回 null，构造侧自动把该图降级为文本说明。
  */

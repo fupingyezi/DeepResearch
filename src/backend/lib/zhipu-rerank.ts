@@ -2,7 +2,7 @@
  * 智谱 rerank API 客户端（裸 fetch）。
  *
  * rerank 接口不是 OpenAI Chat 格式（openai SDK 用不上），直接裸 fetch——
- * 与图片 OCR 的 layout_parsing 裸 fetch 先例（src/lib/files/file-parser.ts）同一做法。
+ * 与图片 OCR 的 layout_parsing 裸 fetch 先例（src/backend/lib/files/file-parser.ts）同一做法。
  * 本适配层 fail-fast：非 2xx 抛错、分数按 index 对齐（缺失填 0）。
  * 降级在 harness 封装层（memory/rerank.ts）做，这里不吞错。
  *
