@@ -22,12 +22,12 @@
  */
 
 import type { NextRequest } from 'next/server';
-import type { UserRecord } from '@deerflow-harness/auth';
+import type { UserRecord } from '@/backend/auth';
 import type { ZodType } from 'zod';
 
 import { parseJsonBody, parseSearchParams, type ParseResult } from '@/server/validation';
 import { authenticateWithRefresh, setAuthCookies } from './auth';
-import type { TokenPair } from '@deerflow-harness/auth';
+import type { TokenPair } from '@/backend/auth';
 import { applyCorsHeaders, isOriginAllowed } from './cors';
 import { jsonError, toHttpError } from './errors';
 import { logHttpError, logHttpRequest } from './logger';

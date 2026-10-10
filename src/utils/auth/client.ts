@@ -4,7 +4,7 @@
  * 失败时抛出携带 code 的 AuthRequestError，调用方据 code/message 做文案提示。
  */
 
-import type { UserResponse } from '@deerflow-harness/auth/types';
+import type { UserResponse } from '@/types/auth';
 
 import { getApiBase } from '@/utils/request/base-url';
 

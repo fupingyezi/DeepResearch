@@ -14,7 +14,7 @@ import {
   getUserByEmail,
   getUserById,
   updateUser,
-} from './user-repository';
+} from '../repositories/user/user-repository';
 import type { SystemRole, UserRecord } from './types';
 
 function normalizeEmail(email: string): string {

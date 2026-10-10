@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { AuthErrorCode, validateStrongPassword } from '@deerflow-harness/auth';
+import { AuthErrorCode, validateStrongPassword } from '@/backend/auth';
 import { jsonError, withApiHandler } from '@/server/http';
 import { getAuthService } from '@/server/services/auth-service';
 import { resetPasswordSchema } from '@/server/validation/schemas';

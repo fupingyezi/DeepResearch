@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { AuthErrorCode, changePassword, validateStrongPassword } from '@deerflow-harness/auth';
+import { AuthErrorCode, changePassword, validateStrongPassword } from '@/backend/auth';
 import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';

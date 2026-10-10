@@ -4,7 +4,7 @@
  * 单一链路：按「当前登录用户」解析主聊天链路的 ModelConfig（用户自带 Key）。
  */
 
-import { getDecryptedKey, getSelectedModel } from '@deerflow-harness/auth';
+import { getDecryptedKey, getSelectedModel } from '@/backend/repositories/user-model-key';
 import { buildModelConfigForUser, MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import type { ModelConfig } from '@deerflow-harness';
 

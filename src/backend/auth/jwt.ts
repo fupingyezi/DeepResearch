@@ -18,6 +18,8 @@ import { randomUUID } from 'node:crypto';
 
 import jwt from 'jsonwebtoken';
 
+import type { TokenPair } from '@/types/auth';
+
 export type TokenType = 'access' | 'refresh';
 
 export interface AccessTokenPayload {
@@ -32,12 +34,6 @@ export interface RefreshTokenPayload {
   typ: 'refresh';
   /** 每次轮换新生成的唯一 id：为将来引入重用检测预留锚点，现在只保证唯一性 */
   jti: string;
-}
-
-/** 成对轮换的 token 对（透明刷新时双 token 一起重签） */
-export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
 }
 
 function getSecret(): string {

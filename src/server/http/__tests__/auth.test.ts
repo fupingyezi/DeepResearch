@@ -7,9 +7,9 @@ import {
   createRefreshToken,
   verifyAccessToken,
   verifyRefreshToken,
-} from '@deerflow-harness/auth/jwt';
-import type { UserRecord } from '@deerflow-harness/auth';
-import { getUserById } from '@deerflow-harness/auth/user-repository';
+} from '@/backend/auth/jwt';
+import type { UserRecord } from '@/backend/auth';
+import { getUserById } from '@/backend/repositories/user';
 
 // 桶导出链（user-model-key-repository 等）会拉到 @/lib/db（pg），测试里替换为桩
 vi.mock('@/lib/db', () => ({
@@ -17,8 +17,8 @@ vi.mock('@/lib/db', () => ({
   getClient: vi.fn(),
 }));
 
-// 桶导出链会加载 provider（解构全部 6 个命名导出），mock 必须给齐
-vi.mock('@deerflow-harness/auth/user-repository', () => ({
+// provider.ts 直接引 user-repository 文件（不经桶），mock 必须命中同一条解析路径
+vi.mock('@/backend/repositories/user/user-repository', () => ({
   backfillOrphanData: vi.fn(),
   countAdminUsers: vi.fn(),
   createUser: vi.fn(),

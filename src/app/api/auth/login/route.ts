@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { AuthErrorCode, authenticate, toUserResponse } from '@deerflow-harness/auth';
+import { AuthErrorCode, authenticate, toUserResponse } from '@/backend/auth';
 import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter, loginFailures } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';

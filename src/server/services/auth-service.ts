@@ -14,8 +14,8 @@ import {
   resetPassword as resetUserPassword,
   type TokenPair,
   type UserRecord,
-} from '@deerflow-harness/auth';
-import { getUserByEmail, updateUser } from '@deerflow-harness/auth/user-repository';
+} from '@/backend/auth';
+import { getUserByEmail, updateUser } from '@/backend/repositories/user';
 import { appBaseUrl } from '@/lib/app-origin';
 import { isMailConfigured, sendMail } from '@/lib/mailer';
 import { PgEmailTokenStore, type EmailTokenStore } from '@/server/daos/email-token';

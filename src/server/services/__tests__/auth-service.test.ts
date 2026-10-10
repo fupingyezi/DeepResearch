@@ -12,7 +12,7 @@ vi.mock('@/lib/mailer', () => ({
 }));
 
 // 桶导出链会加载 provider（解构全部 6 个命名导出），mock 必须给齐
-vi.mock('@deerflow-harness/auth/user-repository', () => ({
+vi.mock('@/backend/repositories/user', () => ({
   backfillOrphanData: vi.fn(),
   countAdminUsers: vi.fn(),
   createUser: vi.fn(),
@@ -21,9 +21,9 @@ vi.mock('@deerflow-harness/auth/user-repository', () => ({
   updateUser: vi.fn(),
 }));
 
-import { verifyAccessToken, verifyRefreshToken } from '@deerflow-harness/auth/jwt';
-import type { UserRecord } from '@deerflow-harness/auth';
-import { getUserByEmail, updateUser } from '@deerflow-harness/auth/user-repository';
+import { verifyAccessToken, verifyRefreshToken } from '@/backend/auth/jwt';
+import type { UserRecord } from '@/backend/auth';
+import { getUserByEmail, updateUser } from '@/backend/repositories/user';
 import { sendMail } from '@/lib/mailer';
 import type { EmailTokenStore } from '@/server/daos/email-token';
 

@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { adminExists, getDemoAccount, isRegistrationEnabled } from '@deerflow-harness/auth';
+import { adminExists, getDemoAccount, isRegistrationEnabled } from '@/backend/auth';
 import { withApiHandler } from '@/server/http';
 
 // 每次实时查询 admin 是否存在，禁止静态预渲染缓存

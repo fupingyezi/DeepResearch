@@ -6,7 +6,7 @@ vi.mock('@/lib/db', () => ({
   getClient: vi.fn(),
 }));
 
-vi.mock('@deerflow-harness/auth/user-repository', () => ({
+vi.mock('@/backend/repositories/user', () => ({
   createUser: vi.fn(),
   getUserByEmail: vi.fn(),
   getUserById: vi.fn(),
@@ -18,13 +18,13 @@ vi.mock('@deerflow-harness/auth/user-repository', () => ({
   },
 }));
 
-import type { UserRecord } from '@deerflow-harness/auth';
+import type { UserRecord } from '@/backend/auth';
 import {
   EmailExistsError,
   createUser,
   getUserByEmail,
   getUserById,
-} from '@deerflow-harness/auth/user-repository';
+} from '@/backend/repositories/user';
 import type { OAuthProviderAdapter, OAuthProviderName, OAuthUserInfo } from '@/lib/oauth';
 import { OAuthAdapterError } from '@/lib/oauth';
 import {

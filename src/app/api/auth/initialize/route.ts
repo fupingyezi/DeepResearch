@@ -13,8 +13,8 @@ import {
   initializeAdmin,
   toUserResponse,
   validateStrongPassword,
-} from '@deerflow-harness/auth';
-import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
+} from '@/backend/auth';
+import { EmailExistsError } from '@/backend/repositories/user';
 import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';

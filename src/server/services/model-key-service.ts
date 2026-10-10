@@ -15,7 +15,7 @@ import {
   setSelectedModel,
   upsertModelKey,
   type ConfiguredProvider,
-} from '@deerflow-harness/auth';
+} from '@/backend/repositories/user-model-key';
 import { MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import { AppError } from '@/server/http';
 

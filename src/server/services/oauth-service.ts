@@ -24,13 +24,13 @@
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
-import type { UserRecord } from '@deerflow-harness/auth';
+import type { UserRecord } from '@/backend/auth';
 import {
   EmailExistsError,
   createUser,
   getUserByEmail,
   getUserById,
-} from '@deerflow-harness/auth/user-repository';
+} from '@/backend/repositories/user';
 import {
   OAuthAdapterError,
   getOAuthAdapters,

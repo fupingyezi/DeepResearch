@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { useAuthStore } from '@/store/auth-store';
 import { fetchMe, logout as logoutRequest } from '@/utils/auth/client';
 import { onUnauthorized } from '@/utils/auth/unauthorized-event';
-import type { UserResponse } from '@deerflow-harness/auth/types';
+import type { UserResponse } from '@/types/auth';
 
 /**
  * AuthProvider：应用挂载时拉取 /api/auth/me 初始化登录态，并监听全局 401 事件

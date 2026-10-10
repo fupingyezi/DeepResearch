@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { UserResponse } from '@deerflow-harness/auth/types';
+import type { UserResponse } from '@/types/auth';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
 

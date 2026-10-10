@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { toUserResponse } from '@deerflow-harness/auth';
+import { toUserResponse } from '@/backend/auth';
 import { withApiHandler } from '@/server/http';
 
 export const GET = withApiHandler({}, async ({ user }) => {

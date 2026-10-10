@@ -41,12 +41,8 @@ export enum AuthErrorCode {
   INVALID_INPUT = 'INVALID_INPUT',
 }
 
-export function toUserResponse(user: UserRecord): UserResponse {
-  return {
-    id: user.id,
-    email: user.email,
-    systemRole: user.systemRole,
-    needsSetup: user.needsSetup,
-    emailVerified: user.emailVerified,
-  };
+/** 成对轮换的 token 对（透明刷新时双 token 一起重签） */
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
 }

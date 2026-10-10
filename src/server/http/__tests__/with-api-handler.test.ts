@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { UserRecord } from '@deerflow-harness/auth';
+import type { UserRecord } from '@/backend/auth';
 
 import { withApiHandler } from '@/server/http/api-handler';
 import { authenticateWithRefresh, setAuthCookies } from '@/server/http/auth';
