@@ -20,6 +20,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            // 必须落在任何客户端脚本执行前：utils/request/base-url.ts 的
+            // getApiBase() 读它，SSR 阶段 window 不存在时回落同源
+            __html: `window.__API_BASE__=${JSON.stringify(process.env.API_BASE_URL ?? '')};`,
+          }}
+        />
+      </head>
       <body className="flex h-screen overflow-hidden bg-[#f9fafb] text-[#111827] antialiased">
         <AuthProvider>{children}</AuthProvider>
       </body>

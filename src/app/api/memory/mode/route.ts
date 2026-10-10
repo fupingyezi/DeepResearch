@@ -16,6 +16,8 @@ import { withApiHandler } from '@/server/http';
 import { getMemoryService } from '@/server/services/memory-service';
 import { setMemoryModeSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

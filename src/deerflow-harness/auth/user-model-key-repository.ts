@@ -12,7 +12,8 @@
  * - 明文 Key 仅在 getDecryptedKey 内部短暂出现，调用方用后即弃，不得落库 / 打日志。
  */
 
-import { query } from '@/lib';
+// 直接导入 @/lib/db 而非 @/lib 桶：桶 re-export harness/models，从 harness 走桶会成反向环
+import { query } from '@/lib/db';
 import {
   decryptKey,
   encryptKey,

@@ -4,6 +4,8 @@ import { withApiHandler } from '@/server/http';
 import { getExtensionService } from '@/server/services/extension-service';
 import { patchEnabledSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const runtime = 'nodejs';
 
 /** 切换某个 MCP 服务器的启用状态。 */

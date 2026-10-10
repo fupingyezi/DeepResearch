@@ -1,3 +1,7 @@
+import { dispatchUnauthorized } from '@/utils/auth/unauthorized-event';
+
+import { getApiBase } from './base-url';
+
 interface ApiClientOptions {
   headers?: Record<string, string>;
   [key: string]: any;
@@ -15,7 +19,7 @@ class ApiClient {
   constructor(baseURL: string = '', defaultOptions: ApiClientOptions = {}) {
     this.baseURL = baseURL;
     this.defaultOptions = {
-      // 同源携带 HttpOnly 会话 cookie，后端按用户隔离数据
+      // 携带 HttpOnly 会话 cookie（同源直发；跨域经 CORS Allow-Credentials + SameSite=None）
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
@@ -59,6 +63,10 @@ class ApiClient {
       const response = await fetch(url, config);
 
       if (!response.ok) {
+        // 业务 API 的 401 即会话失效（服务端吊销/过期）：广播全局事件触发登出跳转
+        if (response.status === 401) {
+          dispatchUnauthorized();
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -130,6 +138,6 @@ class ApiClient {
   }
 }
 
-const apiClient = new ApiClient('/api');
+const apiClient = new ApiClient(`${getApiBase()}/api`);
 export { ApiClient };
 export default apiClient;

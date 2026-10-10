@@ -10,37 +10,53 @@ import { NextResponse } from 'next/server';
 import {
   AuthErrorCode,
   adminExists,
-  createAccessToken,
   initializeAdmin,
   toUserResponse,
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
-import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
+import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
 
-export const POST = withApiHandler({ auth: 'none', body: credentialsSchema }, async ({ body }) => {
-  const { email, password } = body;
+export { OPTIONS } from '@/server/http/preflight';
 
-  const weak = validateStrongPassword(password);
-  if (weak) {
-    return jsonError(AuthErrorCode.WEAK_PASSWORD, weak, 400);
-  }
+const initializeRateLimit = createRateLimiter({
+  bucket: 'initialize',
+  max: 5,
+  windowMs: 15 * 60_000,
+});
 
-  if (await adminExists()) {
-    return jsonError(AuthErrorCode.SYSTEM_ALREADY_INITIALIZED, 'System already initialized', 409);
-  }
+export const POST = withApiHandler(
+  { auth: 'none', body: credentialsSchema, rateLimit: initializeRateLimit },
+  async ({ body }) => {
+    const { email, password } = body;
 
-  try {
-    const admin = await initializeAdmin(email, password);
-    const token = createAccessToken(admin.id, admin.tokenVersion);
-    const response = NextResponse.json(toUserResponse(admin), { status: 201 });
-    setSessionCookie(response, token);
-    return response;
-  } catch (e) {
-    if (e instanceof EmailExistsError) {
+    const weak = validateStrongPassword(password);
+    if (weak) {
+      return jsonError(AuthErrorCode.WEAK_PASSWORD, weak, 400);
+    }
+
+    if (await adminExists()) {
       return jsonError(AuthErrorCode.SYSTEM_ALREADY_INITIALIZED, 'System already initialized', 409);
     }
-    throw e;
-  }
-});
+
+    try {
+      const admin = await initializeAdmin(email, password);
+      const tokens = getAuthService().issueTokenPair(admin);
+      const response = NextResponse.json(toUserResponse(admin), { status: 201 });
+      setAuthCookies(response, tokens);
+      return response;
+    } catch (e) {
+      if (e instanceof EmailExistsError) {
+        return jsonError(
+          AuthErrorCode.SYSTEM_ALREADY_INITIALIZED,
+          'System already initialized',
+          409,
+        );
+      }
+      throw e;
+    }
+  },
+);

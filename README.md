@@ -303,9 +303,10 @@ MINIO_ACCESS_KEY=yezi
 MINIO_SECRET_KEY=fupingyezi123
 MINIO_BUCKET=chat-files
 
-# === JWT 鉴权 ===
+# === JWT 鉴权（无状态双 token）===
 AUTH_JWT_SECRET=please_change_this_to_a_long_random_secret
-AUTH_TOKEN_EXPIRY_DAYS=7
+AUTH_ACCESS_TOKEN_EXPIRES_MINUTES=15  # access 有效期（分钟）；失效后 refresh 服务端透明续期
+AUTH_TOKEN_EXPIRY_DAYS=7              # refresh 有效期（天），每次刷新滑动续期
 
 # === 模型 Key 加密（用户在设置页保存的 API Key 用它加密落库）===
 MODEL_KEY_ENC_SECRET=                    # 生成：openssl rand -base64 32；一旦设置不可更改
@@ -423,7 +424,9 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/auth/initialize`                        | POST          | 初始化管理员账户                                                                  |
 | `/api/auth/setup-status`                      | GET           | 查询初始化状态                                                                    |
 | `/api/auth/demo-login`                        | POST          | 体验账号一键登录（凭据取自服务端环境变量，未配置则 404）                          |
-| `/api/auth/oauth/[provider]`                  | GET           | OAuth 第三方登录回调                                                              |
+| `/api/auth/oauth/[provider]`                  | GET           | OAuth 登录入口（302 到第三方授权页并种 state cookie）                             |
+| `/api/auth/oauth/[provider]/callback`         | GET           | OAuth 回调（换 token、绑定/登录、种会话 cookie、302 回应用）                      |
+| `/api/auth/oauth/providers`                   | GET           | 已配置的 OAuth provider 列表（登录页据此渲染按钮）                                |
 
 **主聊天请求体：**
 

@@ -4,6 +4,8 @@ import { withApiHandler } from '@/server/http';
 import { getExtensionService } from '@/server/services/extension-service';
 import { createSkillSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 // stdio MCP / 文件系统访问需 Node.js runtime
 export const runtime = 'nodejs';
 

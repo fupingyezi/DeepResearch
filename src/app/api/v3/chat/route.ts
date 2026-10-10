@@ -33,6 +33,8 @@ import { preflightError, withApiHandler } from '@/server/http';
 import { getChatService } from '@/server/services/chat-service';
 import { chatStreamBodySchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   { body: chatStreamBodySchema },
   async ({ user, body, request }) => {

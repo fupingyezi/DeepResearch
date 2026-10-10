@@ -3,8 +3,10 @@
  *
  * 执行序（错误处理包裹全流程）：
  *   try/catch 全包裹
- *     → auth（'cookie' 缺省 = getCurrentUser；'none'；自定义 resolver，null → 401）
+ *     → auth（'cookie' 缺省 = authenticateWithRefresh：access 验签失败自动用
+ *       refresh 重签双 token 并挂到最终响应；'none'；自定义 resolver，null → 401）
  *     → guard（sandbox token 等非用户主体门禁，false → 401）
+ *     → origin 校验（非 GET/HEAD/OPTIONS 且带 Origin 不在白名单 → 403，防 CSRF）
  *     → userIdHeader（threads 的 x-user-id → ctx.userId，可空不 401）
  *     → rateLimit（占位钩子，非 null Response 短路）
  *     → body 解析（ZodType → parseJsonBody；函数 → 自定义解析如 multipart）
@@ -24,7 +26,9 @@ import type { UserRecord } from '@deerflow-harness/auth';
 import type { ZodType } from 'zod';
 
 import { parseJsonBody, parseSearchParams, type ParseResult } from '@/server/validation';
-import { getCurrentUser } from './auth';
+import { authenticateWithRefresh, setAuthCookies } from './auth';
+import type { TokenPair } from '@deerflow-harness/auth';
+import { applyCorsHeaders, isOriginAllowed } from './cors';
 import { jsonError, toHttpError } from './errors';
 import { logHttpError, logHttpRequest } from './logger';
 import { noopRateLimit, type RateLimitHook } from './rate-limit';
@@ -81,8 +85,17 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     const { method } = request;
     const path = request.nextUrl.pathname; // 不含 query：查询参数不进日志
     const startedAt = Date.now();
+    // 透明刷新产出（auth 步置位）：finish 统一把新 token 对写进最终响应的
+    // Set-Cookie（含 SSE 的 plain Response）；早退 401 时仍为 null，自然不带 cookie
+    let pendingTokens: TokenPair | null = null;
 
     const finish = (response: Response, userId?: string): Response => {
+      if (pendingTokens) setAuthCookies(response, pendingTokens);
+      // 安全响应头 + CORS 头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      response.headers.set('X-Frame-Options', 'DENY');
+      response.headers.set('Referrer-Policy', 'no-referrer');
+      applyCorsHeaders(request, response);
       logHttpRequest({
         method,
         path,
@@ -94,10 +107,12 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     };
 
     try {
-      // 1) 鉴权
+      // 1) 鉴权（含透明刷新：access 失效但 refresh 有效时自动重签并随响应下发）
       let user: UserRecord | null = null;
       if (auth === 'cookie') {
-        user = await getCurrentUser(request);
+        const result = await authenticateWithRefresh(request);
+        user = result.user;
+        pendingTokens = result.tokens ?? null;
       } else if (typeof auth === 'function') {
         user = (await auth(request)) ?? null;
       }
@@ -110,16 +125,28 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         return finish(jsonError('UNAUTHENTICATED', 'Not authenticated', 401), user?.id);
       }
 
-      // 3) 可选 user_id 头（threads 的 x-user-id）
+      // 3) CSRF：SameSite=None 后 cookie 可被跨域请求携带，状态变更请求必须校验
+      // Origin。浏览器总为跨域 POST 附 Origin；无 Origin 的非浏览器客户端放行
+      // （鉴权在前面仍是生效门槛）。
+      if (
+        method !== 'GET' &&
+        method !== 'HEAD' &&
+        method !== 'OPTIONS' &&
+        !isOriginAllowed(request)
+      ) {
+        return finish(jsonError('INVALID_ORIGIN', 'Origin not allowed', 403), user?.id);
+      }
+
+      // 4) 可选 user_id 头（threads 的 x-user-id）
       const headerUserId = options.userIdHeader
         ? (request.headers.get(options.userIdHeader) ?? undefined)
         : undefined;
 
-      // 4) 限流（占位）
+      // 5) 限流（占位）
       const limited = await rateLimit(request);
       if (limited) return finish(limited, user?.id ?? headerUserId);
 
-      // 5) body 解析（wrapper 是唯一读取方）
+      // 6) body 解析（wrapper 是唯一读取方）
       let body: TBody = undefined as TBody;
       if (typeof options.body === 'function') {
         const parsed = await options.body(request);
@@ -131,7 +158,7 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         body = parsed.data;
       }
 
-      // 6) query 解析
+      // 7) query 解析
       let query: TQuery = undefined as TQuery;
       if (options.query) {
         const parsed = parseSearchParams(request.nextUrl.searchParams, options.query);
@@ -139,7 +166,7 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
         query = parsed.data;
       }
 
-      // 7) handler
+      // 8) handler
       const ctx: ApiContext<TBody, TQuery> = {
         user,
         userId: headerUserId,

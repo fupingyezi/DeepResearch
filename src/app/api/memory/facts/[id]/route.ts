@@ -4,6 +4,8 @@ import { withApiHandler } from '@/server/http';
 import { getMemoryService } from '@/server/services/memory-service';
 import { updateMemoryFactSchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 /** 更新指定记忆 fact 的内容/分类/置信度。 */
 export const PUT = withApiHandler(
   { body: updateMemoryFactSchema, fallbackMessage: 'Update fact failed' },

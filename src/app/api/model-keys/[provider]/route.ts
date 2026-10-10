@@ -9,6 +9,8 @@ import { NextResponse } from 'next/server';
 import { withApiHandler } from '@/server/http';
 import { getModelKeyService } from '@/server/services/model-key-service';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

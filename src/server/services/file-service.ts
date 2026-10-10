@@ -40,7 +40,7 @@ export class FileService {
    * 上传并解析：MinIO 落对象 → file_content 记 parsing → 解析 → success/failed 回写。
    * 任何一步失败（解析除外）都清理已上传的对象后抛出。
    */
-  async uploadFile(file: File, fileId: string): Promise<UploadedFileResult> {
+  async uploadFile(file: File, fileId: string, userId: string): Promise<UploadedFileResult> {
     if (file.size > MAX_FILE_SIZE) {
       throw new AppError('File size exceeds 50MB limit', 'FILE_TOO_LARGE', 413);
     }
@@ -59,6 +59,7 @@ export class FileService {
         minioBucket: process.env.MINIO_BUCKET!,
         minioKey,
         fileId,
+        userId,
         filename: file.name,
         mimeType,
         sizeBytes,
@@ -117,7 +118,12 @@ export class FileService {
    * 写元信息）→ 回退按 file_content.minio_key LIKE 找（fileId 可能只是 key 的一部分）。
    * MinIO 对象删除失败只告警（记录已删，对象留下只是存储垃圾）。
    */
-  async deleteUploadedFile(fileId: string): Promise<void> {
+  async deleteUploadedFile(fileId: string, userId: string): Promise<void> {
+    const owner = await this.deps.fileContent.getOwnerByFileId(fileId);
+    if (owner !== userId) {
+      throw new AppError('file not found', 'NOT_FOUND', 404);
+    }
+
     const metadata = await this.deps.fileMetadata.getByFileId(fileId);
 
     let minioKey: string | null = null;

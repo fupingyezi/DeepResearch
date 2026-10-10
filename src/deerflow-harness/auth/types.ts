@@ -15,6 +15,8 @@ export interface UserRecord {
   systemRole: SystemRole;
   /** 首启自动创建的 admin 在完成设置前为 true */
   needsSetup: boolean;
+  /** 邮箱已验证（SMTP 未配置时注册直接置 true，跳过验证流程） */
+  emailVerified: boolean;
   /** 改密码时自增，使旧 JWT 失效 */
   tokenVersion: number;
   createdAt: string;
@@ -26,6 +28,7 @@ export interface UserResponse {
   email: string;
   systemRole: SystemRole;
   needsSetup: boolean;
+  emailVerified: boolean;
 }
 
 /** 认证错误码，对外返回结构化错误，前端按 code 做文案映射 */
@@ -44,5 +47,6 @@ export function toUserResponse(user: UserRecord): UserResponse {
     email: user.email,
     systemRole: user.systemRole,
     needsSetup: user.needsSetup,
+    emailVerified: user.emailVerified,
   };
 }

@@ -11,13 +11,22 @@ import { NextResponse } from 'next/server';
 import {
   AuthErrorCode,
   authenticate,
-  createAccessToken,
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
+import { createRateLimiter } from '@/server/http/rate-limit';
+import { getAuthService } from '@/server/services/auth-service';
 
-export const POST = withApiHandler({ auth: 'none' }, async () => {
+export { OPTIONS } from '@/server/http/preflight';
+
+const demoLoginRateLimit = createRateLimiter({
+  bucket: 'demoLogin',
+  max: 10,
+  windowMs: 15 * 60_000,
+});
+
+export const POST = withApiHandler({ auth: 'none', rateLimit: demoLoginRateLimit }, async () => {
   const demo = getDemoAccount();
   if (!demo) {
     return jsonError(AuthErrorCode.INVALID_INPUT, 'Demo login is not enabled', 404);
@@ -32,8 +41,8 @@ export const POST = withApiHandler({ auth: 'none' }, async () => {
     );
   }
 
-  const token = createAccessToken(user.id, user.tokenVersion);
+  const tokens = getAuthService().issueTokenPair(user);
   const response = NextResponse.json(toUserResponse(user));
-  setSessionCookie(response, token);
+  setAuthCookies(response, tokens);
   return response;
 });

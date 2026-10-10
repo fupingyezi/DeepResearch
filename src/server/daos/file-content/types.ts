@@ -5,6 +5,7 @@ export interface InsertParsingInput {
   minioBucket: string;
   minioKey: string;
   fileId: string;
+  userId: string;
   filename: string;
   mimeType: string;
   sizeBytes: number;
@@ -15,6 +16,8 @@ export interface FileContentStore {
   insertParsing(input: InsertParsingInput): Promise<void>;
   markSuccess(minioKey: string, content: string): Promise<void>;
   markFailed(minioKey: string, errorMessage: string): Promise<void>;
+  /** 按 fileId 查 owner（files/delete 归属校验；无行或 owner 为 null 返回 null） */
+  getOwnerByFileId(fileId: string): Promise<string | null>;
   /**
    * 按 fileId 批量反查文件元信息（v3/chat 把 contents 里的 file/image 块解析为落库元信息）。
    * 空入参返回 []；结果按入参顺序返回（content block 的视觉顺序对消息渲染重要）。

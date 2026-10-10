@@ -6,6 +6,8 @@
 
 import type { UserResponse } from '@deerflow-harness/auth/types';
 
+import { getApiBase } from '@/utils/request/base-url';
+
 export class AuthRequestError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -15,7 +17,7 @@ export class AuthRequestError extends Error {
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${getApiBase()}${url}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -60,11 +62,27 @@ export async function changePassword(
 }
 
 export async function logout(): Promise<void> {
-  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  await fetch(`${getApiBase()}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+}
+
+export async function verifyEmail(token: string): Promise<void> {
+  await postJson('/api/auth/verify-email', { token });
+}
+
+export async function resendVerification(): Promise<void> {
+  await postJson('/api/auth/resend-verification', {});
+}
+
+export async function forgotPassword(email: string): Promise<void> {
+  await postJson('/api/auth/forgot-password', { email });
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await postJson('/api/auth/reset-password', { token, new_password: newPassword });
 }
 
 export async function fetchMe(): Promise<UserResponse | null> {
-  const res = await fetch('/api/auth/me', { credentials: 'include' });
+  const res = await fetch(`${getApiBase()}/api/auth/me`, { credentials: 'include' });
   if (!res.ok) return null;
   return (await res.json()) as UserResponse;
 }
@@ -77,12 +95,43 @@ export interface SetupStatus {
     /** 展示用邮箱；未配置时为 null（密码永远不下发） */
     email: string | null;
   };
+  /** 注册开关（REGISTRATION_ENABLED）：关闭时登录页隐藏注册入口 */
+  registration: {
+    enabled: boolean;
+  };
+}
+
+export type OAuthProviderName = 'github' | 'google' | 'qq';
+
+/**
+ * 已配置的 OAuth provider 列表（登录页据此渲染第三方登录按钮）。
+ * 请求失败 / 响应形状不符一律返回空数组——按钮隐藏，登录流程不受影响。
+ */
+export async function fetchOAuthProviders(): Promise<OAuthProviderName[]> {
+  const res = await fetch(`${getApiBase()}/api/auth/oauth/providers`, {
+    credentials: 'include',
+  });
+  if (!res.ok) return [];
+  const data = (await res.json().catch(() => ({}))) as { providers?: unknown };
+  if (!Array.isArray(data.providers)) return [];
+  return data.providers.filter(
+    (p): p is OAuthProviderName => typeof p === 'string' && ['github', 'google', 'qq'].includes(p),
+  );
+}
+
+/** OAuth 登录入口 URL：顶层导航（window.location.href）跳转，302 链走完回来。 */
+export function oauthLoginUrl(provider: OAuthProviderName): string {
+  return `${getApiBase()}/api/auth/oauth/${provider}`;
 }
 
 export async function fetchSetupStatus(): Promise<SetupStatus> {
-  const res = await fetch('/api/auth/setup-status', { credentials: 'include' });
+  const res = await fetch(`${getApiBase()}/api/auth/setup-status`, { credentials: 'include' });
   if (!res.ok) {
-    return { needs_setup: false, demo_login: { enabled: false, email: null } };
+    return {
+      needs_setup: false,
+      demo_login: { enabled: false, email: null },
+      registration: { enabled: false },
+    };
   }
   const data = (await res.json()) as Partial<SetupStatus>;
   return {
@@ -90,6 +139,9 @@ export async function fetchSetupStatus(): Promise<SetupStatus> {
     demo_login: {
       enabled: Boolean(data.demo_login?.enabled),
       email: typeof data.demo_login?.email === 'string' ? data.demo_login.email : null,
+    },
+    registration: {
+      enabled: data.registration?.enabled !== false,
     },
   };
 }

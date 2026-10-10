@@ -7,22 +7,22 @@
 import { NextResponse } from 'next/server';
 
 import type { RunStatus } from '@/deerflow-harness';
-import { withApiHandler } from '@/server/http';
+import { withApiHandler, jsonError } from '@/server/http';
 import { listQuerySchema, submitRunSchema } from '@/server/validation/schemas';
 import { getRunStore, getThreadService } from '@/server/wiring';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   {
-    auth: 'none',
-    userIdHeader: 'x-user-id',
     body: submitRunSchema,
     fallbackMessage: 'failed to submit run',
   },
-  async ({ userId, body, params }) => {
+  async ({ user, body, params }) => {
     const service = await getThreadService();
     const { run_id } = await service.submitRun({
       thread_id: params.threadId,
-      user_id: userId,
+      user_id: user!.id,
       input: body.input,
       metadata: body.metadata,
     });
@@ -32,13 +32,14 @@ export const POST = withApiHandler(
 
 export const GET = withApiHandler(
   {
-    auth: 'none',
-    userIdHeader: 'x-user-id',
     query: listQuerySchema,
     fallbackMessage: 'failed to list runs',
   },
-  async ({ query, params }) => {
-    // 复用同一个 PgRunStore；轻量直读，避免再 await service 装配开销
+  async ({ user, query, params }) => {
+    const service = await getThreadService();
+    const thread = await service.getThread({ thread_id: params.threadId, user_id: user!.id });
+    if (!thread) return jsonError('NOT_FOUND', 'not found', 404);
+    // 归属已在上一步经 service.getThread 校验；列表本身复用同一个 PgRunStore 轻量直读
     const data = await getRunStore().listByThread(params.threadId, {
       limit: query.limit,
       offset: query.offset,

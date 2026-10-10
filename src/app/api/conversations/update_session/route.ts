@@ -4,6 +4,8 @@ import { withApiHandler } from '@/server/http';
 import { getConversationService } from '@/server/services/conversation-service';
 import { sessionIdBodySchema, updateSessionBodySchema } from '@/server/validation/schemas';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 export const POST = withApiHandler(
   { body: updateSessionBodySchema, fallbackMessage: 'Failed to update session' },
   async ({ user, body }) => {

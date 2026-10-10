@@ -10,8 +10,8 @@ export class PgFileContentStore implements FileContentStore {
     await query(
       `
         INSERT INTO file_content (
-          minio_bucket, minio_key, status, file_id, filename, mime_type, size_bytes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          minio_bucket, minio_key, status, file_id, filename, mime_type, size_bytes, user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
       [
         input.minioBucket,
@@ -21,6 +21,7 @@ export class PgFileContentStore implements FileContentStore {
         input.filename,
         input.mimeType,
         input.sizeBytes,
+        input.userId,
       ],
     );
   }
@@ -45,6 +46,12 @@ export class PgFileContentStore implements FileContentStore {
       `,
       ['failed', errorMessage, minioKey],
     );
+  }
+
+  async getOwnerByFileId(fileId: string): Promise<string | null> {
+    const res = await query('SELECT user_id FROM file_content WHERE file_id = $1', [fileId]);
+    const row = res.rows[0] as Row | undefined;
+    return row ? String(row.user_id ?? '') || null : null;
   }
 
   async getByIds(fileIds: string[]): Promise<SavedFileMetadata[]> {

@@ -5,6 +5,8 @@ import { jsonError, withApiHandler } from '@/server/http';
 import { getFileService } from '@/server/services/file-service';
 import type { ParseResult } from '@/server/validation';
 
+export { OPTIONS } from '@/server/http/preflight';
+
 /**
  * multipart 自定义解析：ensureBucket 必须最先执行（现状顺序：ensureBucket →
  * formData → 校验 → upload，倒置会让桶不存在时先读 body 抛 500）。
@@ -24,7 +26,7 @@ async function parseUploadBody(
   return { ok: true, data: { file, fileId } };
 }
 
-export const POST = withApiHandler({ auth: 'none', body: parseUploadBody }, async ({ body }) => {
-  const result = await getFileService().uploadFile(body.file, body.fileId);
+export const POST = withApiHandler({ body: parseUploadBody }, async ({ body, user }) => {
+  const result = await getFileService().uploadFile(body.file, body.fileId, user!.id);
   return NextResponse.json(result, { status: 200 });
 });
