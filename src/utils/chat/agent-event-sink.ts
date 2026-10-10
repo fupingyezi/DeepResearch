@@ -22,7 +22,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ClientAgentEventType } from '@/events/protocol/client-event';
 import type { EventBus, RoutedClientAgentEvent } from '@/events/client';
 import useChatSessionStore, { type SessionRunStatus } from '@/store/chat-session-store';
-import type { TitleUpdatePayload } from '@/deerflow-harness';
+import type { TitleUpdatePayload } from '@deerflow-harness';
 import { createRafFlusher, type RafFlusher } from '@/utils/common';
 import type { ChatMessageType, ChatSessionType, ChatUploadedFileRef } from '@/types';
 import type { RunOperation } from './chat-request-body';

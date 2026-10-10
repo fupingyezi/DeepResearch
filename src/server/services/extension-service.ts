@@ -23,7 +23,7 @@ import {
   type ExtensionsConfigStore,
   type McpServerConfig,
   type Skill,
-} from '@/deerflow-harness';
+} from '@deerflow-harness';
 import { AppError } from '@/server/http';
 
 export interface ExtensionServiceDeps {

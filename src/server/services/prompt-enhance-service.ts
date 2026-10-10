@@ -12,7 +12,7 @@
 
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
-import { getPromptEnhanceModel } from '@/deerflow-harness';
+import { getPromptEnhanceModel } from '@deerflow-harness';
 import { AppError } from '@/server/http';
 import { ensureTitleModelFactory } from '@/server/wiring';
 

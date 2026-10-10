@@ -6,7 +6,7 @@
  * 不属于服务语义。
  */
 
-import { getSandboxSnapshot } from '@/deerflow-harness';
+import { getSandboxSnapshot } from '@deerflow-harness';
 
 /** 沙箱运行态快照；仅 docker backend 有数据，local 返回空。 */
 export function getSandboxStatsSnapshot(includeStats: boolean): Promise<unknown> {

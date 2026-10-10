@@ -9,7 +9,7 @@
 
 import { NextResponse } from 'next/server';
 
-import type { ThreadStatus } from '@/deerflow-harness';
+import type { ThreadStatus } from '@deerflow-harness';
 import { withApiHandler } from '@/server/http';
 import { createThreadSchema, listQuerySchema } from '@/server/validation/schemas';
 import { getThreadService } from '@/server/wiring';

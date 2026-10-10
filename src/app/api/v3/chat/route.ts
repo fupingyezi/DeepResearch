@@ -28,7 +28,7 @@
  * `new Response(createSseStream(request, events))`，X-Run-Id / X-Thread-Id 在此组装。
  */
 
-import { createSseStream } from '@/deerflow-harness';
+import { createSseStream } from '@deerflow-harness';
 import { preflightError, withApiHandler } from '@/server/http';
 import { getChatService } from '@/server/services/chat-service';
 import { chatStreamBodySchema } from '@/server/validation/schemas';

@@ -9,7 +9,7 @@
  * 分数分布高度压缩（不相关也常 0.99+），只有相对排序有意义。
  */
 
-import type { MemoryReranker } from '@/deerflow-harness';
+import type { MemoryReranker } from '@deerflow-harness';
 
 export interface ZhipuRerankerOptions {
   apiKey: string;

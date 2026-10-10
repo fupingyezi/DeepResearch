@@ -23,7 +23,7 @@ const eslintConfig = defineConfig([
     // 分层依赖方向（见 CLAUDE.md「后端分层规范」）：
     // harness / utils / types 是共享层，禁止反向依赖 app 侧（@/server、@/app）
     files: [
-      'src/deerflow-harness/**/*.{ts,tsx}',
+      'packages/deerflow-harness/**/*.{ts,tsx}',
       'src/utils/**/*.{ts,tsx}',
       'src/types/**/*.{ts,tsx}',
     ],

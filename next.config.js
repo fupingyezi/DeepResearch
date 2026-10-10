@@ -49,7 +49,7 @@ const nextConfig = {
     if (nextRuntime === 'edge') {
       config.resolve.alias = {
         ...config.resolve.alias,
-        [`${process.cwd()}/src/deerflow-harness`]: false,
+        [`${process.cwd()}/packages/deerflow-harness`]: false,
         [`${process.cwd()}/src/server/wiring`]: false,
       };
     }

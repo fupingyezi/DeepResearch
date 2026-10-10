@@ -9,7 +9,10 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11 --activate
 # 国内服务器构建：npm 走阿里镜像源，官方源在境内几乎不可用
 ENV npm_config_registry=https://registry.npmmirror.com
+# workspace 包的 package.json 也必须进 deps 上下文：缺 importer 时
+# pnpm install --frozen-lockfile 会因 lockfile 与工作区声明不一致而失败
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
 RUN pnpm install --frozen-lockfile
 
 # ---- builder：编译产出 .next/standalone ----

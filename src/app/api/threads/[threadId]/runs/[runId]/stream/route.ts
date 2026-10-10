@@ -15,7 +15,7 @@ import { z } from 'zod';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { ThreadServiceError, createSseStream } from '@/deerflow-harness';
+import { ThreadServiceError, createSseStream } from '@deerflow-harness';
 import { withApiHandler } from '@/server/http';
 import { guardedStream } from '@/server/services/run-stream-guard';
 import { getRunStore, getThreadService } from '@/server/wiring';

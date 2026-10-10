@@ -1,0 +1,30 @@
+{
+  "name": "@deerflow/harness",
+  "version": "0.1.0",
+  "description": "deerflow agent SDK: multi-agent runtime with LangGraph, memory, sandbox, vision and extensions",
+  "private": false,
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/community": "^1.0.5",
+    "@langchain/core": "^1.0.5",
+    "@langchain/langgraph": "^1.0.2",
+    "@langchain/langgraph-checkpoint-postgres": "^1.0.0",
+    "@langchain/mcp-adapters": "^1.0.3",
+    "@langchain/openai": "^1.1.1",
+    "@tavily/core": "^0.5.13",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
+    "langchain": "^1.0.4",
+    "redis": "^5.10.0",
+    "ssh2": "^1.17.0",
+    "uuid": "^13.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "@types/ssh2": "^1.15.6",
+    "pg": "^8.16.3"
+  }
+}

@@ -14,7 +14,7 @@ export interface BenchmarkConfig {
     datasetName: string;
   };
 
-  // Agent 配置 (对齐 src/deerflow-harness/models/index.ts)
+  // Agent 配置 (对齐 packages/deerflow-harness/models/index.ts)
   agent: {
     modelName: string;
     baseUrl?: string;
@@ -45,7 +45,7 @@ export const defaultConfig: BenchmarkConfig = {
     project: process.env.LANGSMITH_PROJECT ?? 'mini-deepresearch-benchmark',
     datasetName: 'deep-research-qa-v1',
   },
-  // Agent 配置 (对齐 src/deerflow-harness/models/index.ts)
+  // Agent 配置 (对齐 packages/deerflow-harness/models/index.ts)
   agent: {
     /** 默认 deepseek-flash（官方名，GET /models 只返回 deepseek-flash 与 deepseek-v4-pro） */
     modelName: process.env.BENCHMARK_AGENT_MODEL ?? 'deepseek-flash',

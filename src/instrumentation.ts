@@ -13,7 +13,7 @@
  * threadService 在启动期初始化（建池 / 建 checkpointer）：停机与对账在无流量时同样可用。
  */
 
-import { getMemoryQueue, type ThreadService } from '@/deerflow-harness';
+import { getMemoryQueue, type ThreadService } from '@deerflow-harness';
 import { getThreadService } from '@/server/wiring';
 
 /** 记忆队列冲刷超时：挂起的 LLM 调用不能拖死退出，超时放弃本轮未落盘的记忆更新。 */

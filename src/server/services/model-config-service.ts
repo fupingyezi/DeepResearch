@@ -6,7 +6,7 @@
 
 import { getDecryptedKey, getSelectedModel } from '@deerflow-harness/auth';
 import { buildModelConfigForUser, MODEL_PRESETS, type ModelPresetName } from '@/config/models';
-import type { ModelConfig } from '@/deerflow-harness';
+import type { ModelConfig } from '@deerflow-harness';
 
 /**
  * 用户感知的模型解析结果（discriminated union）。

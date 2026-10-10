@@ -1,4 +1,8 @@
 # pnpm 配置（pnpm 10+ 把部分设置从 package.json 移到这里）。
+
+packages:
+  - packages/*
+
 #
 # 关于 allowBuilds：pnpm 11 默认不跑依赖的构建脚本，且**把「存在被忽略的构建脚本」
 # 当成非零退出**（strictDepBuilds 默认为真）—— 这会让 `pnpm install` 与

@@ -7,7 +7,7 @@ vi.mock('@/lib/db', () => ({
 
 import { getClient } from '@/lib/db';
 import type { MessagePart } from '@/types';
-import { ThreadServiceError } from '@/deerflow-harness';
+import { ThreadServiceError } from '@deerflow-harness';
 import type { ChatMessageStore } from '@/server/daos/chat-message';
 import type { ChatSessionRecord, ChatSessionStore } from '@/server/daos/chat-session';
 import type { FileContentStore } from '@/server/daos/file-content';

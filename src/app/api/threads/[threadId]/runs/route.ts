@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server';
 
-import type { RunStatus } from '@/deerflow-harness';
+import type { RunStatus } from '@deerflow-harness';
 import { withApiHandler, jsonError } from '@/server/http';
 import { listQuerySchema, submitRunSchema } from '@/server/validation/schemas';
 import { getRunStore, getThreadService } from '@/server/wiring';

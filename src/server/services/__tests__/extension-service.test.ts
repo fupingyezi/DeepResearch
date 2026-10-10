@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Skill } from '@/deerflow-harness';
+import type { Skill } from '@deerflow-harness';
 import { createExtensionService, type ExtensionServiceDeps } from '../extension-service';
 
 function makeSkill(overrides: Partial<Skill> = {}): Skill {

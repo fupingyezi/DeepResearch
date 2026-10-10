@@ -20,7 +20,7 @@ import {
   updateMemoryFact,
   type FactCategory,
   type MemoryData,
-} from '@/deerflow-harness';
+} from '@deerflow-harness';
 import { getMemoryMode, setMemoryMode, type MemoryInjectionMode } from '@deerflow-harness/auth';
 import { AppError } from '@/server/http';
 import { ensureMemoryStorage } from '@/server/wiring';

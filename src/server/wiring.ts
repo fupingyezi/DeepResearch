@@ -33,7 +33,7 @@ import {
   type MemorySqlExecutor,
   type ThreadService,
   type ModelConfig,
-} from '@/deerflow-harness';
+} from '@deerflow-harness';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { getClient, initialMemoryDb, query } from '@/lib/db';
 import { getFile, getMimeType } from '@/lib/storage';

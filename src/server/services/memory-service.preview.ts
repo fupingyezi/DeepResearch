@@ -8,7 +8,7 @@
  * RRF 序预览）。
  */
 
-import { previewMemoryRetrieval, type MemoryRetrievalPreview } from '@/deerflow-harness';
+import { previewMemoryRetrieval, type MemoryRetrievalPreview } from '@deerflow-harness';
 import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '@/server/wiring';
 
 export async function previewRetrieval(

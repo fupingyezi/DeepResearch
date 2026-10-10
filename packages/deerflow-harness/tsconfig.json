@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["**/*.ts"],
+  "compilerOptions": {
+    // 过渡期临时映射：harness 内还有少量 @/ 引用（阶段 3 注入化时清零后删除）。
+    // 仅影响编辑器/独立 typecheck 体验；CI typecheck 走根 tsconfig（paths 是根视角）。
+    "paths": {
+      "@/*": ["../../src/*"]
+    }
+  }
+}

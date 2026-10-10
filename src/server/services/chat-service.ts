@@ -21,7 +21,7 @@ import {
   type SseStreamEvent,
   type ThreadImageRef,
   type ThreadService,
-} from '@/deerflow-harness';
+} from '@deerflow-harness';
 import type { ChatMessageType, MessagePart } from '@/types';
 import { AssistantPartsCollector } from '@/utils/chat/assistant-parts-collector';
 import { getThreadService } from '@/server/wiring';

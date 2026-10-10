@@ -6,7 +6,7 @@ import {
   type ClientAgentEvent,
   type SseStreamEvent,
   type StampedClientAgentEvent,
-} from '@/deerflow-harness';
+} from '@deerflow-harness';
 import { guardedStream } from '../run-stream-guard';
 
 /**

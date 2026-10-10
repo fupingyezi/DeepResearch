@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { askClarificationTool, searchWebTool, taskTool } from '@/deerflow-harness/tools';
+import { askClarificationTool, searchWebTool, taskTool } from '@deerflow-harness/tools';
 import { withApiHandler } from '@/server/http';
 
 type ToolCategory = 'builtin' | 'agent';
