@@ -204,3 +204,21 @@
 - 跨域 SSE 若在真实环境不可行：nginx 反代 `/api` 回同源是零代码回退方案（CORS 基建保留不白做）
 - QQ 互联的 openid/unionid 语义差异，三平台回调流程需逐一实测
 - 双实例部署（web/api）后，`middleware.ts` 的页面跳转逻辑只在 web 实例生效，api 实例按 401 JSON 处理
+
+## 六、实施记录
+
+### 无状态双 token 改造（2026-10）
+
+**动机**：原会话机制 = 单一 7d JWT + DB `sessions` 表逐会话吊销，每请求打 2 次 DB（`getUserById` + `sessions.isActive`）。改后每请求最多 1 次 DB（仅 token_version 比对），吊销不依赖任何服务端状态。
+
+**设计**：
+
+- access JWT `{sub, ver, typ:'access'}` 15 分钟（`AUTH_ACCESS_TOKEN_EXPIRES_MINUTES`）；refresh JWT `{sub, ver, jti, typ:'refresh'}` 7 天（`AUTH_TOKEN_EXPIRY_DAYS`），每次刷新**滑动**——双 token 一起重签，jti 每次轮换
+- `typ` 是 payload 自定义声明：双 token 验签各归其位，塞错 cookie 或旧版无 typ token 一律拒
+- **服务端透明刷新**：api-handler 的 auth 步 access 失效时自动验 refresh → 重签新对 → `finish` 收敛点把 `Set-Cookie` 附加到本次响应（含 SSE plain Response），请求照常继续。401 只在双 token 全败时触发，前端零改动
+- 撤销通道只剩 `users.token_version`（改密/重置自增，access 与 refresh 验签后都比对）；登出 = 清双 cookie
+- `sessions` 表与 DAO 已删；middleware（Edge）只做双 cookie 存在性校验，验签仍在 Node 路由层
+
+**取舍（已确认接受）**：被盗 refresh 至多活 7 天；登出后已被拷贝的 access 至多活 15 分钟（无 jti 重用检测，锚点已留）；并发透明刷新各自成功、last-wins，无害。
+
+**部署注记**：旧 token 无 `typ`，验签必败——**部署即全体强制重登一次**（预期内）。存量库的死表可一次性 `drop table sessions;` 清理（initialDB 不 DROP）。

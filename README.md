@@ -303,9 +303,10 @@ MINIO_ACCESS_KEY=yezi
 MINIO_SECRET_KEY=fupingyezi123
 MINIO_BUCKET=chat-files
 
-# === JWT 鉴权 ===
+# === JWT 鉴权（无状态双 token）===
 AUTH_JWT_SECRET=please_change_this_to_a_long_random_secret
-AUTH_TOKEN_EXPIRY_DAYS=7
+AUTH_ACCESS_TOKEN_EXPIRES_MINUTES=15  # access 有效期（分钟）；失效后 refresh 服务端透明续期
+AUTH_TOKEN_EXPIRY_DAYS=7              # refresh 有效期（天），每次刷新滑动续期
 
 # === 模型 Key 加密（用户在设置页保存的 API Key 用它加密落库）===
 MODEL_KEY_ENC_SECRET=                    # 生成：openssl rand -base64 32；一旦设置不可更改
