@@ -8,6 +8,8 @@
  */
 import type { NextResponse } from 'next/server';
 
+import { isSecureCookieDisabled } from '@/server/http';
+
 export const OAUTH_STATE_COOKIE = 'oauth_state';
 /** 10 分钟：覆盖一次完整授权往返（用户输入账号密码的时间在内） */
 export const OAUTH_STATE_TTL_SECONDS = 600;
@@ -15,7 +17,7 @@ export const OAUTH_STATE_TTL_SECONDS = 600;
 export function setOAuthStateCookie(response: NextResponse, state: string): void {
   response.cookies.set(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
-    secure: true,
+    secure: !isSecureCookieDisabled(),
     sameSite: 'lax',
     path: '/api/auth/oauth',
     maxAge: OAUTH_STATE_TTL_SECONDS,
@@ -25,7 +27,7 @@ export function setOAuthStateCookie(response: NextResponse, state: string): void
 export function clearOAuthStateCookie(response: NextResponse): void {
   response.cookies.set(OAUTH_STATE_COOKIE, '', {
     httpOnly: true,
-    secure: true,
+    secure: !isSecureCookieDisabled(),
     sameSite: 'lax',
     path: '/api/auth/oauth',
     maxAge: 0,

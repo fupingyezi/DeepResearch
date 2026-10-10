@@ -57,6 +57,7 @@ beforeEach(() => {
   process.env.AUTH_JWT_SECRET = SECRET;
   delete process.env.AUTH_ACCESS_TOKEN_EXPIRES_MINUTES;
   delete process.env.AUTH_TOKEN_EXPIRY_DAYS;
+  delete process.env.DISABLE_SECURE_COOKIE;
   getUserByIdMock.mockResolvedValue(user);
 });
 
@@ -191,5 +192,26 @@ describe('cookie 写入', () => {
     expect(cookies[0]).toContain('access_token=;');
     expect(cookies[1]).toContain('refresh_token=;');
     expect(cookies.every((c) => c.includes('Max-Age=0'))).toBe(true);
+  });
+
+  it('纯 HTTP 部署（DISABLE_SECURE_COOKIE=1）：去 Secure、SameSite 降为 Lax', () => {
+    process.env.DISABLE_SECURE_COOKIE = '1';
+    const response = new Response('ok');
+    setAuthCookies(response, { accessToken: 'access-jwt', refreshToken: 'refresh-jwt' });
+    const [access, refresh] = response.headers.getSetCookie();
+    // http 来源浏览器拒收 Secure cookie；SameSite=None 强制要求 Secure，同源部署降 Lax
+    expect(access).toBe('access_token=access-jwt; Path=/; HttpOnly; SameSite=Lax; Max-Age=900');
+    expect(refresh).toBe(
+      'refresh_token=refresh-jwt; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800',
+    );
+  });
+
+  it('纯 HTTP 部署下 clearAuthCookies 属性与写入时一致（浏览器才会删除）', () => {
+    process.env.DISABLE_SECURE_COOKIE = 'true';
+    const response = new Response('ok');
+    clearAuthCookies(response);
+    const [access, refresh] = response.headers.getSetCookie();
+    expect(access).toBe('access_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+    expect(refresh).toBe('refresh_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
   });
 });

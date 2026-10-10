@@ -9,8 +9,10 @@
  * 无状态设计：不查任何会话表；token_version（users 表）是唯一全局失效通道，
  * 登出只清 cookie。被盗 refresh 至多活到过期（7 天），已接受的取舍。
  *
- * 属性与前代一致：SameSite=None + Secure 是前后端分离部署下跨站携带 cookie 的
- * 硬约束（None 必须配 Secure）；dev 下 localhost 属可信源，http 也能读写。
+ * 属性默认 SameSite=None + Secure：前后端分离部署下跨站携带 cookie 的硬约束
+ * （None 必须配 Secure）；dev 下 localhost 属可信源，http 也能读写。
+ * 纯 HTTP 部署（DISABLE_SECURE_COOKIE）必须去掉 Secure——浏览器对非 https
+ * 来源拒收 Secure cookie，登录会"成功但永不生效"。
  */
 
 import type { NextRequest } from 'next/server';
@@ -30,11 +32,25 @@ import type { UserRecord } from '@deerflow-harness/auth';
 export const ACCESS_COOKIE_NAME = 'access_token';
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
-const COOKIE_ATTRS = 'Path=/; HttpOnly; Secure; SameSite=None';
+/**
+ * 纯 HTTP 部署开关（DISABLE_SECURE_COOKIE='1'/'true'，语义见 .env.production.example）。
+ * http 下浏览器拒收带 Secure 的 cookie；而 SameSite=None 强制要求 Secure，
+ * 所以去 Secure 必须同时降为 Lax——同源部署（页面与 API 同源直连）本就不需要 None。
+ */
+export function isSecureCookieDisabled(): boolean {
+  const raw = process.env.DISABLE_SECURE_COOKIE;
+  return raw === '1' || raw === 'true';
+}
+
+function cookieAttrs(): string {
+  return isSecureCookieDisabled()
+    ? 'Path=/; HttpOnly; SameSite=Lax'
+    : 'Path=/; HttpOnly; Secure; SameSite=None';
+}
 
 /** JWT 是 base64url 字符集，无 ';' 等需转义字符，直接拼接即可 */
 function cookieHeader(name: string, value: string, maxAgeSeconds: number): string {
-  return `${name}=${value}; ${COOKIE_ATTRS}; Max-Age=${maxAgeSeconds}`;
+  return `${name}=${value}; ${cookieAttrs()}; Max-Age=${maxAgeSeconds}`;
 }
 
 /**
