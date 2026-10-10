@@ -2,8 +2,8 @@
  * OAuth 登录编排服务（app 层）：state 校验 → 换 token → 绑定决策树 → 建号。
  *
  * 本服务不碰 NextRequest/NextResponse（auth-service 先例）：redirect_uri 由
- * 路由层算好传入，会话 token 也由路由层调 getAuthService().issueSessionToken
- * 签发——service 只返回 UserRecord。
+ * 路由层算好传入，token 对也由路由层调 getAuthService().issueTokenPair 签发
+ * ——service 只返回 UserRecord。
  *
  * 绑定决策树（顺序即不变量，注释对应 handleCallback 步骤）：
  * ① adapter 缺失/未配置 → PROVIDER_DISABLED

@@ -3,7 +3,8 @@
  *
  * 执行序（错误处理包裹全流程）：
  *   try/catch 全包裹
- *     → auth（'cookie' 缺省 = getCurrentUser；'none'；自定义 resolver，null → 401）
+ *     → auth（'cookie' 缺省 = authenticateWithRefresh：access 验签失败自动用
+ *       refresh 重签双 token 并挂到最终响应；'none'；自定义 resolver，null → 401）
  *     → guard（sandbox token 等非用户主体门禁，false → 401）
  *     → origin 校验（非 GET/HEAD/OPTIONS 且带 Origin 不在白名单 → 403，防 CSRF）
  *     → userIdHeader（threads 的 x-user-id → ctx.userId，可空不 401）
@@ -25,7 +26,8 @@ import type { UserRecord } from '@deerflow-harness/auth';
 import type { ZodType } from 'zod';
 
 import { parseJsonBody, parseSearchParams, type ParseResult } from '@/server/validation';
-import { getCurrentUser } from './auth';
+import { authenticateWithRefresh, setAuthCookies } from './auth';
+import type { TokenPair } from '@deerflow-harness/auth';
 import { applyCorsHeaders, isOriginAllowed } from './cors';
 import { jsonError, toHttpError } from './errors';
 import { logHttpError, logHttpRequest } from './logger';
@@ -83,8 +85,12 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     const { method } = request;
     const path = request.nextUrl.pathname; // 不含 query：查询参数不进日志
     const startedAt = Date.now();
+    // 透明刷新产出（auth 步置位）：finish 统一把新 token 对写进最终响应的
+    // Set-Cookie（含 SSE 的 plain Response）；早退 401 时仍为 null，自然不带 cookie
+    let pendingTokens: TokenPair | null = null;
 
     const finish = (response: Response, userId?: string): Response => {
+      if (pendingTokens) setAuthCookies(response, pendingTokens);
       // 安全响应头 + CORS 头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
       response.headers.set('X-Content-Type-Options', 'nosniff');
       response.headers.set('X-Frame-Options', 'DENY');
@@ -101,10 +107,12 @@ export function withApiHandler<TBody = undefined, TQuery = undefined>(
     };
 
     try {
-      // 1) 鉴权
+      // 1) 鉴权（含透明刷新：access 失效但 refresh 有效时自动重签并随响应下发）
       let user: UserRecord | null = null;
       if (auth === 'cookie') {
-        user = await getCurrentUser(request);
+        const result = await authenticateWithRefresh(request);
+        user = result.user;
+        pendingTokens = result.tokens ?? null;
       } else if (typeof auth === 'function') {
         user = (await auth(request)) ?? null;
       }

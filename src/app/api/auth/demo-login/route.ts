@@ -14,7 +14,7 @@ import {
   getDemoAccount,
   toUserResponse,
 } from '@deerflow-harness/auth';
-import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';
 
@@ -41,8 +41,8 @@ export const POST = withApiHandler({ auth: 'none', rateLimit: demoLoginRateLimit
     );
   }
 
-  const token = await getAuthService().issueSessionToken(user);
+  const tokens = getAuthService().issueTokenPair(user);
   const response = NextResponse.json(toUserResponse(user));
-  setSessionCookie(response, token);
+  setAuthCookies(response, tokens);
   return response;
 });

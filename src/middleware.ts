@@ -2,8 +2,13 @@
  * Edge 网关中间件：仅做 cookie 存在性校验。
  *
  * 设计取舍：不在 Edge runtime 内做 jsonwebtoken 验签（Edge 对 Node crypto 支持
- * 受限），真正的验签与 token_version 校验放在各 API 路由的 getCurrentUser 内
+ * 受限），真正的验签 / token_version 校验 / 透明刷新放在各 API 路由的鉴权层
  * （Node runtime）。本中间件只拦截"完全无 cookie"的访问，降低无效请求穿透。
+ *
+ * 双 token 下任一 auth cookie 存在即放行：access 已过期但 refresh 仍有效的
+ * 用户必须能到达 API 层，由 authenticateWithRefresh 透明续期（否则会被这里
+ * 提前 302 回登录页，刷新机制形同虚设）。过期 cookie 放行到路由层后由验签
+ * 兜底，无安全风险。
  *
  * 放行（公开）：/api/auth/*、/login、/setup、Next 静态资源。
  * 受保护页面无 cookie → 重定向 /login；受保护 API 无 cookie → 401。
@@ -11,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const COOKIE_NAME = 'access_token';
+const AUTH_COOKIE_NAMES = ['access_token', 'refresh_token'];
 
 // verify-email / reset-password 是邮件令牌页：用户点邮件链接时多半未登录，必须公开可达
 const PUBLIC_PAGES = ['/login', '/setup', '/verify-email', '/reset-password'];
@@ -35,7 +40,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const hasCookie = Boolean(request.cookies.get(COOKIE_NAME)?.value);
+  const hasCookie = AUTH_COOKIE_NAMES.some((name) => Boolean(request.cookies.get(name)?.value));
   if (hasCookie) {
     return NextResponse.next();
   }

@@ -214,17 +214,6 @@ export async function initialDB() {
         create index if not exists idx_email_tokens_hash on email_tokens(token_hash);
         create index if not exists idx_email_tokens_user on email_tokens(user_id);
 
-        -- 登录会话：JWT 带 sid，每次鉴权校验未吊销未过期——登出即吊销，即时生效
-        create table if not exists sessions (
-          id         uuid primary key,
-          user_id    uuid not null references users(id) on delete cascade,
-          expires_at timestamptz not null,
-          revoked_at timestamptz,
-          created_at timestamptz not null default now()
-        );
-        create index if not exists idx_sessions_user on sessions(user_id);
-        create index if not exists idx_sessions_expires on sessions(expires_at);
-
         -- OAuth 第三方登录绑定：provider_user_id 命中即登录；
         -- 唯一约束防同一 provider 账号重复绑定（并发回调的兜底在 service 层回查）
         create table if not exists oauth_accounts (

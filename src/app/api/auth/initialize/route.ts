@@ -15,7 +15,7 @@ import {
   validateStrongPassword,
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
-import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
@@ -44,9 +44,9 @@ export const POST = withApiHandler(
 
     try {
       const admin = await initializeAdmin(email, password);
-      const token = await getAuthService().issueSessionToken(admin);
+      const tokens = getAuthService().issueTokenPair(admin);
       const response = NextResponse.json(toUserResponse(admin), { status: 201 });
-      setSessionCookie(response, token);
+      setAuthCookies(response, tokens);
       return response;
     } catch (e) {
       if (e instanceof EmailExistsError) {

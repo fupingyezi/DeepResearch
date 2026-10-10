@@ -5,15 +5,17 @@ import { z } from 'zod';
 import type { UserRecord } from '@deerflow-harness/auth';
 
 import { withApiHandler } from '@/server/http/api-handler';
-import { getCurrentUser } from '@/server/http/auth';
+import { authenticateWithRefresh, setAuthCookies } from '@/server/http/auth';
 import { AppError, jsonError } from '@/server/http/errors';
 import { listQuerySchema } from '@/server/validation/schemas';
 
 vi.mock('@/server/http/auth', () => ({
-  getCurrentUser: vi.fn(),
+  authenticateWithRefresh: vi.fn(),
+  setAuthCookies: vi.fn(),
 }));
 
-const getCurrentUserMock = vi.mocked(getCurrentUser);
+const authenticateWithRefreshMock = vi.mocked(authenticateWithRefresh);
+const setAuthCookiesMock = vi.mocked(setAuthCookies);
 
 const user = {
   id: 'u1',
@@ -96,7 +98,7 @@ describe('返回透传与完成日志', () => {
   });
 
   it('cookie 登录通过 → ctx.user 非空，完成日志带 user 段', async () => {
-    getCurrentUserMock.mockResolvedValue(user);
+    authenticateWithRefreshMock.mockResolvedValue({ user });
     const wrapped = withApiHandler({}, async (ctx) => {
       expect(ctx.user?.id).toBe('u1');
       return NextResponse.json({});
@@ -156,8 +158,8 @@ describe('错误路径（catch → logHttpError → toHttpError）', () => {
 });
 
 describe('鉴权', () => {
-  it("'cookie' 未登录 → 401 标准体，handler 不执行", async () => {
-    getCurrentUserMock.mockResolvedValue(null);
+  it("'cookie' 未登录 → 401 标准体，handler 不执行，不写刷新 cookie", async () => {
+    authenticateWithRefreshMock.mockResolvedValue({ user: null });
     const handler = vi.fn(() => NextResponse.json({}));
     const wrapped = withApiHandler({}, handler);
     const response = await wrapped(requestAt('/api/test'));
@@ -168,6 +170,20 @@ describe('鉴权', () => {
     });
     expect(handler).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(setAuthCookiesMock).not.toHaveBeenCalled();
+  });
+
+  it('透明刷新命中 → setAuthCookies 调一次（新 token 对挂上响应），handler 照跑', async () => {
+    const tokens = { accessToken: 'a', refreshToken: 'r' };
+    authenticateWithRefreshMock.mockResolvedValue({ user, tokens });
+    const handler = vi.fn(() => NextResponse.json({ ok: true }));
+    const wrapped = withApiHandler({}, handler);
+    const response = await wrapped(requestAt('/api/test'));
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(setAuthCookiesMock).toHaveBeenCalledTimes(1);
+    expect(setAuthCookiesMock.mock.calls[0][0]).toBe(response);
+    expect(setAuthCookiesMock.mock.calls[0][1]).toEqual(tokens);
   });
 
   it('自定义 resolver 返回 null → 401', async () => {
@@ -177,7 +193,7 @@ describe('鉴权', () => {
   });
 
   it('guard false → 401，完成日志带已登录 userId', async () => {
-    getCurrentUserMock.mockResolvedValue(user);
+    authenticateWithRefreshMock.mockResolvedValue({ user });
     const handler = vi.fn(() => NextResponse.json({}));
     const wrapped = withApiHandler({ guard: () => false }, handler);
     const response = await wrapped(requestAt('/api/test'));

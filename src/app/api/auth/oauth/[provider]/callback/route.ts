@@ -10,7 +10,7 @@
 import { NextResponse } from 'next/server';
 
 import { appBaseUrl, oauthRedirectUri } from '@/lib/app-origin';
-import { setSessionCookie, withApiHandler } from '@/server/http';
+import { setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';
 import {
@@ -61,9 +61,9 @@ export const GET = withApiHandler(
         cookieState,
         oauthRedirectUri(request, params.provider),
       );
-      const token = await getAuthService().issueSessionToken(user);
+      const tokens = getAuthService().issueTokenPair(user);
       const response = NextResponse.redirect(`${app}/`, 302);
-      setSessionCookie(response, token);
+      setAuthCookies(response, tokens);
       return clearAnd(response);
     } catch (error) {
       return clearAnd(

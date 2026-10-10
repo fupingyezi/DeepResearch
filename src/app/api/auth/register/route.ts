@@ -15,7 +15,7 @@ import {
 } from '@deerflow-harness/auth';
 import { EmailExistsError } from '@deerflow-harness/auth/user-repository';
 import { isMailConfigured } from '@/lib/mailer';
-import { jsonError, setSessionCookie, withApiHandler } from '@/server/http';
+import { jsonError, setAuthCookies, withApiHandler } from '@/server/http';
 import { createRateLimiter } from '@/server/http/rate-limit';
 import { getAuthService } from '@/server/services/auth-service';
 import { credentialsSchema } from '@/server/validation/schemas';
@@ -47,9 +47,9 @@ export const POST = withApiHandler(
       if (!emailVerified) {
         await getAuthService().sendVerificationEmail(user);
       }
-      const token = await getAuthService().issueSessionToken(user);
+      const tokens = getAuthService().issueTokenPair(user);
       const response = NextResponse.json(toUserResponse(user), { status: 201 });
-      setSessionCookie(response, token);
+      setAuthCookies(response, tokens);
       return response;
     } catch (e) {
       if (e instanceof EmailExistsError) {
