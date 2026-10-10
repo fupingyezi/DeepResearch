@@ -33,7 +33,6 @@ import {
 } from '@deerflow-harness/auth/user-repository';
 import {
   OAuthAdapterError,
-  getOAuthAdapter,
   getOAuthAdapters,
   type OAuthProviderAdapter,
   type OAuthProviderName,
