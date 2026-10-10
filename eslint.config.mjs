@@ -39,6 +39,37 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // API 路由是薄适配器：只允许依赖管线（http/validation）与 controller。
+    // services / repositories / wiring / lib 与 harness 只能经 @/backend/controllers
+    // 间接使用——handler 逻辑全在 controller 层，路由层不越过它直连领域层
+    files: ['src/app/api/**/route.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@deerflow-harness', '@deerflow-harness/*'],
+              message: 'API 路由是薄适配器：harness 只能经 @/backend/controllers 间接使用',
+            },
+            {
+              group: [
+                '@/backend/services',
+                '@/backend/services/*',
+                '@/backend/repositories',
+                '@/backend/repositories/*',
+                '@/backend/wiring',
+                '@/backend/lib',
+                '@/backend/lib/*',
+              ],
+              message: 'API 路由是薄适配器：只允许依赖 @/backend/{http,validation,controllers}',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/utils/**/*.{ts,tsx}', 'src/types/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [

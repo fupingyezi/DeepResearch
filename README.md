@@ -454,7 +454,7 @@ interface ChatStreamBody {
 
 `start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `todo_update` / `human_interrupt` / `error` / `end` / `heartbeat`
 
-协议定义：`src/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/events/protocol/client-event.ts` re-export 复用。
+协议定义：`packages/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/events/protocol/client-event.ts` re-export 复用。
 
 前端事件链：`AgentEventProvider` 每 session 一个泵（`fetch` SSE → `sse-frame-parser` 分帧 → EventBus 广播，emit 前盖 `sessionId`+`streamId` 前端本地分拣戳）；`SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者把事件聚合成 zustand 数据（占位消息 / START id 迁移 / rAF 合帧 / 错误兜底），EventBus 基于官方 `events` 包实现。
 
@@ -464,7 +464,7 @@ interface ChatStreamBody {
 前端（React/Next.js + Zustand + EventBus + 设置管理）
         │ HTTP + SSE
         ▼
-API Routes（/api/v3/chat 等）
+API Routes（route.ts 薄适配器 → Controllers（HTTP 层逻辑））
         │
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
