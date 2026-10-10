@@ -88,7 +88,9 @@ chmod +x scripts/*.sh
 bash scripts/deploy-remote.sh deepresearch:<git_sha>
 ```
 
-部署成功后访问 `http://<SSH_HOST>:3000`。
+部署成功后访问 `http://<SSH_HOST>:3000`（app 端口绑全接口，安全组需放行 3000；
+无 HTTPS 时 `.env.production` 必须保留 `DISABLE_SECURE_COOKIE=true`，否则浏览器拒收
+登录 cookie。若改宿主机 nginx 反代，compose 端口可回收为 `127.0.0.1:3000:3000`）。
 
 ## 五、健康检查
 

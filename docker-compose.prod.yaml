@@ -38,8 +38,10 @@ services:
       # 进程就被 Next 直接退出，instrumentation 的排水序列根本跑不完
       NEXT_MANUAL_SIG_HANDLE: '1'
     ports:
-      # 只绑本机回环：公网 80/443 由宿主机 nginx 进入，与中间件同款策略
-      - '127.0.0.1:3000:3000'
+      # 绑全接口（http+IP 直连部署，安全组放行 3000）：国内服务器域名需备案，
+      # 无域名时只能 http://IP:3000 直连（.env.production 须配 DISABLE_SECURE_COOKIE=true）。
+      # 若改走宿主机 nginx 反代，可回收为 127.0.0.1:3000:3000，公网只留 80/443
+      - '3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
