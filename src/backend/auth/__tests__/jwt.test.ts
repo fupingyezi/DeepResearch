@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import jwt from 'jsonwebtoken';
 
-// 直接走子路径导入，避开 barrel（barrel 的 provider 等模块会拉起 @/lib/db）
+// 直接走子路径导入，避开 barrel（barrel 的 provider 等模块会拉起 @/backend/lib/db）
 import {
   createAccessToken,
   createRefreshToken,

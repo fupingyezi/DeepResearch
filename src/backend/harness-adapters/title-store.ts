@@ -1,4 +1,4 @@
-import { query } from '@/lib/db';
+import { query } from '@/backend/lib/db';
 
 import type { TitleStoreProvider } from '@deerflow-harness/agents/middlewares/title-store';
 

@@ -1,12 +1,8 @@
 /**
- * GET /api/auth/me —— 返回当前登录用户信息，未登录返回 401。
+ * GET /api/auth/me —— 薄适配器：逻辑见 @/backend/controllers/auth-controller。
  */
 
-import { NextResponse } from 'next/server';
+import { withApiHandler } from '@/backend/http';
+import { authController } from '@/backend/controllers/auth-controller';
 
-import { toUserResponse } from '@/backend/auth';
-import { withApiHandler } from '@/server/http';
-
-export const GET = withApiHandler({}, async ({ user }) => {
-  return NextResponse.json(toUserResponse(user!));
-});
+export const GET = withApiHandler({}, authController.me);

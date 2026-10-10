@@ -7,8 +7,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 
-// 直接导入 @/lib/db 而非 @/lib 桶：桶 re-export harness/models，从 harness 走桶会成反向环
-import { query } from '@/lib/db';
+// 直接导入 @/backend/lib/db 而非 @/lib 桶：桶 re-export harness/models，从 harness 走桶会成反向环
+import { query } from '@/backend/lib/db';
 import type { SystemRole, UserRecord } from '../../auth/types';
 
 interface UserRow {

@@ -37,7 +37,7 @@ import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
 import { getMemoryQueue } from '@deerflow-harness/agents/memory/queue';
 import { getMemoryStorage } from '@deerflow-harness/agents/memory/storage';
 import { getMemoryUpdateStats } from '@deerflow-harness/agents/memory/updater';
-import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '../../src/server/wiring';
+import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '../../src/backend/wiring';
 import { computeRunCost } from '@deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,

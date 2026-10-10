@@ -1,4 +1,4 @@
-import { query } from '@/lib/db';
+import { query } from '@/backend/lib/db';
 
 import type { UploadedFilesProvider } from '@deerflow-harness/agents/middlewares/uploaded-files';
 import type { UploadedFile } from '@deerflow-harness/agents/thread-state';

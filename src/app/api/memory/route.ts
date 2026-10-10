@@ -1,21 +1,10 @@
-import { NextResponse } from 'next/server';
+import { withApiHandler } from '@/backend/http';
+import { memoryController } from '@/backend/controllers/memory-controller';
 
-import { withApiHandler } from '@/server/http';
-import { getMemoryService } from '@/server/services/memory-service';
+export { OPTIONS } from '@/backend/http/preflight';
 
-export { OPTIONS } from '@/server/http/preflight';
-
-/** 读取当前用户的记忆（结构化 summary + facts）。 */
-export const GET = withApiHandler({ fallbackMessage: 'Get memory failed' }, async ({ user }) => {
-  const data = await getMemoryService().getMemory(user!.id);
-  return NextResponse.json({ message: 'Get memory success!', data }, { status: 200 });
-});
-
-/** 清空当前用户的全部记忆。 */
+export const GET = withApiHandler({ fallbackMessage: 'Get memory failed' }, memoryController.get);
 export const DELETE = withApiHandler(
   { fallbackMessage: 'Clear memory failed' },
-  async ({ user }) => {
-    const data = await getMemoryService().clearMemory(user!.id);
-    return NextResponse.json({ message: 'Clear memory success!', data }, { status: 200 });
-  },
+  memoryController.clear,
 );

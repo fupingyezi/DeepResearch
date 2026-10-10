@@ -12,14 +12,14 @@
  * - 明文 Key 仅在 getDecryptedKey 内部短暂出现，调用方用后即弃，不得落库 / 打日志。
  */
 
-// 直接导入 @/lib/db 而非 @/lib 桶：桶 re-export harness/models，从 harness 走桶会成反向环
-import { query } from '@/lib/db';
+// 直接导入 @/backend/lib/db 而非 @/lib 桶：桶 re-export harness/models，从 harness 走桶会成反向环
+import { query } from '@/backend/lib/db';
 import {
   decryptKey,
   encryptKey,
   maskKey,
   type EncryptedPayload,
-} from '@/lib/crypto/model-key-crypto';
+} from '@/backend/lib/crypto/model-key-crypto';
 
 /** 已配置 provider 的对外安全视图（不含明文 / 密文）。 */
 export interface ConfiguredProvider {

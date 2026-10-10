@@ -1,6 +1,7 @@
 /**
  * 进程生命周期接线（Next 的 register 钩子，服务端启动时调用一次）：
  *
+ * - 建表：initialDB（DDL bootstrap，best-effort——失败告警不阻断启动）
  * - 优雅停机：SIGTERM / SIGINT → beginShutdown（置 draining 停止接新 → 等待在跑
  *   run 自然收尾 → 超时取消并等收尾落库 / END 落流）→ 冲刷记忆更新队列 → 退出。
  *   第二次信号立即退出——drain 可能被卡死的收尾拖住，不无限等。
@@ -14,7 +15,8 @@
  */
 
 import { getMemoryQueue, type ThreadService } from '@deerflow-harness';
-import { getThreadService } from '@/server/wiring';
+import { initialDB } from '@/backend/lib/db';
+import { getThreadService } from '@/backend/wiring';
 
 /** 记忆队列冲刷超时：挂起的 LLM 调用不能拖死退出，超时放弃本轮未落盘的记忆更新。 */
 const MEMORY_FLUSH_TIMEOUT_MS = 10_000;
@@ -40,6 +42,12 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (installed) return;
   installed = true;
+
+  // 建表放在 threadService 之前：wiring 的 ensureMemoryStorage 会查 memory_state。
+  // best-effort 语义与 layout.tsx 时代一致：失败告警，不阻断启动
+  await initialDB().catch((error) => {
+    console.warn('[lifecycle] initialDB failed:', (error as Error)?.message);
+  });
 
   const service = getThreadService().catch((error) => {
     console.error('[lifecycle] threadService init failed:', (error as Error)?.message);
