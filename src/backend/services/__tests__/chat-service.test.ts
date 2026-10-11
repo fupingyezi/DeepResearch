@@ -4,7 +4,8 @@ vi.mock('@/backend/services/model-config-service', () => ({
   resolveUserModelConfig: vi.fn(),
 }));
 
-import type { ModelConfig, ThreadService } from '@deerflow-harness';
+import type { ModelConfig } from '@deerflow-harness';
+import type { ThreadService } from '@/backend/services/thread-service';
 import type { MessagePart } from '@/types';
 import type { SavedFileMetadata } from '@/backend/repositories/file-metadata';
 import { resolveUserModelConfig } from '@/backend/services/model-config-service';

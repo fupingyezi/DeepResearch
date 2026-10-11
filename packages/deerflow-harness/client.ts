@@ -325,10 +325,11 @@ export function resolveRuntimeOptions(
 /**
  * DeerFlowClient
  *
- * 进程级单例（见 src/server/wiring.ts）。lead-agent 永远启用 subagent
- * 能力（taskTool + subagentLimitMiddleware 始终注入）。每轮 stream 把当前
- * modelConfig 写入 RuntimeContext.currentModelConfig，供 'inherit' 模式的
- * subagent（如 general-purpose）复用。
+ * 实例由宿主按 run 构造（每 run 独立 client，agent / 中间件实例不跨 run 共享）；
+ * 内部 agentCache 只服务本实例内的配置键复用，不跨 run、不跨 client 共享。
+ * lead-agent 永远启用 subagent 能力（taskTool + subagentLimitMiddleware 始终注入）。
+ * 每轮 stream 把当前 modelConfig 写入 RuntimeContext.currentModelConfig，供
+ * 'inherit' 模式的 subagent（如 general-purpose）复用。
  */
 export class DeerFlowClient {
   /** Agent 实例缓存：按 RuntimeRunOptions 派生的 key 分组缓存。 */

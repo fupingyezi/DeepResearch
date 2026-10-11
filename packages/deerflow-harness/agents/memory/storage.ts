@@ -10,10 +10,10 @@
 
 import { createEmptyMemory } from './types';
 import type { MemoryData } from './types';
-import type { SqlExecutor } from '../../persistence/sql';
+import type { SqlExecutor } from '../../types/sql-executor';
 
 /**
- * 过渡期别名：SQL 最小接口统一收编到 persistence/sql.ts 的 SqlExecutor。
+ * 过渡期别名：SQL 最小接口统一收编到 types/sql-executor.ts 的 SqlExecutor。
  * 存量消费者（wiring）可直接换用 SqlExecutor，此导出保留至迁移完成。
  */
 export type MemorySqlExecutor = SqlExecutor;

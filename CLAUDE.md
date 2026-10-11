@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 用户认证（JWT + OAuth）；模型 API Key **按用户**加密存 DB（`model-keys` + `MODEL_KEY_ENC_SECRET`），主聊天链路经 `resolveUserModelConfig()` 取用户 Key，**不读环境变量默认 Key**（环境 Key 只剩标题 / 提示词增强 / 记忆更新等副链路兜底）
 - 持久化：PostgreSQL（threads/runs 元数据 + LangGraph checkpoint）+ Redis（缓存 / 跨进程沙箱协调）+ MinIO（文件）
 - SSE 事件流：fire-and-forget 执行 + 事件缓冲回放（多进程下经 Redis Stream 镜像跨进程续读）；LLM 驱动长期记忆；文件上传解析（PDF/Word/图片 OCR）；视觉多模态；可插拔沙箱（local/docker/remote）；MCP/skill 扩展；双层背压并行编排
-- **harness 是独立 SDK 包**：`packages/deerflow-harness`（包名 `@deerflow/harness`，pnpm workspace）——只含 agent 本身服务层（Agent 工厂 / 中间件 / 工具 / subagent / runtime / 事件 / 沙箱 / 记忆引擎），**零 `@/` 依赖**（eslint 固化）；上下文装配、沙箱装配、记忆检索封装为注入 API（SqlExecutor / TitleStoreProvider / UploadedFilesProvider / RedisClientFactory / makeCheckpointer 等），由 `src/backend/wiring.ts` + `src/backend/harness-adapters/` 装配（见 §2 与包内 README）
+- **harness 是独立 SDK 包**：`packages/deerflow-harness`（包名 `@deerflow/harness`，pnpm workspace）——只含 agent 执行层（Agent 工厂 / 中间件 / 工具 / subagent / 沙箱 / 记忆引擎 / SSE 事件协议 / checkpoint）+ 契约与内存默认实现，**零 `@/` 依赖**（eslint 固化）；线程生命周期 / 事件总线 / 流缓冲等产品层在 `src/backend/runtime/`；上下文装配、存储、沙箱装配、记忆检索封装为注入 API（SqlExecutor / TitleStoreProvider / UploadedFilesProvider / RedisClientFactory / makeCheckpointer 等），由 `src/backend/wiring.ts` + `src/backend/harness-adapters/` 装配（见 §2 与包内 README）
 
 技术栈：前端 Next.js 14 / React 18 / Ant Design 5 / Zustand / TailwindCSS；后端 Node.js + LangChain/LangGraph；AI 走 OpenAI 兼容接口；存储 PostgreSQL / Redis / MinIO；搜索 Tavily。
 
@@ -115,9 +115,9 @@ Services（src/backend/services，领域编排，无 SQL）
 Repositories（单表 SQL）  wiring.ts（组合根 → ThreadService 进程单例）
    │                       ├─ harness（packages/deerflow-harness：SDK——Agent/中间件/工具/沙箱/记忆，
    │                       │   上下文与存储经注入面接回 app：harness-adapters）
-   │                       ├─ DeerFlowClient（Agent 缓存 + LangGraph stream）
+   │                       ├─ DeerFlowClient（每 run 独立实例：agent / 中间件不跨 run 共享）
    ▼                       ├─ Checkpointer（PG）/ Stores（threads/runs）
-PostgreSQL                 └─ RunEventBus（进程内 StreamBridge / Redis Stream 镜像 + 游标续读）→ SSE → 前端
+PostgreSQL                 └─ runtime/ RunEventBus（进程内 StreamBridge / Redis Stream 镜像 + 游标续读）→ SSE → 前端
 ```
 
 Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `createBaseAgent()`（中间件链按 `ORDERED_MIDDLEWARES` 位序装配）→ 工具（search_web / task / sandbox 读写执行 / view_image / …）→ `SandboxProvider`（local / docker / remote）。
@@ -179,9 +179,10 @@ interface ChatStreamBody {
 - 路由 `src/app/api/**/route.ts`——薄适配器：withApiHandler 横切选项（auth/body/query/guard/rateLimit/fallbackMessage/userIdHeader）+ controller 一行调用；Next 配置导出（`runtime`/`dynamic`/OPTIONS）只认 route 文件，必须留在此层
 - 控制器 `src/backend/controllers/`——HTTP 层逻辑（14 文件按域分组）；handler 是裸函数（`ApiRouteHandler<TBody, TQuery>` 标注，不感知 withApiHandler）；`createRateLimiter` 限流器（Redis 固定窗口 + 进程内降级，另含账号维度登录失败锁定 `recordLoginFailure` / `isLoginLocked`，锁定判定在密码校验前省 bcrypt 算力）、自定义 body 解析（multipart）、guard 纯函数（sandbox token）都在这层。**统一形态：裸函数导出，route.ts 消费走 namespace import（`import * as xxxController`）——不设聚合对象/类**
 - 服务 `src/backend/services/`——领域编排、业务规则、错误映射（AppError）；无 SQL。**统一形态：`export class XService` + 构造器注入 deps**（纯函数模块如 model-config / run-stream-guard 除外）
-- 仓库 `src/backend/repositories/`——单表 SQL（app 侧四张表 + email-token / oauth-account / user / user-model-key）。**统一形态：每域 types.ts 契约 + `PgXxxRepository implements` 类 + index 桶**
+- 仓库 `src/backend/repositories/`——单表 SQL（app 侧四张表 + harness 侧 thread-meta/runs + email-token / oauth-account / user / user-model-key）。**统一形态：每域 types.ts 契约 + `PgXxxRepository implements` 类 + index 桶**。**两种 SqlExecutor 形态**：app 仓库用 `shared.ts` 的 query-only SqlExecutor（withTransaction）；`harness-adapters/pg-memory-storage.ts` 保持 harness `types/sql-executor.ts` 形态（update() 需 FOR UPDATE 事务）——wiring 的 `makePoolSqlExecutor()` 结构上同时满足两者
 - 组合根 `src/backend/wiring.ts`——ThreadService 进程单例 + harness 注入面注册
-- 适配器 `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files）
+- 适配器 `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files / pg-memory-storage）
+- 运行时 `src/backend/runtime/`——run 生命周期与协调：lifecycle（并发闸门 / 心跳 / 僵尸回收）、coordination（RunRegistry / RunEventBus 进程内与 Redis 双实现）、stream-bridge、locks
 
 **依赖方向**（eslint `no-restricted-imports` 已固化 route 与 harness 两侧）：
 
@@ -202,7 +203,7 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 ### 3. ThreadService
 
-**文件：** `packages/deerflow-harness/runtime/service.ts`；**单例入口：** `src/backend/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaRepository + RunRepository + RunRegistry + RunEventBus + AsyncLocalStorage Context（13 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `truncateHistory` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
+**文件：** `src/backend/services/thread-service.ts`；**单例入口：** `src/backend/wiring.ts` → `getThreadService()`。装配 Checkpointer + ThreadMetaRepository + RunRepository + RunRegistry + RunEventBus + 长驻 DeerFlowClient（仅 truncateHistory）+ **每 run 独立 DeerFlowClient 工厂** + AsyncLocalStorage Context（13 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `truncateHistory` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
 
 **关键不变量：**
 
@@ -223,12 +224,12 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 ### 4. DeerFlowClient
 
-**文件：** `packages/deerflow-harness/client.ts`（进程级单例，注入到 ThreadService）。
+**文件：** `packages/deerflow-harness/client.ts`（agent 执行 client，实例由宿主按 run 构造）。
 
-- **Agent 实例缓存**：缓存键由 `[modelName, 运行期开关布尔组(memory/autoTitle/threadData/uploads/sandbox/summarization/guardrail/todo/mcp/subagents/vision), agentName, sortedSkills, mcpSignature, skillSignature, extraMiddlewareSignature, middlewareConfigSignature]` JSON 签名组成（`buildConfigKey`）——config.yaml 签名（mtime+哈希）变化即缓存失效重建，改 YAML 下轮对话热生效。**重要例外：`memoryEnabled=true` 时不缓存**（每轮 prompt 含最新 memory，必须每次重建）
+- **Agent 实例缓存（仅本实例内生效）**：缓存键由 `[modelName, 运行期开关布尔组(memory/autoTitle/threadData/uploads/sandbox/summarization/guardrail/todo/mcp/subagents/vision), agentName, sortedSkills, mcpSignature, skillSignature, extraMiddlewareSignature, middlewareConfigSignature]` JSON 签名组成（`buildConfigKey`）——config.yaml 签名（mtime+哈希）变化即缓存失效重建，改 YAML 下轮对话热生效。**重要例外：`memoryEnabled=true` 时不缓存**（每轮 prompt 含最新 memory，必须每次重建）
 - **运行期选项三级优先级**：`resolveRuntimeOptions(baseOptions, modelConfig, metadata, snapshot)`——① metadata 显式开关（最高，严格 `typeof === 'boolean'` 才生效，`undefined` 不会被解释为 false）② `snapshot.enabled`（config.yaml，经 middlewareConfigProvider 每轮读取）③ 构造时 `baseOptions`（wiring 由 config.yaml 派生：`agentName: 'lead'` + 8 开关 + memoryMode + 4 个中间件 options）。`visionEnabled` 由 `modelConfig.supportsVision` 驱动，不开放 metadata 覆盖。解析结果是局部变量，不修改 `this.baseOptions`
 - **stream()**：LangGraph `streamMode: ['messages', 'updates', 'custom']` 三模式同时订阅——messages：AI token 分片（`tool_call_chunks` 按 index 缓冲拼接 args，ToolMessage 到达才发 `TOOL_CALL_START` 完整调用信息）；updates：补抓 ToolMessage；custom：writer 推送的 payload（state*update / human_interrupt / task*\* 六种）
-- `wiring.ts` 的 `createClientForModel`：请求携带 `modelConfig` 时按**完整 modelConfig 签名**（JSON.stringify）缓存 DeerFlowClient——支持单请求切模型，同时隔离不同用户的 apiKey。缓存键若是模型名，两个用户用同一模型会共用第一个用户的 Key；且 client 构造时固化 modelConfig，配置变化后旧实例永不刷新
+- `wiring.ts` 的 `createRunClient`：每 run `new DeerFlowClient(modelConfig)` 独立实例——agent / 中间件实例不跨 run 共享，并发 run 绝对隔离；单请求携带 `modelConfig` 时进入本次构造（不同用户的 apiKey 天然隔离）。长驻 client 只服务 truncateHistory（checkpoint 纯写通道、无 LLM 调用，共享同一 checkpointer 用哪个实例结果一致）
 
 ### 5. 事件系统（双层协议）与 StreamBridge
 
@@ -242,9 +243,9 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 过滤边界在 `runtime/sse/to-client-event.ts`——白名单外的内部事件在此 drop，不泄露给前端。
 
-**RunEventBus**（契约 `runtime/coordination/contracts.ts` + 双实现 `runtime/coordination/event-bus/`）——SSE 订阅的 wiring 面：`subscribe(threadId, runId, fromEventId?)` 返回带单调游标的 `StampedClientAgentEvent` 流（游标是断点续读凭证），`publish` 直通 + `release` 释放 run 级资源。进程内实现直包 StreamBridge（游标用 publish 时贴的递增序号，release drop channel 并留墓碑——已释放的 run 再订阅立即结束，不挂空 channel）；`RedisEventBus` 把事件镜像到 `deerflow:stream:{threadId}:{runId}`（XADD 内联 TRIM ~2000 与进程内 buffer 对齐、EXPIRE 24h 从最后一条事件起算）：订阅走独立连接 XREAD BLOCK 续读（阻塞读占住命令队列，**不能与发布共用连接**），中断退避后以同一游标重发——XREAD 幂等不丢不重；无 END 的悬挂流（owner 崩溃）由重连路由按 runs 终态补尾。REDIS_URL 未配置 / 连接失败 → 永久降级进程内实现（告警一次）。跨进程回放使 LB 粘性不再必要。
+**RunEventBus**（契约 `src/backend/runtime/coordination/contracts.ts` + 双实现 `src/backend/runtime/coordination/event-bus/`）——SSE 订阅的 wiring 面：`subscribe(threadId, runId, fromEventId?)` 返回带单调游标的 `StampedClientAgentEvent` 流（游标是断点续读凭证），`publish` 直通 + `release` 释放 run 级资源。进程内实现直包 StreamBridge（游标用 publish 时贴的递增序号，release drop channel 并留墓碑——已释放的 run 再订阅立即结束，不挂空 channel）；`RedisEventBus` 把事件镜像到 `deerflow:stream:{threadId}:{runId}`（XADD 内联 TRIM ~2000 与进程内 buffer 对齐、EXPIRE 24h 从最后一条事件起算）：订阅走独立连接 XREAD BLOCK 续读（阻塞读占住命令队列，**不能与发布共用连接**），中断退避后以同一游标重发——XREAD 幂等不丢不重；无 END 的悬挂流（owner 崩溃）由重连路由按 runs 终态补尾。REDIS_URL 未配置 / 连接失败 → 永久降级进程内实现（告警一次）。跨进程回放使 LB 粘性不再必要。
 
-**StreamBridge**（`runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。**ThreadChannel 是每 run 一个的 typed `EventEmitter<ChannelEventMap>`**——10 个 `ClientAgentEventType` 就是事件名（emit/on 传整个事件对象），另挂 `CLOSED_EVENT` Symbol 事件作内部唤醒信号：close() 时发出，把「唤醒」从「数据」剥离，不再合成 system END 帧（chat-service 里按 `agentId==='system'` 过滤的跨文件耦合随之删除）。`publish()` 是唯一写入口（类内 `emitEvent` 类型桥规避「联合事件名+联合值」的 TS 推断失败）；构造函数常驻 no-op `'error'` 监听——`error` 是白名单事件名却撞 EventEmitter 内建语义（无监听者 emit 会抛）。`subscribe()` 仍是 SSE 稳定契约：手写四步 next()（回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件），buffer 快照与对全部事件名的监听注册在**同一同步块**内完成——事件要么在快照里（回放）要么进 pending（实时），不丢不重；跨类型全局序由单一 pending 队列保持。**不用 `events.on()` 重写 subscribe**：合并多事件名会丢跨类型时序，且 'error' 的终止语义与「ERROR 是流中间事件、END 才终止」相反。终止：END → `close()`（emit CLOSED_EVENT + removeAllListeners，后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。
+**StreamBridge**（`src/backend/runtime/stream-bridge/stream-bridge.ts`）：`channels: Map<"threadId:runId", ThreadChannel>`。**ThreadChannel 是每 run 一个的 typed `EventEmitter<ChannelEventMap>`**——10 个 `ClientAgentEventType` 就是事件名（emit/on 传整个事件对象），另挂 `CLOSED_EVENT` Symbol 事件作内部唤醒信号：close() 时发出，把「唤醒」从「数据」剥离，不再合成 system END 帧（chat-service 里按 `agentId==='system'` 过滤的跨文件耦合随之删除）。`publish()` 是唯一写入口（类内 `emitEvent` 类型桥规避「联合事件名+联合值」的 TS 推断失败）；构造函数常驻 no-op `'error'` 监听——`error` 是白名单事件名却撞 EventEmitter 内建语义（无监听者 emit 会抛）。`subscribe()` 仍是 SSE 稳定契约：手写四步 next()（回放快照 → 消费 pending → 检查关闭 → 挂起等下一个事件），buffer 快照与对全部事件名的监听注册在**同一同步块**内完成——事件要么在快照里（回放）要么进 pending（实时），不丢不重；跨类型全局序由单一 pending 队列保持。**不用 `events.on()` 重写 subscribe**：合并多事件名会丢跨类型时序，且 'error' 的终止语义与「ERROR 是流中间事件、END 才终止」相反。终止：END → `close()`（emit CLOSED_EVENT + removeAllListeners，后续 publish no-op）；`recoverable=false` 的 ERROR 不立即 close，由 END 兜底。
 
 ### 6. Agent 工厂与中间件管线
 
@@ -284,7 +285,7 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 **文件：** `packages/deerflow-harness/agents/memory/`
 
 - **结构 `MemoryData`**：`user.workContext/personalContext/topOfMind` + `history.recentMonths/earlierContext/longTermBackground`（各带 summary + updatedAt）+ `facts[]`（id/category/confidence/source/embedding）
-- **存储（PG 双表，唯一后端）**：`PgMemoryStorage`（`memory_state` jsonb 存结构不含 embedding、`memory_vectors` pgvector 列存向量，`scope_key = ${userId}::${agentName}`；update = 单事务行锁 RMW（行锁即 per-scope 串行锁，跨进程语义一致）；**mutator 前必须水合向量**——updater 的 embedMissingFacts/Sections 靠读 current 里的 embedding 判缺，不水合会每轮更新全量重嵌）。**NoopMemoryStorage 是注册表默认**（load/reload 返回空 schema、save false、update null）：wiring `ensureMemoryStorage()` 的 `initialMemoryDb`（CREATE EXTENSION + 建表 + 维度变更先清空再 ALTER 列）成功 → 切 PG，失败 warnOnce 保持 Noop（**记忆功能关闭，聊天不阻断**）。旧文件数据迁移是一次性脚本 `scripts/migrate-memory-to-pg.mjs`（读旧 memory.json → scope 行缺失才插入，只读不删旧文件，跑完可删；步骤见 `docs/deploy-runbook.md`）
+- **存储（PG 双表，唯一后端）**：`PgMemoryStorage`（`src/backend/harness-adapters/pg-memory-storage.ts`：`memory_state` jsonb 存结构不含 embedding、`memory_vectors` pgvector 列存向量，`scope_key = ${userId}::${agentName}`；update = 单事务行锁 RMW（行锁即 per-scope 串行锁，跨进程语义一致）；**mutator 前必须水合向量**——updater 的 embedMissingFacts/Sections 靠读 current 里的 embedding 判缺，不水合会每轮更新全量重嵌）。**NoopMemoryStorage 是注册表默认**（load/reload 返回空 schema、save false、update null）：wiring `ensureMemoryStorage()` 的 `initialMemoryDb`（CREATE EXTENSION + 建表 + 维度变更先清空再 ALTER 列）成功 → 切 PG，失败 warnOnce 保持 Noop（**记忆功能关闭，聊天不阻断**）。**SDK 内置 `InMemoryMemoryStorage`**（`agents/memory/in-memory-storage.ts`：Map 存储 + 写时向量归一，与 pg-storage 同口径）供无 DB 场景 / SDK 测试夹具选用。旧文件数据迁移是一次性脚本 `scripts/migrate-memory-to-pg.mjs`（读旧 memory.json → scope 行缺失才插入，只读不删旧文件，跑完可删；步骤见 `docs/deploy-runbook.md`）
 - **LLM 驱动更新（MemoryUpdater）**：加载 → 拼 prompt（注入当前 memory + 对话 + 校正/强化提示）→ LLM invoke（**关键：显式 `callbacks: []`**，切断与外层 SSE handler 的回调链，防止向已关闭的 ReadableStream 写入触发 ERR_INVALID_STATE；另带 `AbortSignal.timeout(updateTimeoutMs)` 超时，挂起不卡死队列）→ JSON 解析（含 tryRecoverJson 修复 Qwen maxTokens 触顶的尾部截断）→ applyUpdates（confidence 过滤 + casefold 去重 + maxFacts 截断）→ stripUploadMentions 清洗文件引用 → 落盘。applyUpdates / stripUploadMentions 是惰性拷贝：无变更返回原引用，`pg-storage.update` 的 `next === current` 判等跳过落盘写
 - **注入模式**：`inject`（默认，全量：所有 section + facts 按 confidence 降序，2000 token 预算）/ `retrieve`（RAG 管线检索 top-K facts + 最相关一段 history，800 token 预算）。由 `configuration.memoryMode` 切换
 - **检索管线**（`retrieval.ts`，双路召回 → RRF 融合 → rerank 精排 → 组装）：路 A 向量召回——pgvector 余弦 top-50（SQL 失败 / 无后端 → JS 线性扫描兜底，`vectorLeg` 记来源），余弦 ≥ 门槛才进 RRF；4 个打分 section 单独 JS 过门槛并入（pgvector top-50 可能被 facts 占满，section 不能因此丢）。路 B 词面召回——BM25（JS，语料 = facts + 4 section，idf 查询时现算；tokenize 复用：latin 词 + CJK 单字/二元组；BM25+ idf 恒非负、tf 饱和 k1=1.5、长度归一 b=0.75）top-50。RRF(k=60) 按**排名**融合（向量分与词面分不同量纲，排名天然可比；路 A 先入 Map 保 tie 稳定序）→ 候选池（恒 max(topK, 20)，池宽与 topK 解耦防 4 个 section 挤占 fact 名额）→ rerank 精排池头 20 条（池尾接续倒数排名分，头 min 1/80 > 尾 max 1/81 边界单调；未注册 / 失败 → 状态切换告警 + 计数保持 RRF 序）→ 组装：final =（rerank ?? RRF）×（0.5 + 0.5×confidence）取 topK(8)——rerank 只提供精排顺序（原始分压缩，转成与 RRF 同量纲的倒数排名分 1/(RRF_K+rank+1)，池头为精排名次、池尾为接续名次；明细里原始分存 rerankRaw）。query 分工：词面用近 3 轮用户输入拼接（省略式提问「它呢？」命中上轮实体），语义与 rerank 只用本轮单句（拼串稀释向量语义）。双路全空 → 不注入（即使存在身份信息）；workContext/personalContext 恒保留、history 三段留池内最优一段、topOfMind 进池才留
@@ -309,7 +310,7 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 - **后端工厂**（provider-factory，进程级单例，`setSandboxProvider()` 供测试注入）：`local`（默认）宿主文件系统直连，bash 受 `DEERFLOW_ALLOW_HOST_BASH` 门控；`docker` 每 thread 一个长驻加固容器（内核级隔离）；`remote` 每 thread 一条 SSH 长连接。docker/remote 是隔离边界，**不受 host-bash 门控**。依赖方向 factory → local/docker/remote、docker → local（仅重写 executeCommand 走 docker exec），单向无循环
 - **docker 后端**：`sleep infinity` 加固容器（`--cap-drop ALL` + `no-new-privileges` + memory/cpus/pids 限额 + 非 root 降权）；卷挂 `{threadDir}/user-data → /mnt/user-data`（不暴露宿主真实路径，内部反向映射）；引用计数 + 空闲回收 + LRU + 容器消失时 reprovision 重建。`docker-cli.ts` 用 `execFile` + 参数数组（**禁 shell 拼接防注入**）
 - **remote 后端**：**缺 host 或私钥时构造即抛错**（避免静默降级宿主直连）；per-thread SSH 连接池（ssh2，幂等复用 + 引用计数 + 空闲回收 + keepalive + 进程内信号量）；全部 IO 经 SSH 往返——readFile base64 往返保编码、writeFile 走 stdin 超 `DEERFLOW_REMOTE_MAX_WRITE_BYTES` 拒绝、listDir/glob/grep 远端执行并把远程路径还原为 `/mnt/user-data`。**并发上限按进程独立计**，多进程部署实际连接数 = 上限 × 进程数
-- **双层背压**：run 级 `RunConcurrencyGate`（`runtime/lifecycle/run-concurrency-gate.ts`，进程 FIFO 信号量 + 跨进程 `runs:count` 占位；接在 service 执行体消费 stream 之前 acquire，超限先 publish `task_progress{status:'queued'}`——对话仍可先思考，finally 释放）+ 容器级 `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（活跃容器上限，配合空闲回收与启动 reconcile 清孤儿）
+- **双层背压**：run 级 `RunConcurrencyGate`（`src/backend/runtime/lifecycle/run-concurrency-gate.ts`，进程 FIFO 信号量 + 跨进程 `runs:count` 占位；接在 service 执行体消费 stream 之前 acquire，超限先 publish `task_progress{status:'queued'}`——对话仍可先思考，finally 释放）+ 容器级 `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（活跃容器上限，配合空闲回收与启动 reconcile 清孤儿）
 - **run 名额凭据**：跨进程占位落 per-run 槽键（`deerflow:sandbox:run:slot:{runId}`，`tryReserveRun(runId, maxRuns)` 原子 INCR 计数 + SET 槽键）；释放 = DEL 槽键成功才 DECR 计数（Lua 原子）——正常 finally 与僵尸回收共用这条路径，槽键一次性 DEL 保证计数恰好扣一次（两方并发也不会多扣），kill -9 丢失的名额由僵尸回收归还
 - **引用计数不变量**：refCount = 正在使用容器的 run/agent 层数，由 sandbox-middleware 的 beforeAgent retain(+1) / afterAgent markIdle(-1) 严格成对；`acquire` 幂等命中只 touch 不 incRef（避免 subagent/工具惰性 acquire 泄漏）；`deleteThread` 联动 `releaseByThreadId` 销毁容器
 - **跨进程协调**（docker-coordinator）：Redis 原子计数（Lua RESERVE/RELEASE）、thread→container 登记 Hash、`SET NX PX` 分布式锁；**Redis 不可用自动降级进程内 Map**
@@ -330,8 +331,8 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 ### 9. 持久化（PG schema）
 
-- **threads**（PgThreadMetaRepository，`persistence/thread-meta/thread-meta-repository.ts`）：id / thread_id / user_id / assistant_id / display_name / status（'idle'|'running'|'error'|'interrupted'）/ metadata JSONB / 时间戳；metadata 用 `@>` 操作符过滤；全部操作带 user_id 访问控制
-- **runs**（PgRunRepository，`persistence/runs/run-repository.ts`）：id / thread_id / assistant_id / user_id / input / status（'running'|'succeeded'|'failed'）/ error / metadata JSONB / 时间戳
+- **threads**（PgThreadMetaRepository，`src/backend/repositories/thread-meta/thread-meta-repository.ts`）：id / thread_id / user_id / assistant_id / display_name / status（'idle'|'running'|'error'|'interrupted'）/ metadata JSONB / 时间戳；metadata 用 `@>` 操作符过滤；全部操作带 user_id 访问控制
+- **runs**（PgRunRepository，`src/backend/repositories/runs/run-repository.ts`）：id / thread_id / assistant_id / user_id / input / status（'running'|'succeeded'|'failed'）/ error / metadata JSONB / 时间戳
 - **Checkpointer**：`@langchain/langgraph-checkpoint-postgres`，工厂 `makeCheckpointer()`（`runtime/checkpointer/factory.ts`），代理 lib/db 单例连接池
 
 ### 10. 前端状态管理（Zustand）
@@ -355,7 +356,7 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 ### 11. 关键设计模式
 
-- **进程级单例**：wiring.ts `getThreadService()` 懒初始化（DeerFlowClient + Checkpointer + Stores + createClientForModel），dev 下挂 globalThis（见 §3）。App 侧 service 用 `createXService(deps?)` 工厂 + 模块级懒单例 `getXService()`——无跨请求可变状态，模块级单例即可
+- **进程级单例**：wiring.ts `getThreadService()` 懒初始化（Checkpointer + Stores + 长驻 client + createRunClient 工厂），dev 下挂 globalThis（见 §3）。App 侧 service 用 `createXService(deps?)` 工厂 + 模块级懒单例 `getXService()`——无跨请求可变状态，模块级单例即可
 - **app → harness 注入点**（依赖方向单向，wiring 统一注入）：`setMemoryModelFactory`（记忆更新 LLM）、`setTitleModelFactory`（标题/提示词增强）、`setMemoryEmbeddingsFactory`（智谱 embedding-3）、`setMemoryRerankerFactory`（智谱 rerank 精排）、`setThreadImageFetcher`（MinIO 图片字节读取）、`setParentHistoryProvider`（子 agent 父 checkpoint 读取）
 - **AsyncLocalStorage 上下文传播**（`runtime/context.ts`）：`runWithContext()` 在整个 Agent 调用栈提供 threadId / runId / userId / agent_name / currentModelConfig；SubagentExecutor 经 `getContext()?.thread_id` 读父线程 ID、`currentModelConfig` 透传 modelConfig
 - **幂等线程创建**：前端生成 `sessionId`（UUID）作请求体字段调 `POST /api/v3/chat`，`createThread()` 先查再写，外部指定 ID 天然支持请求重试
@@ -376,33 +377,35 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 
 ### 13. 关键文件索引
 
-- `src/backend/wiring.ts`——ThreadService 进程单例工厂（globalThis）+ harness 注入面注册（title/uploaded-files provider、RedisClientFactory、Tavily key、checkpointer 池、StreamBridge bufferMax）+ config.yaml 装配接线（middlewareConfigProvider）
+- `src/backend/wiring.ts`——ThreadService 进程单例工厂（globalThis）+ harness 注入面注册（title/uploaded-files provider、RedisClientFactory、Tavily key、checkpointer 池、StreamBridge bufferMax）+ 每 run 独立 DeerFlowClient 工厂（createRunClient）+ config.yaml 装配接线（middlewareConfigProvider）
 - `src/backend/config/`（deerflow-config.ts / middleware-loader.ts）——config.yaml 宿主侧读取（mtime 缓存 + 配置签名）/ extensions.middlewares 模块加载；`config.yaml` / `config.example.yaml`——中间件装配配置（约定与优先级见 `docs/middleware-yaml-config.md`）
 - `src/backend/controllers/`（14 个按域文件）——HTTP 层 handler（裸 `ApiRouteHandler` + `createRateLimiter` 限流器）；route.ts 只做 withApiHandler 装配与 Next 配置导出
-- `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files，SQL 自中间件逐字搬移）
+- `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files / pg-memory-storage，SQL 自中间件逐字搬移）
 - `src/backend/http/`（api-handler / errors / auth / logger / rate-limit）——统一请求管线 / 错误映射（toHttpError）/ 会话 cookie / HTTP 访问日志 / 限流占位
 - `src/backend/validation/schemas.ts` / `schemas.preview.ts`——全部路由 body/query 的 zod schema（v4，`error.issues`）；预览接口的 schema 独立在 `schemas.preview.ts`
-- `src/backend/repositories/`（chat-session / chat-message / file-metadata / file-content / email-token / oauth-account / user / user-model-key）——app 侧单表 SQL（SqlExecutor + withTransaction）
-- `src/backend/services/`——领域编排（chat / conversation / file / memory / model-key / extension / prompt-enhance / sandbox / model-config）
+- `src/backend/repositories/`（chat-session / chat-message / file-metadata / file-content / thread-meta / runs / email-token / oauth-account / user / user-model-key）——单表 SQL（query-only SqlExecutor + withTransaction）
+- `src/backend/services/`——领域编排（thread-service：run 生命周期 + chat / conversation / file / memory / model-key / extension / prompt-enhance / sandbox / model-config）
+- `src/backend/runtime/`——run 运行时：lifecycle（run-concurrency-gate / liveness / instance-id / zombie-reconciler）、coordination（contracts + run-registry + event-bus 进程内与 Redis 双实现）、stream-bridge、locks（dist-lock）
 - `src/backend/services/model-config-service.ts`——主聊天链路模型解析：用户选定预设 + 该 provider 加密 Key → ModelConfig
 - `src/config/models.ts`——MODEL_PRESETS 预设（默认 deepseek-v4-flash）与 ModelConfig 构建（harness `models/` 只含 createChatModel 工厂与 provider 推断）
 - `src/backend/lib/crypto/model-key-crypto.ts`——用户模型 Key 加密存取（`MODEL_KEY_ENC_SECRET`）
 - `src/app/api/v3/chat/route.ts`——主聊天 API 薄适配器（handler 在 `controllers/chat-controller.ts`，编排在 chat-service，sessionId 走 body）
-- `packages/deerflow-harness/client.ts`——DeerFlowClient：Agent 缓存 + LangGraph 流式调用
-- `packages/deerflow-harness/runtime/service.ts`——ThreadService（fire-and-forget + 取消三路径）
-- `packages/deerflow-harness/runtime/lifecycle/run-concurrency-gate.ts`——run 级并发闸门（FIFO 信号量 + 跨进程占位）
+- `packages/deerflow-harness/client.ts`——DeerFlowClient：每 run 独立实例（agent 缓存仅本实例内复用）+ LangGraph 流式调用
+- `src/backend/services/thread-service.ts`——ThreadService（fire-and-forget + 取消三路径）
+- `src/backend/runtime/lifecycle/run-concurrency-gate.ts`——run 级并发闸门（FIFO 信号量 + 跨进程占位）
 - `packages/deerflow-harness/runtime/usage/usage-accounting.ts`——LLM 用量记账（模型工厂挂接，ALS 累加器）
 - `packages/deerflow-harness/agents/factory.ts` / `features.ts`——createBaseAgent + assembleFromFeatures / RuntimeFeatures + Next/Prev 装饰器
-- `packages/deerflow-harness/runtime/stream-bridge/stream-bridge.ts`——StreamBridge + ThreadChannel（每 run 一个 typed EventEmitter + 缓冲回放）
-- `packages/deerflow-harness/runtime/coordination/event-bus/`（in-memory.ts / redis.ts）——RunEventBus 双实现（进程内游标 / Redis Stream 镜像 + XREAD 续读）
-- `packages/deerflow-harness/runtime/lifecycle/liveness.ts`——心跳间隔与 owner 死亡窗口常量（单一出处）
-- `packages/deerflow-harness/runtime/lifecycle/zombie-reconciler.ts`——僵尸 run 启动对账回收
+- `src/backend/runtime/stream-bridge/stream-bridge.ts`——StreamBridge + ThreadChannel（每 run 一个 typed EventEmitter + 缓冲回放）
+- `src/backend/runtime/coordination/event-bus/`（in-memory.ts / redis.ts）——RunEventBus 双实现（进程内游标 / Redis Stream 镜像 + XREAD 续读）
+- `src/backend/runtime/lifecycle/liveness.ts`——心跳间隔与 owner 死亡窗口常量（单一出处）
+- `src/backend/runtime/lifecycle/zombie-reconciler.ts`——僵尸 run 启动对账回收
 - `src/instrumentation.ts`——优雅停机信号处理 + 记忆队列 flush + 僵尸对账两轮调度
 - `src/app/api/health/route.ts`——健康检查（`distributed` / `draining`，排水期 503）
 - `packages/deerflow-harness/runtime/sse/client-event.ts` / `to-client-event.ts`——ClientAgentEvent 白名单协议 / 内→外过滤边界
 - `packages/deerflow-harness/types/agent-event.ts`——AgentEvent 内部事件枚举
 - `packages/deerflow-harness/subagents/executor.ts` / `parent-history.ts`——SubagentExecutor（超时+取消）/ 父历史只读注入
-- `packages/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts` / `pg-storage.ts` / `injection.preview.ts` / `retrieval.preview.ts`——MemoryUpdater / 向量基础设施（归一化）/ RAG 检索管线 / PG 存储后端 / 检索效果预览 + 打分明细组装（\*.preview.ts，不进生产链路）
+- `packages/deerflow-harness/agents/memory/updater.ts` / `embeddings.ts` / `retrieval.ts` / `in-memory-storage.ts` / `injection.preview.ts` / `retrieval.preview.ts`——MemoryUpdater / 向量基础设施（归一化）/ RAG 检索管线 / InMemoryMemoryStorage / 检索效果预览 + 打分明细组装（\*.preview.ts，不进生产链路）
+- `src/backend/harness-adapters/pg-memory-storage.ts`——PG 记忆存储后端（MemoryStorage 契约实现，update 走 FOR UPDATE 事务）
 - `src/backend/lib/zhipu-rerank.ts`——智谱 rerank 适配层（fail-fast 裸 fetch，降级在 harness `rerankWithFallback`）
 - `packages/deerflow-harness/vision/image-fetcher.ts` / `vision-middleware.ts`——图片字节注入 + 多模态 content 构造 / 历史图片压缩
 - `packages/deerflow-harness/tools/builtins/`——内置工具（task / search_web / clarification / view_image）

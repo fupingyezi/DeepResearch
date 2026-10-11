@@ -3,6 +3,7 @@
 > 来源：2026-10-06 对 RAG 改动的并行 review（分支 `feat/rag-retrieval`，提交集中 10-05 → 10-06）。
 > 用途：摊在代码旁做后续 review / 调参的清单。清单表内行号为修复前定位，已漂移；复查时以 grep 定位为准。
 > 状态：**全部关闭**。P0-1 / P0-2 已修复（60b888d / 428dc02）；词面召回已替换为 **BM25**（9cda328）；P1 四条、P2 七条全部已修 / 已排除（状态见各清单表第三列）。
+> 迁移注记（2026-10-11）：本文为历史 review 归档，正文保留原样；正文中 `packages/deerflow-harness/agents/memory/pg-storage.ts` 已迁至 `src/backend/harness-adapters/pg-memory-storage.ts`，检索引擎本体仍在 SDK（`@deerflow-harness/agents/memory/retrieval.ts`）。
 
 ## 两条链路
 

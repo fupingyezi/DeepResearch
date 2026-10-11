@@ -8,7 +8,7 @@ import {
   resetMemoryEmbeddingsFactory,
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
-import { PgMemoryStorage } from '../pg-storage';
+import { InMemoryMemoryStorage } from '../in-memory-storage';
 import {
   getMemoryStorage,
   resetMemoryStorage,
@@ -22,7 +22,7 @@ import {
   setMemoryModelFactory,
   updateMemoryFact,
 } from '../updater';
-import { FakeSql } from './fake-sql';
+import { createEmptyMemory } from '../types';
 
 const DIMS = 4;
 
@@ -60,7 +60,7 @@ describe('updater 写侧嵌入', () => {
 
   beforeEach(() => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
-    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
+    setMemoryStorage(new InMemoryMemoryStorage());
     prompts.length = 0;
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -203,7 +203,7 @@ describe('updater 写侧嵌入', () => {
   it('updateMemoryFact 的嵌入在 update 事务（mutator）之外发起', async () => {
     // 记录 embed 调用是否发生在 mutator 执行期间：修复前在 mutator 内 await embedQuery
     // （持行锁调 HTTP），标记会为 true
-    const base = new PgMemoryStorage(new FakeSql());
+    const base = new InMemoryMemoryStorage();
     let inMutator = false;
     const embedDuringMutator: boolean[] = [];
     const trackingStorage: MemoryStorage = {
@@ -451,29 +451,36 @@ describe('updater 写侧嵌入', () => {
     expect(getMemoryUpdateStats().failed).toBe(failedBefore + 1);
   });
 
-  it('无变更轮次返回原引用：跳过落盘写（无 UPSERT / 向量重建）', async () => {
-    // applyUpdates/stripUploadMentions 无变更时返回原引用，pg-storage.update
+  it('无变更轮次跳过落盘写（lastUpdated 不刷新）', async () => {
+    // applyUpdates/stripUploadMentions 无变更时返回原引用，storage.update
     // 的 `next === current` 判等生效——否则每轮无变更更新也会全量重写
-    const fake = new FakeSql();
-    setMemoryStorage(new PgMemoryStorage(fake));
-    setMemoryModelFactory(() =>
-      fakeModel(JSON.stringify({ newFacts: [], user: {}, history: {} }), prompts),
-    );
+    const storage = new InMemoryMemoryStorage();
+    setMemoryStorage(storage);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      await storage.save(createEmptyMemory(), { userId: 'nc1' });
+      const before = await storage.reload({ userId: 'nc1' });
+      vi.setSystemTime(new Date('2026-02-02T00:00:00.000Z'));
+      setMemoryModelFactory(() =>
+        fakeModel(JSON.stringify({ newFacts: [], user: {}, history: {} }), prompts),
+      );
 
-    const ok = await new MemoryUpdater().updateMemory([humanMsg('随便聊聊')], {
-      userId: 'nc1',
-    });
-    expect(ok).toBe(true);
+      const ok = await new MemoryUpdater().updateMemory([humanMsg('随便聊聊')], {
+        userId: 'nc1',
+      });
+      expect(ok).toBe(true);
 
-    // 仅剩 readLocked 的造行 INSERT（DO NOTHING）；UPSERT 与向量重建都没发生
-    const stateInserts = fake.calls.filter((c) => c.trim().startsWith('INSERT INTO memory_state'));
-    expect(stateInserts).toHaveLength(1);
-    expect(stateInserts[0]).toContain('DO NOTHING');
-    expect(fake.calls.some((c) => c.trim().startsWith('DELETE FROM memory_vectors'))).toBe(false);
+      const after = await storage.reload({ userId: 'nc1' });
+      expect(after.lastUpdated).toBe(before.lastUpdated); // 未刷新 = 未发生写入
+      expect(after).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('存储写失败（update 返回 null）计入 failed，attempted = succeeded + failed', async () => {
-    const base = new PgMemoryStorage(new FakeSql());
+    const base = new InMemoryMemoryStorage();
     const failingStorage: MemoryStorage = {
       load: (o) => base.load(o),
       reload: (o) => base.reload(o),
@@ -495,7 +502,7 @@ describe('updater 写侧嵌入', () => {
   it('嵌入 HTTP 在 update 事务（mutator）之外发起', async () => {
     // 包一层 storage 记录「embed 调用是否发生在 mutator 执行期间」：
     // 修复前 embedMissing* 在 mutator 内 await（持行锁调 HTTP），标记会为 true
-    const base = new PgMemoryStorage(new FakeSql());
+    const base = new InMemoryMemoryStorage();
     let inMutator = false;
     const embedDuringMutator: boolean[] = [];
     const trackingStorage: MemoryStorage = {

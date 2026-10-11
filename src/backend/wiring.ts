@@ -1,28 +1,20 @@
 /**
- * threadService 全局单例
+ * threadService 全局单例（dev 挂 globalThis，见下方注释）。
  *
- * 支持两种模式：
- * 1. 基础单例模式（缓存 DeerFlowClient）
- * 2. 动态模型模式：通过 body.configuration.model.value 在请求时传递
+ * client 生命周期：长驻 client 只服务 truncateHistory；run 路径经 createRunClient
+ * 每 run 新建独立 DeerFlowClient（单次请求模型切换 = body.configuration.model.value
+ * 解析出的 modelConfig 进入本次构造），并发 run 之间实例绝对隔离。
  */
 
 import {
   DeerFlowClient,
-  InMemoryRunEventBus,
-  InMemoryRunRegistry,
-  PgRunRepository,
-  RedisEventBus,
-  RedisRunRegistry,
-  PgThreadMetaRepository,
   buildThreadConfig,
   createChatModel,
-  createThreadService,
   makeCheckpointer,
   EMBEDDING_BATCH_LIMIT,
   getMemoryConfig,
   loadMemoryConfigFromDict,
   maxImageBytesFromEnv,
-  PgMemoryStorage,
   setMemoryConfig,
   setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
@@ -36,7 +28,6 @@ import {
   setTitleStoreProvider,
   setUploadedFilesProvider,
   type SqlExecutor,
-  type ThreadService,
   type ModelConfig,
   type MiddlewareConfigProvider,
 } from '@deerflow-harness';
@@ -53,6 +44,14 @@ import {
 import { loadConfiguredExtraMiddlewares } from '@/backend/config/middleware-loader';
 import { titleStoreProvider } from '@/backend/harness-adapters/title-store';
 import { uploadedFilesProvider } from '@/backend/harness-adapters/uploaded-files';
+import { PgMemoryStorage } from '@/backend/harness-adapters/pg-memory-storage';
+import { PgThreadMetaRepository } from '@/backend/repositories/thread-meta';
+import { PgRunRepository } from '@/backend/repositories/runs';
+import { InMemoryRunRegistry } from '@/backend/runtime/coordination/run-registry/in-memory';
+import { RedisRunRegistry } from '@/backend/runtime/coordination/run-registry/redis';
+import { InMemoryRunEventBus } from '@/backend/runtime/coordination/event-bus/in-memory';
+import { RedisEventBus } from '@/backend/runtime/coordination/event-bus/redis';
+import { createThreadService, type ThreadService } from '@/backend/services/thread-service';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,
@@ -423,25 +422,14 @@ async function build(): Promise<ThreadService> {
     middlewareConfigProvider,
   };
 
+  // 长驻 client 只服务 truncateHistory（checkpoint 纯写通道，无 LLM 调用）：
+  // 所有 client 共享同一 checkpointer，用哪个实例结果一致。
+  // run 路径不复用它——createRunClient 每 run 新建独立 client（agent / 中间件
+  // 实例不跨 run 共享，并发 run 绝对隔离；agent 重建代价在 memoryEnabled=true
+  // 默认路径本就每轮付出，无额外成本）。
   const client = new DeerFlowClient(defaultModelConfig, sharedClientOptions);
-
-  // 按模型配置签名缓存 client，供 submitRun 在单次请求切换模型时复用（避免每请求新建丢失 agentCache）。
-  //
-  // 缓存键必须是**完整 modelConfig 的签名**而不是 modelName：client 在构造时固化
-  // modelConfig（apiKey / baseUrl / supportsVision 都在里面），按名字缓存意味着
-  // ① 两个用户用同一模型会共用第一个用户的 client（**连带他的 API Key**）；
-  // ② 配置变化（如给预设补 supportsVision）后，同进程内的旧 client 永远不会刷新
-  //    —— dev 下 globalThis 单例跨 HMR 存活，改完预设不重启 dev 就会出现
-  //    「远端生效、本地不生效」的假象（实测踩过）。
-  const clientByModel = new Map<string, DeerFlowClient>();
-  const createClientForModel = (modelConfig: ModelConfig): DeerFlowClient => {
-    const signature = JSON.stringify(modelConfig);
-    const cached = clientByModel.get(signature);
-    if (cached) return cached;
-    const next = new DeerFlowClient(modelConfig, sharedClientOptions);
-    clientByModel.set(signature, next);
-    return next;
-  };
+  const createRunClient = (modelConfig?: ModelConfig): DeerFlowClient =>
+    new DeerFlowClient(modelConfig ?? defaultModelConfig, sharedClientOptions);
 
   // redisEnabled 时用跨进程登记表（连接失败自降级进程内、只告警一次），
   // 否则直接用进程内实现：装配侧是切换本地 / 跨进程实现的唯一换芯点。
@@ -457,7 +445,7 @@ async function build(): Promise<ThreadService> {
     checkpointer,
     threads: new PgThreadMetaRepository(makePoolSqlExecutor()),
     runs: new PgRunRepository(makePoolSqlExecutor()),
-    createClientForModel,
+    createRunClient,
     registry,
     eventBus,
   });

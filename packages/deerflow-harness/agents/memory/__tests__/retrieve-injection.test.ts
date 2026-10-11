@@ -4,15 +4,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { resetMemoryEmbeddingsFactory, setMemoryEmbeddingsFactory } from '../embeddings';
 import { buildMemoryContext } from '../index';
-import { PgMemoryStorage } from '../pg-storage';
+import { InMemoryMemoryStorage } from '../in-memory-storage';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact, MemoryData } from '../types';
-import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 const QUERY_VEC = [1, 0, 0, 0];
 
-/** 记忆检索端到端：走真实 storage（PgMemoryStorage + 假 SQL），覆盖
+/** 记忆检索端到端：走真实 storage（InMemoryMemoryStorage），覆盖
  *  buildMemoryContext 的 retrieve 分支行为（多轮 query、空 query、阈值配置生效）。 */
 describe('buildMemoryContext · retrieve 模式', () => {
   function fact(content: string, id = content, embedding?: number[]): Fact {
@@ -48,7 +47,7 @@ describe('buildMemoryContext · retrieve 模式', () => {
 
   beforeEach(() => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
-    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
+    setMemoryStorage(new InMemoryMemoryStorage());
   });
 
   afterEach(() => {

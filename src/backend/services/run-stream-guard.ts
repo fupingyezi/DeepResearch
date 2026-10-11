@@ -14,11 +14,11 @@
 
 import {
   ClientAgentEventType,
-  HEARTBEAT_INTERVAL_MS,
   createClientAgentEvent,
   type SseStreamEvent,
   type StampedClientAgentEvent,
 } from '@deerflow-harness';
+import { HEARTBEAT_INTERVAL_MS } from '@/backend/runtime/lifecycle/liveness';
 
 /** 终态 / 存活轮询间隔：订阅挂起期间定期探测，让悬挂流尽快收尾。 */
 const TERMINAL_POLL_MS = 5_000;
