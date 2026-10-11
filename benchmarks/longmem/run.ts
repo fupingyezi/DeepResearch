@@ -34,11 +34,11 @@ import { fileURLToPath } from 'url';
 import { ChatOpenAI } from '@langchain/openai';
 
 import defaultConfig, { BenchmarkConfigError, validateEnv } from '../config';
-import { getMemoryQueue } from '../../src/deerflow-harness/agents/memory/queue';
-import { getMemoryStorage } from '../../src/deerflow-harness/agents/memory/storage';
-import { getMemoryUpdateStats } from '../../src/deerflow-harness/agents/memory/updater';
-import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '../../src/server/wiring';
-import { computeRunCost } from '../../src/deerflow-harness/runtime/usage/pricing';
+import { getMemoryQueue } from '@deerflow-harness/agents/memory/queue';
+import { getMemoryStorage } from '@deerflow-harness/agents/memory/storage';
+import { getMemoryUpdateStats } from '@deerflow-harness/agents/memory/updater';
+import { ensureMemoryRerankerFactory, ensureMemoryStorage } from '../../src/backend/wiring';
+import { computeRunCost } from '@deerflow-harness/runtime/usage/pricing';
 import {
   UsageAccumulator,
   mergeRunUsage,
@@ -46,7 +46,7 @@ import {
   withUsageAccounting,
   type RunUsage,
   type TokenUsage,
-} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
+} from '@deerflow-harness/runtime/usage/usage-accounting';
 import { loadLongMemDataset, printStats, exportToJSONL, type LongMemExample } from './dataset';
 import { createLongMemAgent, type LongMemAgentResult, type PerformanceMetrics } from './agent';
 import {

@@ -1,0 +1,185 @@
+/**
+ * 统一请求管线（withApiHandler）：全部 API 路由的横切关注点收敛点。
+ *
+ * 执行序（错误处理包裹全流程）：
+ *   try/catch 全包裹
+ *     → auth（'cookie' 缺省 = authenticateWithRefresh：access 验签失败自动用
+ *       refresh 重签双 token 并挂到最终响应；'none'；自定义 resolver，null → 401）
+ *     → guard（sandbox token 等非用户主体门禁，false → 401）
+ *     → origin 校验（非 GET/HEAD/OPTIONS 且带 Origin 不在白名单 → 403，防 CSRF）
+ *     → userIdHeader（threads 的 x-user-id → ctx.userId，可空不 401）
+ *     → rateLimit（占位钩子，非 null Response 短路）
+ *     → body 解析（ZodType → parseJsonBody；函数 → 自定义解析如 multipart）
+ *     → query 解析（parseSearchParams）
+ *     → handler(ctx)
+ *   每条返回路径（401/400/限流短路/正常返回）各记一条完成日志；
+ *   catch 先 logHttpError 再 toHttpError(e, fallbackMessage)。
+ *
+ * handler 约定：
+ * - wrapper 是 body 唯一读取方，handler 内不得再调 request.json()/formData()（二次读取报 Body unusable）
+ * - handler 返回值原样透传（NextResponse / SSE 的 plain Response 均可，严禁把 SSE 包进 NextResponse.json）
+ * - auth 'cookie' 通过时 ctx.user 必非空
+ */
+
+import type { NextRequest } from 'next/server';
+import type { UserRecord } from '@/backend/auth';
+import type { ZodType } from 'zod';
+
+import { parseJsonBody, parseSearchParams, type ParseResult } from '@/backend/validation';
+import { authenticateWithRefresh, setAuthCookies } from './auth';
+import type { TokenPair } from '@/backend/auth';
+import { applyCorsHeaders, isOriginAllowed } from './cors';
+import { jsonError, toHttpError } from './errors';
+import { logHttpError, logHttpRequest } from './logger';
+import { noopRateLimit, type RateLimitHook } from './rate-limit';
+
+/** 自定义鉴权解析：返回 null → 401 UNAUTHENTICATED（预留，当前无消费路由）。 */
+export type AuthResolver = (request: NextRequest) => Promise<UserRecord | null> | UserRecord | null;
+
+export interface ApiHandlerOptions<TBody = undefined, TQuery = undefined> {
+  /** 缺省 'cookie'（getCurrentUser，null → 401）；'none' 跳过；函数为自定义解析。 */
+  auth?: 'cookie' | 'none' | AuthResolver;
+  /** 附加布尔门禁（非用户主体鉴权，如 sandbox token），false → 401。 */
+  guard?: (request: NextRequest) => boolean | Promise<boolean>;
+  /** 从指定 header 读取可选 user_id 注入 ctx.userId（threads 的 x-user-id，无 401）。 */
+  userIdHeader?: string;
+  /** ZodType → parseJsonBody（json 模式）；函数 → 自定义解析（multipart 等）；缺省不解析。 */
+  body?: ZodType<TBody> | ((request: NextRequest) => Promise<ParseResult<TBody>>);
+  /** → parseSearchParams(request.nextUrl.searchParams, schema)；缺省不解析。 */
+  query?: ZodType<TQuery>;
+  /** 未知错误 500 的 message（prompt/enhance 传 '增强失败' 等用户可见文案；缺省 'Internal server error'）。 */
+  fallbackMessage?: string;
+  /** 限流钩子（占位），缺省 no-op。 */
+  rateLimit?: RateLimitHook;
+}
+
+export interface ApiContext<TBody, TQuery> {
+  user: UserRecord | null; // auth 'cookie' 通过时必非空
+  userId?: string; // userIdHeader 命中时
+  body: TBody;
+  query: TQuery;
+  params: Record<string, string>; // 动态路由段（无动态段时为 {}）
+  request: NextRequest; // 供 SSE 组装 createSseStream(request, ...)
+}
+
+export type ApiRouteHandler<TBody, TQuery> = (
+  ctx: ApiContext<TBody, TQuery>,
+) => Response | Promise<Response>;
+
+/**
+ * 包一层统一管线。返回 Next.js route handler 形状
+ * `(request, { params }) => Promise<Response>`，路由层直接 `export const GET = withApiHandler(...)`。
+ *
+ * TBody / TQuery 由 options.body / options.query 的 schema 推断；不要显式传
+ * 类型参数——部分显式类型参数会让未指定的项退回默认值 undefined 而非推断
+ * （TS 不支持按名传泛型）。
+ */
+export function withApiHandler<TBody = undefined, TQuery = undefined>(
+  options: ApiHandlerOptions<TBody, TQuery>,
+  handler: ApiRouteHandler<TBody, TQuery>,
+): (request: NextRequest, routeCtx?: { params?: Record<string, string> }) => Promise<Response> {
+  const auth = options.auth ?? 'cookie';
+  const rateLimit = options.rateLimit ?? noopRateLimit;
+
+  return async (request, routeCtx) => {
+    const { method } = request;
+    const path = request.nextUrl.pathname; // 不含 query：查询参数不进日志
+    const startedAt = Date.now();
+    // 透明刷新产出（auth 步置位）：finish 统一把新 token 对写进最终响应的
+    // Set-Cookie（含 SSE 的 plain Response）；早退 401 时仍为 null，自然不带 cookie
+    let pendingTokens: TokenPair | null = null;
+
+    const finish = (response: Response, userId?: string): Response => {
+      if (pendingTokens) setAuthCookies(response, pendingTokens);
+      // 安全响应头 + CORS 头：全部 API 响应（含 SSE 的 plain Response）统一在此加。
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      response.headers.set('X-Frame-Options', 'DENY');
+      response.headers.set('Referrer-Policy', 'no-referrer');
+      applyCorsHeaders(request, response);
+      logHttpRequest({
+        method,
+        path,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        userId,
+      });
+      return response;
+    };
+
+    try {
+      // 1) 鉴权（含透明刷新：access 失效但 refresh 有效时自动重签并随响应下发）
+      let user: UserRecord | null = null;
+      if (auth === 'cookie') {
+        const result = await authenticateWithRefresh(request);
+        user = result.user;
+        pendingTokens = result.tokens ?? null;
+      } else if (typeof auth === 'function') {
+        user = (await auth(request)) ?? null;
+      }
+      if (auth !== 'none' && user === null) {
+        return finish(jsonError('UNAUTHENTICATED', 'Not authenticated', 401));
+      }
+
+      // 2) 非用户主体门禁
+      if (options.guard && !(await options.guard(request))) {
+        return finish(jsonError('UNAUTHENTICATED', 'Not authenticated', 401), user?.id);
+      }
+
+      // 3) CSRF：SameSite=None 后 cookie 可被跨域请求携带，状态变更请求必须校验
+      // Origin。浏览器总为跨域 POST 附 Origin；无 Origin 的非浏览器客户端放行
+      // （鉴权在前面仍是生效门槛）。
+      if (
+        method !== 'GET' &&
+        method !== 'HEAD' &&
+        method !== 'OPTIONS' &&
+        !isOriginAllowed(request)
+      ) {
+        return finish(jsonError('INVALID_ORIGIN', 'Origin not allowed', 403), user?.id);
+      }
+
+      // 4) 可选 user_id 头（threads 的 x-user-id）
+      const headerUserId = options.userIdHeader
+        ? (request.headers.get(options.userIdHeader) ?? undefined)
+        : undefined;
+
+      // 5) 限流（占位）
+      const limited = await rateLimit(request);
+      if (limited) return finish(limited, user?.id ?? headerUserId);
+
+      // 6) body 解析（wrapper 是唯一读取方）
+      let body: TBody = undefined as TBody;
+      if (typeof options.body === 'function') {
+        const parsed = await options.body(request);
+        if (!parsed.ok) return finish(parsed.response, user?.id ?? headerUserId);
+        body = parsed.data;
+      } else if (options.body) {
+        const parsed = await parseJsonBody(request, options.body);
+        if (!parsed.ok) return finish(parsed.response, user?.id ?? headerUserId);
+        body = parsed.data;
+      }
+
+      // 7) query 解析
+      let query: TQuery = undefined as TQuery;
+      if (options.query) {
+        const parsed = parseSearchParams(request.nextUrl.searchParams, options.query);
+        if (!parsed.ok) return finish(parsed.response, user?.id ?? headerUserId);
+        query = parsed.data;
+      }
+
+      // 8) handler
+      const ctx: ApiContext<TBody, TQuery> = {
+        user,
+        userId: headerUserId,
+        body,
+        query,
+        params: routeCtx?.params ?? {},
+        request,
+      };
+      const response = await handler(ctx);
+      return finish(response, user?.id ?? headerUserId);
+    } catch (e) {
+      logHttpError(method, path, e);
+      return finish(toHttpError(e, options.fallbackMessage));
+    }
+  };
+}

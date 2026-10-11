@@ -25,7 +25,7 @@
 ## 2. 文件结构
 
 ```
-src/deerflow-harness/sandbox/
+packages/deerflow-harness/sandbox/
 ├── index.ts                      # 统一出口
 ├── exceptions.ts                 # 错误体系
 ├── sandbox.ts                    # Sandbox 抽象基类
@@ -44,14 +44,14 @@ src/deerflow-harness/sandbox/
 
 **改造文件**（已有代码）：
 
-- `src/deerflow-harness/agents/middlewares/sandbox-middleware.ts` — 实现生命周期
-- `src/deerflow-harness/agents/middlewares/thread-data-middleware.ts` — 计算真实目录
-- `src/deerflow-harness/agents/factory.ts` — 挂载中间件 + 注入工具
-- `src/deerflow-harness/agents/lead-agent/prompt.ts` — 增补工具说明
-- `src/deerflow-harness/client.ts` — 新增 sandboxEnabled
-- `src/deerflow-harness/types/index.ts` — 新增 ClientOptions.sandboxEnabled
-- `src/deerflow-harness/tools/index.ts` — 注册 SANDBOX_TOOLS
-- `src/deerflow-harness/index.ts` — 导出公共 API
+- `packages/deerflow-harness/agents/middlewares/sandbox-middleware.ts` — 实现生命周期
+- `packages/deerflow-harness/agents/middlewares/thread-data-middleware.ts` — 计算真实目录
+- `packages/deerflow-harness/agents/factory.ts` — 挂载中间件 + 注入工具
+- `packages/deerflow-harness/agents/lead-agent/prompt.ts` — 增补工具说明
+- `packages/deerflow-harness/client.ts` — 新增 sandboxEnabled
+- `packages/deerflow-harness/types/index.ts` — 新增 ClientOptions.sandboxEnabled
+- `packages/deerflow-harness/tools/index.ts` — 注册 SANDBOX_TOOLS
+- `packages/deerflow-harness/index.ts` — 导出公共 API
 - `src/app/api/threads/_service.ts` — 服务级默认开启
 - `.gitignore` — 新增 `/.sandbox`
 
@@ -277,7 +277,7 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 ### 7.3 IDE 诊断
 
 ```bash
-✅ src/deerflow-harness/sandbox/**  # 0 错误
+✅ packages/deerflow-harness/sandbox/**  # 0 错误
 ✅ sandbox-middleware.ts  # 0 错误
 ✅ thread-data-middleware.ts  # 0 错误
 ✅ factory.ts  # 0 错误

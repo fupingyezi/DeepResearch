@@ -1,0 +1,73 @@
+# 中间件装配配置模板（对齐 deer-flow 2.0 的 config.yaml 约定）。
+#
+# 顺序不在这里：装配顺序是代码固定列表（harness factory.ts），YAML 只控制
+# enabled 开关与各中间件参数；vision / qwen 工具调用恢复是 runtime 门控
+# （模型能力 / provider），不进 YAML。
+#
+# 热生效：改完保存，下一轮对话自动按新配置重建 agent（配置签名折入缓存键）；
+# 例外：extensions.middlewares 仅启动时 require 一次，变更需重启。
+# 非法配置（拼错键 / 类型错 / 版本不符）会在启动时大声失败。
+# 字符串值支持 $VAR / ${VAR} 环境变量占位（如 model_name: $MEMORY_MODEL），
+# 未解析的占位符替换为空串。路径可用 DEERFLOW_CONFIG_PATH 覆盖。
+# 详见 docs/middleware-yaml-config.md。
+config_version: 1
+
+summarization:
+  enabled: true
+  trigger_tokens: 12000
+  keep_messages: 8
+
+loop_detection:
+  enabled: true
+  warn_threshold: 3
+  hard_limit: 5
+  window_size: 20
+  tool_freq_warn: 30
+  tool_freq_hard_limit: 50
+
+guardrails:
+  enabled: true
+  block_mode: none # none / injection / output / all
+
+title:
+  enabled: true
+
+memory:
+  enabled: true
+  mode: inject # inject（全量注入）/ retrieve（RAG 检索）
+  model_name: null # 宿主工厂解析；null = 默认 preset
+  debounce_seconds: 30
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
+  retrieve_top_k: 8
+  retrieve_max_tokens: 800
+  semantic_match_threshold: 0.6
+  update_timeout_ms: 60000
+
+sandbox:
+  enabled: true
+
+todo:
+  enabled: true
+
+thread_data:
+  enabled: true
+
+uploads:
+  enabled: true
+
+subagent_limit:
+  enabled: true
+  max_concurrent: 3
+  max_total: 8
+  max_tracked_threads: 100
+
+extensions:
+  middlewares: [] # 自定义中间件模块路径列表（相对项目根 / 绝对 / 裸包名）
+  # 示例：
+  # middlewares:
+  #   - ./lib/middlewares/audit-log.js   # 相对项目根
+  #   - my-middleware-pkg                 # 裸包名（node_modules）
+  # 模块可导出：中间件实例 / 实例数组 / 工厂函数（可 async）/ 命名导出 middleware(s)

@@ -65,8 +65,8 @@ LongMemEval 数据集需手动下载（官方 HuggingFace 源），详见
 
 - **token 是实测值**：agent 侧经模型工厂的 callback 累加（含 subagent、中间件与记忆抽取
   的调用），judge 侧就地读取响应的 `usage_metadata`。实现在
-  `src/deerflow-harness/runtime/usage/usage-accounting.ts`。
-- **金额是估算**：单价取自 `src/deerflow-harness/runtime/usage/pricing.json`（含 `asOf` 与官方
+  `packages/deerflow-harness/runtime/usage/usage-accounting.ts`。
+- **金额是估算**：单价取自 `packages/deerflow-harness/runtime/usage/pricing.json`（含 `asOf` 与官方
   URL）。价格变动只改这个文件，不动代码。**未知模型不给估算**，只列进 `unknownModels`。
 - **按角色拆分**：`agent`（作答）/ `judge`（评分）/ `ingest`（LongMemEval 的
   `--ingest` 记忆写入，成本大头）/ `memory`（记忆更新抽取）。`memory` 单独成角色是因为
@@ -97,7 +97,7 @@ failed}`。失败的形态是**静默丢事实** —— 记忆抽取的输出顶
 ## TTFT 与流式分片的口径（容易误读）
 
 agent 的正文**不是无条件逐 token 下发的**：`client.ts` 有一个「报告范式」分类器
-（`looksLikeFinalReportStart`，见 `src/deerflow-harness/client.ts`）—— 仅当回答以
+（`looksLikeFinalReportStart`，见 `packages/deerflow-harness/client.ts`）—— 仅当回答以
 Markdown 标题（`# ` / `## ` / `### `）或摘要引用块（`> **`）开头时，才判定为「最终报告
 正文」并逐 token 流式下发；否则内容会被缓冲到本轮结束、整段一次性刷出。设计意图是把
 「工具调用前的规划叙述」与「最终报告正文」分开，前者归到 reasoning 通道。

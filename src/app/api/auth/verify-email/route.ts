@@ -1,22 +1,14 @@
 /**
- * POST /api/auth/verify-email —— 邮箱验证令牌核销。
- *
- * 令牌经 sha256 匹配、单次使用；幂等：已验证的用户重复提交有效令牌也返回 200；
- * 无效/过期令牌 400 INVALID_TOKEN。
+ * POST /api/auth/verify-email —— 薄适配器：逻辑见 @/backend/controllers/auth-controller。
  */
 
-import { NextResponse } from 'next/server';
+import { withApiHandler } from '@/backend/http';
+import { authController } from '@/backend/controllers/auth-controller';
+import { emailTokenSchema } from '@/backend/validation/schemas';
 
-import { jsonError, withApiHandler } from '@/server/http';
-import { getAuthService } from '@/server/services/auth-service';
-import { emailTokenSchema } from '@/server/validation/schemas';
+export { OPTIONS } from '@/backend/http/preflight';
 
-export { OPTIONS } from '@/server/http/preflight';
-
-export const POST = withApiHandler({ auth: 'none', body: emailTokenSchema }, async ({ body }) => {
-  const verified = await getAuthService().verifyEmail(body.token);
-  if (!verified) {
-    return jsonError('INVALID_TOKEN', 'Invalid or expired token', 400);
-  }
-  return NextResponse.json({ message: 'Email verified' });
-});
+export const POST = withApiHandler(
+  { auth: 'none', body: emailTokenSchema },
+  authController.verifyEmail,
+);

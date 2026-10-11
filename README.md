@@ -109,7 +109,7 @@ src/
 │   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
 │   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
 │   │   └── context.ts                  # AsyncLocalStorage 上下文传播
-│   ├── persistence/                    # ThreadMetaStore + RunStore（PostgreSQL）
+│   ├── persistence/                    # ThreadMetaRepository + RunRepository（PostgreSQL）
 │   ├── tools/builtins/                 # 内置工具（task、search_web、clarification、view_image）
 │   ├── models/                         # createChatModel 模型工厂 + provider 推断 + LLM 用量记账挂接（MODEL_PRESETS 在 src/config/models.ts）
 │   ├── auth/                           # 认证模块
@@ -454,7 +454,7 @@ interface ChatStreamBody {
 
 `start` / `stream_chunk` / `tool_call` / `tool_result` / `task_progress` / `todo_update` / `human_interrupt` / `error` / `end` / `heartbeat`
 
-协议定义：`src/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/events/protocol/client-event.ts` re-export 复用。
+协议定义：`packages/deerflow-harness/runtime/sse/client-event.ts`，前端通过 `src/events/protocol/client-event.ts` re-export 复用。
 
 前端事件链：`AgentEventProvider` 每 session 一个泵（`fetch` SSE → `sse-frame-parser` 分帧 → EventBus 广播，emit 前盖 `sessionId`+`streamId` 前端本地分拣戳）；`SessionStreamSink`（`src/utils/chat/agent-event-sink.ts`）作为 EventBus 的一等通配订阅者把事件聚合成 zustand 数据（占位消息 / START id 迁移 / rAF 合帧 / 错误兜底），EventBus 基于官方 `events` 包实现。
 
@@ -464,7 +464,7 @@ interface ChatStreamBody {
 前端（React/Next.js + Zustand + EventBus + 设置管理）
         │ HTTP + SSE
         ▼
-API Routes（/api/v3/chat 等）
+API Routes（route.ts 薄适配器 → Controllers（HTTP 层逻辑））
         │
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
@@ -489,7 +489,7 @@ StreamBridge（进程内 typed EventEmitter 总线）
 - Tool Call Chunk 缓冲机制（OpenAI 流式分片按 index 拼接）
 - 中间件组装顺序与 `RuntimeFeatures` 开关（13 层位序中间件 + Qwen 恢复层 + Tool Call 完整性子规则）
 - Memory LLM 更新流程（含显式 `callbacks: []` 切断回调链的关键约束）
-- ThreadMetaStore / RunStore 的 PG schema
+- ThreadMetaRepository / RunRepository 的 PG schema
 - MCP 客户端连接与工具加载缓存策略
 - Skill frontmatter 解析与 prompt 注入机制（7 种内置技能）
 - 扩展统一配置（extensions_config.json）的读写与校验

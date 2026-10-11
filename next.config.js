@@ -43,14 +43,15 @@ const nextConfig = {
     // instrumentation 在 14.2 会同时编译 nodejs / edge 两个端点，edge 端点解析不了
     // redis / mcp / pg / minio 依赖的 node 内建模块（stream/net/dns/fs/child_process）。
     // edge 端点在自托管部署（standalone node 服务）从不执行，register() 也带
-    // NEXT_RUNTIME 守卫；因此 edge 编译把这两个重依赖入口替换为空模块，只求编译通过。
+    // NEXT_RUNTIME 守卫；因此 edge 编译把这三个重依赖入口替换为空模块，只求编译通过。
     // 别名键必须是绝对路径：Next 的 jsconfig-paths 插件在 described-resolve 阶段就
     // 把 '@/' 请求解析成绝对路径，webpack 原生 alias 只对相对/裸模块名生效。
     if (nextRuntime === 'edge') {
       config.resolve.alias = {
         ...config.resolve.alias,
-        [`${process.cwd()}/src/deerflow-harness`]: false,
-        [`${process.cwd()}/src/server/wiring`]: false,
+        [`${process.cwd()}/packages/deerflow-harness`]: false,
+        [`${process.cwd()}/src/backend/wiring`]: false,
+        [`${process.cwd()}/src/backend/lib/db`]: false,
       };
     }
     return config;

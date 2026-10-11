@@ -1,12 +1,5 @@
 import './globals.css';
 import { AuthProvider } from '@/events/context/auth-provider';
-import { initialDB } from '@/lib/db';
-
-// 在模块加载时触发一次（fire-and-forget），不阻塞 layout 渲染。
-// initialDB 内部用 globalThis 单例缓存，HMR / 多次 import 都只跑一次。
-initialDB().catch((error) => {
-  console.error('Database initialization failed:', error);
-});
 
 /**
  * 根布局：仅负责 html/body 骨架与全局 Provider 注入。

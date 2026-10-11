@@ -144,7 +144,7 @@ Error: Failed to collect page data for /api/auth/login
 
 ### 根因
 
-`src/lib/storage/index.ts` 在**模块顶层** `new Client({ endPoint: process.env.MINIO_ENDPOINT! })`。
+`src/backend/lib/storage/index.ts` 在**模块顶层** `new Client({ endPoint: process.env.MINIO_ENDPOINT! })`。
 `next build` 的"Collecting page data"阶段会 import 各 route 模块 → MinIO 构造函数
 发现 endPoint 是 undefined 直接 throw → 构建崩溃。本地没 `.env`、CI 也没配业务
 密钥，所以两边都必炸。

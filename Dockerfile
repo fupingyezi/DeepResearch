@@ -9,7 +9,10 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11 --activate
 # 国内服务器构建：npm 走阿里镜像源，官方源在境内几乎不可用
 ENV npm_config_registry=https://registry.npmmirror.com
+# workspace 包的 package.json 也必须进 deps 上下文：缺 importer 时
+# pnpm install --frozen-lockfile 会因 lockfile 与工作区声明不一致而失败
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
 RUN pnpm install --frozen-lockfile
 
 # ---- builder：编译产出 .next/standalone ----
@@ -49,6 +52,8 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+# 中间件装配配置随镜像分发（standalone 只打包运行所需文件，不含源码树里的 config.yaml）
+COPY --from=builder --chown=node:node /app/config.yaml ./config.yaml
 
 # 预建运行期数据目录并置 node 属主：named volume 挂载到"镜像中已存在且属 node"的
 # 目录时，copy-up 会继承该属主；否则全新卷由 Docker 以 root 创建，容器内 node

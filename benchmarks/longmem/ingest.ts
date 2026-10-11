@@ -22,7 +22,7 @@ import {
   clearMemoryData,
   getMemoryData,
   type ModelConfig,
-} from '../../src/deerflow-harness';
+} from '@deerflow-harness';
 import type { LongMemExample, LongMemSessionMessage } from './dataset';
 
 /** 记忆写入阶段的逐 example 统计 */

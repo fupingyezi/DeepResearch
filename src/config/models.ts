@@ -1,4 +1,4 @@
-import { ModelConfig, ModelProvider } from '@/deerflow-harness';
+import { ModelConfig, ModelProvider } from '@deerflow-harness';
 
 export type ModelPresetName =
   | 'qwen-max'

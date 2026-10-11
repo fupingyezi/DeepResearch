@@ -59,7 +59,7 @@
 
 ### 2.4 越权面（独立安全债）
 
-- threads v1 REST（`src/app/api/threads/**`）用 `x-user-id` 透传头（`auth:'none'` + userIdHeader）：无签名、空值放行；`src/deerflow-harness/persistence/thread-meta/postgres-store.ts:161-169` 的 assertOwner 对空 user_id 直接放行——匿名可操作匿名行甚至他人 thread。前端不调用这些 REST 路由（只消费 SSE stream）
+- threads v1 REST（`src/app/api/threads/**`）用 `x-user-id` 透传头（`auth:'none'` + userIdHeader）：无签名、空值放行；`src/deerflow-harness/persistence/thread-meta/thread-meta-repository.ts:161-169` 的 assertOwner 对空 user_id 直接放行——匿名可操作匿名行甚至他人 thread。前端不调用这些 REST 路由（只消费 SSE stream）
 - `files/upload`、`files/delete` 是 `auth:'none'`：仅靠 middleware 的 cookie 存在性弱门禁；上传无归属绑定、删除无归属校验
 - middleware 只查 cookie 存在性不验签（`src/middleware.ts`，验签在路由层）
 

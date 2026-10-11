@@ -20,7 +20,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@deerflow-harness/*": ["./src/deerflow-harness/*"]
+      "@deerflow-harness": ["./packages/deerflow-harness/index.ts"],
+      "@deerflow-harness/*": ["./packages/deerflow-harness/*"]
     }
   },
   "include": [

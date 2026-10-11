@@ -1,16 +1,7 @@
-import { NextResponse } from 'next/server';
+import { withApiHandler } from '@/backend/http';
+import { filesController } from '@/backend/controllers/files-controller';
+import { fileIdBodySchema } from '@/backend/validation/schemas';
 
-import { withApiHandler } from '@/server/http';
-import { getFileService } from '@/server/services/file-service';
-import { fileIdBodySchema } from '@/server/validation/schemas';
+export { OPTIONS } from '@/backend/http/preflight';
 
-export { OPTIONS } from '@/server/http/preflight';
-
-export const DELETE = withApiHandler({ body: fileIdBodySchema }, async ({ body, user }) => {
-  await getFileService().deleteUploadedFile(body.fileId, user!.id);
-
-  return NextResponse.json({
-    success: true,
-    message: 'File deleted successfully',
-  });
-});
+export const DELETE = withApiHandler({ body: fileIdBodySchema }, filesController.deleteFile);

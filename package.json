@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
+    "@deerflow/harness": "workspace:*",
     "@langchain/community": "^1.0.5",
     "@langchain/core": "^1.0.5",
     "@langchain/langgraph": "^1.0.2",

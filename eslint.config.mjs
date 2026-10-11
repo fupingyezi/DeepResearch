@@ -21,12 +21,56 @@ const eslintConfig = defineConfig([
   },
   {
     // 分层依赖方向（见 CLAUDE.md「后端分层规范」）：
-    // harness / utils / types 是共享层，禁止反向依赖 app 侧（@/server、@/app）
-    files: [
-      'src/deerflow-harness/**/*.{ts,tsx}',
-      'src/utils/**/*.{ts,tsx}',
-      'src/types/**/*.{ts,tsx}',
-    ],
+    // harness 是独立 SDK 包，禁止一切 @/ 形式的 app 侧 import（零反向依赖）；
+    // utils / types 是 app 内共享层，禁止反向依赖 app 侧（@/server、@/app）
+    files: ['packages/deerflow-harness/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/*'],
+              message: 'deerflow-harness 是独立 SDK 包，不允许任何 @/ 形式的 app 侧 import',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // API 路由是薄适配器：只允许依赖管线（http/validation）与 controller。
+    // services / repositories / wiring / lib 与 harness 只能经 @/backend/controllers
+    // 间接使用——handler 逻辑全在 controller 层，路由层不越过它直连领域层
+    files: ['src/app/api/**/route.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@deerflow-harness', '@deerflow-harness/*'],
+              message: 'API 路由是薄适配器：harness 只能经 @/backend/controllers 间接使用',
+            },
+            {
+              group: [
+                '@/backend/services',
+                '@/backend/services/*',
+                '@/backend/repositories',
+                '@/backend/repositories/*',
+                '@/backend/wiring',
+                '@/backend/lib',
+                '@/backend/lib/*',
+              ],
+              message: 'API 路由是薄适配器：只允许依赖 @/backend/{http,validation,controllers}',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/utils/**/*.{ts,tsx}', 'src/types/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -34,7 +78,7 @@ const eslintConfig = defineConfig([
           patterns: [
             {
               group: ['@/server/*', '@/app/*'],
-              message: '共享层（harness/utils/types）不允许依赖 @/server 或 @/app',
+              message: '共享层（utils/types）不允许依赖 @/server 或 @/app',
             },
           ],
         },

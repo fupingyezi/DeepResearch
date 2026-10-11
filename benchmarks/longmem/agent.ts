@@ -18,17 +18,14 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { DeerFlowClient } from '../../src/deerflow-harness/client';
-import { runWithContext } from '../../src/deerflow-harness/runtime/context';
-import type { ModelConfig } from '../../src/deerflow-harness/types';
-import {
-  ClientAgentEvent,
-  ClientAgentEventType,
-} from '../../src/deerflow-harness/runtime/sse/client-event';
+import { DeerFlowClient } from '@deerflow-harness/client';
+import { runWithContext } from '@deerflow-harness/runtime/context';
+import type { ModelConfig } from '@deerflow-harness/types';
+import { ClientAgentEvent, ClientAgentEventType } from '@deerflow-harness/runtime/sse/client-event';
 import {
   withUsageAccounting,
   type RunUsage,
-} from '../../src/deerflow-harness/runtime/usage/usage-accounting';
+} from '@deerflow-harness/runtime/usage/usage-accounting';
 
 export interface LongMemAgentResult {
   /** Agent 最终输出文本 */
