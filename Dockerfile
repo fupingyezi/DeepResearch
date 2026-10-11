@@ -13,7 +13,10 @@ ENV npm_config_registry=https://registry.npmmirror.com
 # pnpm install --frozen-lockfile 会因 lockfile 与工作区声明不一致而失败
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+# pnpm 全局 store 走 BuildKit cache mount：packages/ 内任何源码变动都会失效本层并
+# 重跑 install（国内源分钟级），store 跨构建复用后只剩依赖解析与 node_modules 链接
+RUN --mount=type=cache,target=/pnpm-store \
+  pnpm install --store-dir /pnpm-store --frozen-lockfile
 
 # ---- builder：编译产出 .next/standalone ----
 FROM node:22-slim AS builder
@@ -35,11 +38,18 @@ ENV NODE_OPTIONS=--max-old-space-size=2048
 # （langchain 等），轻量服务器上与同机 PG / Redis / MinIO / app 互挤内存会触发 swap
 # 风暴——构建进程活着但几乎不前进，叠加 Next 默认关闭的 worker 超时（见
 # next.config 的 staticPageGenerationTimeout）表现为「Collecting page data 后静默挂
-# 死，被 30m 墙钟杀死」。压到 2 把 fork 内存尖峰减半以上；机器规格较大时
-# --build-arg NEXT_BUILD_CPUS=4 可上调。
-ARG NEXT_BUILD_CPUS=2
+# 死，被 30m 墙钟杀死」。压到 1（pages+app 各 1，共 2 fork）：4G 无 swap 机器实测
+# cpus=2 的收集峰值 + 主进程逼近整机可用内存，配合 deploy-remote.sh 的容器额度
+# （~2G）cpus=1 才能稳定落在额度内（见 docs/cicd-notes.md §15 校准）。
+# 机器规格较大时 --build-arg NEXT_BUILD_CPUS=4 可上调。
+ARG NEXT_BUILD_CPUS=1
 ENV NEXT_BUILD_CPUS=$NEXT_BUILD_CPUS
-RUN pnpm build
+# .next/cache 走 BuildKit cache mount：webpack 持久缓存（.next/cache/webpack，Next 14
+# 默认开 filesystem 缓存）+ swc 缓存跨部署复用，未改动模块不重编译——缓存命中时
+# 编译时长与主进程内存峰值都显著下降。页面数据收集阶段无跨构建缓存、worker fork
+# 尖峰照旧，内存守卫与 cpus 上限仍需保留。缓存命中脏数据报诡异错误（幽灵 module
+# not found）时 docker builder prune -f 清掉重来即可。
+RUN --mount=type=cache,target=/app/.next/cache pnpm build
 
 # ---- runner：仅拷贝 standalone 运行所需文件，非 root 运行 ----
 FROM node:22-slim AS runner

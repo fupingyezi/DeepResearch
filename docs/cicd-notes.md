@@ -571,6 +571,20 @@ production build」后零输出挂满墙钟（`[deploy][ERROR] docker build 失�
 4. 守卫频繁拦下构建时说明机器内存确实不够：扩容、或 `NEXT_BUILD_CPUS=1`（fork
    4→2，页面仅 6 个代价小）、或下调 `BUILD_MEM_RESERVE_MB`。
 
+**校准（首次部署实测，4G 无 swap 机器）**：初版默认值（预留 1024MB / 下限 1536MB）
+下构建容器额度 ≈ 1.5G，而构建真实峰值 ≈ 2G（主进程 + 4 worker 收集阶段）——
+`RUN pnpm build` 在容器内 OOM（`exit code: 137` = SIGKILL），3 分钟干净失败，
+旧版本全程健康（守卫机制本身工作正常，是额度发少了）。校准：`BUILD_MEM_RESERVE_MB`
+默认 512（额度 ≈ 可用 − 512 ≈ 2.0G）、`BUILD_MEM_MIN_MB` 默认 1024，配合
+Dockerfile `NEXT_BUILD_CPUS=1`（fork 4→2）把峰值压进额度。仍 OOM 时按需下调
+预留或扩容。
+
+**增量构建（后续补充）**：编译阶段经 BuildKit cache mount 复用 webpack 持久缓存
+（`.next/cache`，Next 14 默认 filesystem 缓存）与 pnpm store——未改动模块不重编译，
+缓存命中时编译时长与主进程峰值显著下降；页面数据收集阶段无跨构建缓存，worker
+fork 尖峰照旧，内存守卫与 cpus 上限仍需保留。缓存命中脏数据报诡异错误（幽灵
+module not found）时 `docker builder prune -f` 清掉重来。
+
 **教训**：
 
 1. 同机构建的内存边界必须落在**容器（cgroup）层**——进程内 `NODE_OPTIONS` 这类

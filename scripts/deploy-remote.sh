@@ -47,8 +47,11 @@ ensure_disk_space() {
 # 那种死法旧 app 跟着不可访问，只能重启整机恢复（见 docs/cicd-notes.md §15）。
 # 注意 NODE_OPTIONS 的堆上限只罩得住构建主进程（Next fork 静态 worker 时主动剥掉），
 # 只有这里的容器级上限对「主进程 + worker fork 群」整体生效。
-MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-1024}" # 给同机 PG/Redis/MinIO/app + 系统预留
-MIN_BUILD_MB="${BUILD_MEM_MIN_MB:-1536}"       # 构建自身下限，低于此值宁可快速失败
+# 预留值按 4G 无 swap 机器实测标定：构建峰值 ≈ 2G（主进程 + 4 worker 收集阶段），
+# 预留 1024 会把额度压到 1.5G 以内触发容器 OOM（exit 137）；预留 512 让额度 ≈
+# 可用 − 512，配合 Dockerfile NEXT_BUILD_CPUS=1 把峰值压到额度内（§15 校准）。
+MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-512}" # 给同机 PG/Redis/MinIO/app + 系统预留
+MIN_BUILD_MB="${BUILD_MEM_MIN_MB:-1024}"      # 构建自身下限，低于此值宁可快速失败
 ensure_memory_headroom() {
   local avail_mb
   avail_mb="$(free -m | awk '/^Mem:/ {print $7}')"
