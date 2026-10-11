@@ -45,5 +45,3 @@ export const list: ApiRouteHandler<undefined, undefined> = async () => {
 
   return NextResponse.json({ message: 'Get tools success!', data }, { status: 200 });
 };
-
-export const toolsController = { list };

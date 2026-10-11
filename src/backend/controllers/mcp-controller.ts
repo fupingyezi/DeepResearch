@@ -46,5 +46,3 @@ export const removeServer: ApiRouteHandler<undefined, undefined> = async ({ para
   await getExtensionService().removeMcpServer(params.name);
   return NextResponse.json({ message: 'Delete MCP server success!' }, { status: 200 });
 };
-
-export const mcpController = { list, upsert, setServerEnabled, removeServer };

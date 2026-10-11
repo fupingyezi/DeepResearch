@@ -3,6 +3,6 @@
  */
 
 import { withApiHandler } from '@/backend/http';
-import { authController } from '@/backend/controllers/auth-controller';
+import * as authController from '@/backend/controllers/auth-controller';
 
 export const GET = withApiHandler({}, authController.me);

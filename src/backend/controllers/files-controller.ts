@@ -52,5 +52,3 @@ export const deleteFile: ApiRouteHandler<z.infer<typeof fileIdBodySchema>, undef
     message: 'File deleted successfully',
   });
 };
-
-export const filesController = { upload, deleteFile };

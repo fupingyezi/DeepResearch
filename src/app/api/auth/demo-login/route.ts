@@ -3,7 +3,8 @@
  */
 
 import { withApiHandler } from '@/backend/http';
-import { authController, authRateLimits } from '@/backend/controllers/auth-controller';
+import * as authController from '@/backend/controllers/auth-controller';
+import { authRateLimits } from '@/backend/controllers/auth-controller';
 
 export { OPTIONS } from '@/backend/http/preflight';
 

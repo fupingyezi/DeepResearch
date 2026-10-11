@@ -1,5 +1,5 @@
 import { withApiHandler } from '@/backend/http';
-import { promptController } from '@/backend/controllers/prompt-controller';
+import * as promptController from '@/backend/controllers/prompt-controller';
 import { enhancePromptSchema } from '@/backend/validation/schemas';
 
 export { OPTIONS } from '@/backend/http/preflight';

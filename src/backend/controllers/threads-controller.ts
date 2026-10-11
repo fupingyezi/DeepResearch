@@ -155,13 +155,3 @@ export const streamRun: ApiRouteHandler<undefined, z.infer<typeof runStreamQuery
     },
   });
 };
-
-export const threadsController = {
-  list,
-  create,
-  get,
-  deleteThread,
-  submitRun,
-  listRuns,
-  streamRun,
-};

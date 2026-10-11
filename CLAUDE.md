@@ -175,9 +175,9 @@ interface ChatStreamBody {
 后端按 **route（薄适配器）/ controller / service / repository** 四层分离，全部位于 `src/app/api/**/route.ts` 与 `src/backend/`：
 
 - 路由 `src/app/api/**/route.ts`——薄适配器：withApiHandler 横切选项（auth/body/query/guard/rateLimit/fallbackMessage/userIdHeader）+ controller 一行调用；Next 配置导出（`runtime`/`dynamic`/OPTIONS）只认 route 文件，必须留在此层
-- 控制器 `src/backend/controllers/`——HTTP 层逻辑（14 文件按域分组）；handler 是裸函数（`ApiRouteHandler<TBody, TQuery>` 标注，不感知 withApiHandler）；`createRateLimiter` 限流器、自定义 body 解析（multipart）、guard 纯函数（sandbox token）都在这层
-- 服务 `src/backend/services/`——领域编排、业务规则、错误映射（AppError）；无 SQL
-- 仓库 `src/backend/repositories/`——单表 SQL（app 侧四张表 + email-token / oauth-account / user / user-model-key）
+- 控制器 `src/backend/controllers/`——HTTP 层逻辑（14 文件按域分组）；handler 是裸函数（`ApiRouteHandler<TBody, TQuery>` 标注，不感知 withApiHandler）；`createRateLimiter` 限流器、自定义 body 解析（multipart）、guard 纯函数（sandbox token）都在这层。**统一形态：裸函数导出，route.ts 消费走 namespace import（`import * as xxxController`）——不设聚合对象/类**
+- 服务 `src/backend/services/`——领域编排、业务规则、错误映射（AppError）；无 SQL。**统一形态：`export class XService` + 构造器注入 deps**（纯函数模块如 model-config / run-stream-guard 除外）
+- 仓库 `src/backend/repositories/`——单表 SQL（app 侧四张表 + email-token / oauth-account / user / user-model-key）。**统一形态：每域 types.ts 契约 + `PgXxxRepository implements` 类 + index 桶**
 - 组合根 `src/backend/wiring.ts`——ThreadService 进程单例 + harness 注入面注册
 - 适配器 `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files）
 

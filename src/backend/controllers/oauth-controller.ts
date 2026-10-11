@@ -147,5 +147,3 @@ export const oauthRateLimits = {
     windowMs: 15 * 60_000,
   }),
 };
-
-export const oauthController = { begin, callback, listProviders };

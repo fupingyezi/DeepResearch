@@ -62,5 +62,3 @@ export const post: ApiRouteHandler<z.infer<typeof chatStreamBodySchema>, undefin
     },
   });
 };
-
-export const chatController = { post };

@@ -36,5 +36,3 @@ export const get: ApiRouteHandler<undefined, undefined> = async () => {
     draining: false,
   });
 };
-
-export const healthController = { get };

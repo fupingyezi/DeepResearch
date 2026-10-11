@@ -1,5 +1,6 @@
 import { withApiHandler } from '@/backend/http';
-import { filesController, parseUploadBody } from '@/backend/controllers/files-controller';
+import * as filesController from '@/backend/controllers/files-controller';
+import { parseUploadBody } from '@/backend/controllers/files-controller';
 
 export { OPTIONS } from '@/backend/http/preflight';
 

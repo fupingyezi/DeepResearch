@@ -3,8 +3,9 @@
  *
  * - createRateLimiter：通用计数钩子（withApiHandler 的 rateLimit 槽），窗口内超过
  *   max 即 429 短路。计数 key 缺省为客户端 IP，可用 keyOf 换账号等维度。
- * - loginFailures：账号维度失败计数——连续失败达阈值即锁定该账号的登录入口，
- *   成功登录清零。锁定判定放在密码校验之前，锁定期内不消耗 bcrypt 算力。
+ * - recordLoginFailure / clearLoginFailures / isLoginLocked：账号维度失败计数——
+ *   连续失败达阈值即锁定该账号的登录入口，成功登录清零。锁定判定放在密码校验
+ *   之前，锁定期内不消耗 bcrypt 算力。
  *
  * 固定窗口语义：INCR 后首条计数带 EXPIRE，窗口从首条起算；窗口滑动的误差上限
  * 为一个完整窗口期，对登录/注册这类防滥用场景可接受（令牌桶留给未来需要时）。
@@ -164,19 +165,20 @@ const LOGIN_FAIL_WINDOW_MS = 15 * 60_000;
 
 const loginFailKey = (email: string): string => `deerflow:rl:loginfail:${email.toLowerCase()}`;
 
-export const loginFailures = {
-  record(email: string): Promise<void> {
-    return incr(loginFailKey(email), LOGIN_FAIL_WINDOW_MS).then(() => undefined);
-  },
+/** 记一次登录失败（重置锁定窗口）。 */
+export function recordLoginFailure(email: string): Promise<void> {
+  return incr(loginFailKey(email), LOGIN_FAIL_WINDOW_MS).then(() => undefined);
+}
 
-  clear(email: string): Promise<void> {
-    return del(loginFailKey(email));
-  },
+/** 登录成功后清零失败计数。 */
+export function clearLoginFailures(email: string): Promise<void> {
+  return del(loginFailKey(email));
+}
 
-  async isLocked(email: string): Promise<boolean> {
-    if (isDisabled()) return false;
-    return (await getCount(loginFailKey(email))) >= LOGIN_FAIL_MAX;
-  },
-};
+/** 失败计数达阈值即锁定该账号的登录入口；锁定期内不消耗 bcrypt。 */
+export async function isLoginLocked(email: string): Promise<boolean> {
+  if (isDisabled()) return false;
+  return (await getCount(loginFailKey(email))) >= LOGIN_FAIL_MAX;
+}
 
 export const noopRateLimit: RateLimitHook = () => null;

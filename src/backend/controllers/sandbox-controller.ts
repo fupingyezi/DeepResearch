@@ -41,5 +41,3 @@ export const stats: ApiRouteHandler<undefined, z.infer<typeof sandboxStatsQueryS
   const snapshot = await getSandboxStatsSnapshot(includeStats);
   return NextResponse.json(snapshot, { status: 200 });
 };
-
-export const sandboxController = { stats };

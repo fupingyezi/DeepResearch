@@ -1,4 +1,4 @@
-import { modelKeysController } from '@/backend/controllers/model-keys-controller';
+import * as modelKeysController from '@/backend/controllers/model-keys-controller';
 import { withApiHandler } from '@/backend/http';
 import { patchSelectedModelSchema, putModelKeySchema } from '@/backend/validation/schemas';
 

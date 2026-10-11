@@ -34,5 +34,3 @@ export const setEnabled: ApiRouteHandler<z.infer<typeof patchEnabledSchema>, und
   const skill = await getExtensionService().setSkillEnabled(params.name, body.enabled);
   return NextResponse.json({ message: 'Update skill success!', data: skill }, { status: 200 });
 };
-
-export const skillsController = { list, create, setEnabled };

@@ -1,5 +1,5 @@
 import { withApiHandler } from '@/backend/http';
-import { memoryController } from '@/backend/controllers/memory-controller';
+import * as memoryController from '@/backend/controllers/memory-controller';
 import { retrievePreviewSchema } from '@/backend/validation/schemas.preview';
 
 export const runtime = 'nodejs';

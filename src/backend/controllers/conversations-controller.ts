@@ -103,11 +103,3 @@ export const deleteSession: ApiRouteHandler<
     { status: 200 },
   );
 };
-
-export const conversationsController = {
-  cancelRun,
-  listSessions,
-  history,
-  renameSession,
-  deleteSession,
-};

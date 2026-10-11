@@ -26,9 +26,11 @@ import {
 import type { ApiRouteHandler } from '@/backend/http';
 import {
   clearAuthCookies,
+  clearLoginFailures,
   createRateLimiter,
+  isLoginLocked,
   jsonError,
-  loginFailures,
+  recordLoginFailure,
   setAuthCookies,
 } from '@/backend/http';
 import { isMailConfigured } from '@/backend/lib/mailer';
@@ -165,17 +167,17 @@ export const initialize: ApiRouteHandler<z.infer<typeof credentialsSchema>, unde
 export const login: ApiRouteHandler<z.infer<typeof credentialsSchema>, undefined> = async ({
   body,
 }) => {
-  if (await loginFailures.isLocked(body.email)) {
+  if (await isLoginLocked(body.email)) {
     return jsonError('LOGIN_LOCKED', 'Too many failed attempts, please try again later', 429);
   }
 
   const user = await authenticate(body.email, body.password);
   if (!user) {
-    await loginFailures.record(body.email);
+    await recordLoginFailure(body.email);
     return jsonError(AuthErrorCode.INVALID_CREDENTIALS, 'Incorrect email or password', 401);
   }
 
-  await loginFailures.clear(body.email);
+  await clearLoginFailures(body.email);
   const tokens = getAuthService().issueTokenPair(user);
   const response = NextResponse.json(toUserResponse(user));
   setAuthCookies(response, tokens);
@@ -334,7 +336,7 @@ export const authRateLimits = {
     max: 5,
     windowMs: 15 * 60_000,
   }),
-  // IP 维度兜底防爆破；账号维度失败锁定见 loginFailures（handler 内先判锁再验密码，
+  // IP 维度兜底防爆破；账号维度失败锁定见 isLoginLocked（handler 内先判锁再验密码，
   // 锁定期内不消耗 bcrypt）
   login: createRateLimiter({ bucket: 'login', max: 20, windowMs: 15 * 60_000 }),
   // 注册是创建账号 + bcrypt 哈希的昂贵操作，IP 维度限流防批量注册
@@ -344,19 +346,4 @@ export const authRateLimits = {
     max: 5,
     windowMs: 15 * 60_000,
   }),
-};
-
-export const authController = {
-  changePassword,
-  demoLogin,
-  forgotPassword,
-  initialize,
-  login,
-  logout,
-  me,
-  register,
-  resendVerification,
-  resetPassword,
-  getSetupStatus,
-  verifyEmail,
 };

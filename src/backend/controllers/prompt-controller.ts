@@ -20,5 +20,3 @@ export const enhance: ApiRouteHandler<z.infer<typeof enhancePromptSchema>, undef
   const enhanced = await getPromptEnhanceService().enhance(body.input);
   return NextResponse.json({ enhanced });
 };
-
-export const promptController = { enhance };
