@@ -63,22 +63,8 @@ export class OAuthServiceError extends Error {
 }
 
 export interface OAuthServiceDeps {
-  oauthAccounts?: OAuthAccountRepository;
-  adapters?: OAuthProviderAdapter[];
-}
-
-export interface OAuthService {
-  listConfiguredProviders(): OAuthProviderName[];
-  /** 生成 authorize 跳转与 CSRF state；provider 未配置抛 PROVIDER_DISABLED */
-  begin(provider: string, redirectUri: string): { redirectUrl: string; state: string };
-  /** 完整回调编排：state 校验 → 交换 → 绑定决策 → 返回用户；失败抛 OAuthServiceError */
-  handleCallback(
-    provider: string,
-    code: string,
-    state: string | null,
-    cookieState: string | null,
-    redirectUri: string,
-  ): Promise<UserRecord>;
+  oauthAccounts: OAuthAccountRepository;
+  adapters: OAuthProviderAdapter[];
 }
 
 function statesEqual(a: string, b: string): boolean {
@@ -86,110 +72,127 @@ function statesEqual(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-export function createOAuthService(deps: OAuthServiceDeps = {}): OAuthService {
-  const adapters = deps.adapters ?? getOAuthAdapters();
-  const accounts = deps.oauthAccounts ?? new PgOAuthAccountRepository();
+export class OAuthService {
+  constructor(private readonly deps: OAuthServiceDeps) {}
+
+  listConfiguredProviders(): OAuthProviderName[] {
+    return this.deps.adapters.filter((a) => a.isConfigured()).map((a) => a.name);
+  }
+
+  /** 生成 authorize 跳转与 CSRF state；provider 未配置抛 PROVIDER_DISABLED */
+  begin(provider: string, redirectUri: string): { redirectUrl: string; state: string } {
+    const adapter = this.resolveAdapter(provider);
+    const state = randomBytes(32).toString('hex');
+    return { redirectUrl: adapter.buildAuthorizeUrl(state, redirectUri), state };
+  }
+
+  /** 完整回调编排：state 校验 → 交换 → 绑定决策 → 返回用户；失败抛 OAuthServiceError */
+  async handleCallback(
+    provider: string,
+    code: string,
+    state: string | null,
+    cookieState: string | null,
+    redirectUri: string,
+  ): Promise<UserRecord> {
+    const adapter = this.resolveAdapter(provider);
+
+    // state 只存在于 begin 种下的 httpOnly cookie：攻击者无法在 api 域种
+    // cookie，state 匹配 ⟺ 回调必然流经我们的 begin 端点（CSRF 防线）
+    if (!cookieState || !state || !statesEqual(cookieState, state)) {
+      throw new OAuthServiceError('STATE_MISMATCH', 'oauth state mismatch');
+    }
+
+    let info: OAuthUserInfo;
+    try {
+      info = await adapter.exchange(code, redirectUri);
+    } catch (error) {
+      if (error instanceof OAuthAdapterError) {
+        console.warn('[oauth] exchange failed:', adapter.name, error.stage);
+        throw new OAuthServiceError('EXCHANGE_FAILED', error.message);
+      }
+      throw error;
+    }
+
+    if (!info.email) {
+      throw new OAuthServiceError('NO_EMAIL', 'provider returned no usable email');
+    }
+    const email = info.email.trim().toLowerCase();
+
+    const binding = await this.deps.oauthAccounts.findByProvider(adapter.name, info.providerUserId);
+    if (binding) {
+      const user = await getUserById(binding.userId);
+      if (!user) {
+        // 外键级联理论上不产生悬空绑定行，出现即数据异常：拒绝而不是崩溃
+        console.error('[oauth] binding points to missing user', binding);
+        throw new OAuthServiceError('EXCHANGE_FAILED', 'binding points to missing user');
+      }
+      return user;
+    }
+
+    if (await getUserByEmail(email)) {
+      throw new OAuthServiceError(
+        'EMAIL_TAKEN',
+        'email belongs to a local account without oauth binding',
+      );
+    }
+
+    let user: UserRecord;
+    try {
+      user = await createUser({
+        email,
+        passwordHash: null,
+        systemRole: 'user',
+        needsSetup: false,
+        emailVerified: info.emailVerified,
+      });
+    } catch (error) {
+      if (error instanceof EmailExistsError) {
+        // 并发回调竞态：另一路已建号并绑定
+        throw new OAuthServiceError('EMAIL_TAKEN', 'email exists');
+      }
+      throw error;
+    }
+
+    try {
+      await this.deps.oauthAccounts.create(user.id, adapter.name, info.providerUserId);
+    } catch (error) {
+      if (error instanceof OAuthAccountExistsError) {
+        const existing = await this.deps.oauthAccounts.findByProvider(
+          adapter.name,
+          info.providerUserId,
+        );
+        if (existing) {
+          const boundUser = await getUserById(existing.userId);
+          if (boundUser) return boundUser;
+        }
+      }
+      throw error;
+    }
+    return user;
+  }
 
   /** 未知 provider 与未配置同归 PROVIDER_DISABLED：不泄露枚举信息 */
-  function resolveAdapter(provider: string): OAuthProviderAdapter {
-    const adapter = adapters.find((a) => a.name === provider);
+  private resolveAdapter(provider: string): OAuthProviderAdapter {
+    const adapter = this.deps.adapters.find((a) => a.name === provider);
     if (!adapter || !adapter.isConfigured()) {
       throw new OAuthServiceError('PROVIDER_DISABLED', `OAuth provider '${provider}' disabled`);
     }
     return adapter;
   }
-
-  return {
-    listConfiguredProviders() {
-      return adapters.filter((a) => a.isConfigured()).map((a) => a.name);
-    },
-
-    begin(provider, redirectUri) {
-      const adapter = resolveAdapter(provider);
-      const state = randomBytes(32).toString('hex');
-      return { redirectUrl: adapter.buildAuthorizeUrl(state, redirectUri), state };
-    },
-
-    async handleCallback(provider, code, state, cookieState, redirectUri) {
-      const adapter = resolveAdapter(provider);
-
-      // state 只存在于 begin 种下的 httpOnly cookie：攻击者无法在 api 域种
-      // cookie，state 匹配 ⟺ 回调必然流经我们的 begin 端点（CSRF 防线）
-      if (!cookieState || !state || !statesEqual(cookieState, state)) {
-        throw new OAuthServiceError('STATE_MISMATCH', 'oauth state mismatch');
-      }
-
-      let info: OAuthUserInfo;
-      try {
-        info = await adapter.exchange(code, redirectUri);
-      } catch (error) {
-        if (error instanceof OAuthAdapterError) {
-          console.warn('[oauth] exchange failed:', adapter.name, error.stage);
-          throw new OAuthServiceError('EXCHANGE_FAILED', error.message);
-        }
-        throw error;
-      }
-
-      if (!info.email) {
-        throw new OAuthServiceError('NO_EMAIL', 'provider returned no usable email');
-      }
-      const email = info.email.trim().toLowerCase();
-
-      const binding = await accounts.findByProvider(adapter.name, info.providerUserId);
-      if (binding) {
-        const user = await getUserById(binding.userId);
-        if (!user) {
-          // 外键级联理论上不产生悬空绑定行，出现即数据异常：拒绝而不是崩溃
-          console.error('[oauth] binding points to missing user', binding);
-          throw new OAuthServiceError('EXCHANGE_FAILED', 'binding points to missing user');
-        }
-        return user;
-      }
-
-      if (await getUserByEmail(email)) {
-        throw new OAuthServiceError(
-          'EMAIL_TAKEN',
-          'email belongs to a local account without oauth binding',
-        );
-      }
-
-      let user: UserRecord;
-      try {
-        user = await createUser({
-          email,
-          passwordHash: null,
-          systemRole: 'user',
-          needsSetup: false,
-          emailVerified: info.emailVerified,
-        });
-      } catch (error) {
-        if (error instanceof EmailExistsError) {
-          // 并发回调竞态：另一路已建号并绑定
-          throw new OAuthServiceError('EMAIL_TAKEN', 'email exists');
-        }
-        throw error;
-      }
-
-      try {
-        await accounts.create(user.id, adapter.name, info.providerUserId);
-      } catch (error) {
-        if (error instanceof OAuthAccountExistsError) {
-          const existing = await accounts.findByProvider(adapter.name, info.providerUserId);
-          if (existing) {
-            const boundUser = await getUserById(existing.userId);
-            if (boundUser) return boundUser;
-          }
-        }
-        throw error;
-      }
-      return user;
-    },
-  };
 }
 
-let _oauthService: OAuthService | null = null;
+export function createOAuthService(deps?: Partial<OAuthServiceDeps>): OAuthService {
+  return new OAuthService({
+    adapters: deps?.adapters ?? getOAuthAdapters(),
+    oauthAccounts: deps?.oauthAccounts ?? new PgOAuthAccountRepository(),
+  });
+}
+
+// 模块级懒单例即可：本服务无状态，不需要 globalThis 防 HMR 分裂（与
+// file-service 同一约定）。
+let service: OAuthService | null = null;
 
 export function getOAuthService(): OAuthService {
-  if (!_oauthService) _oauthService = createOAuthService();
-  return _oauthService;
+  if (!service) service = createOAuthService();
+  return service;
 }
