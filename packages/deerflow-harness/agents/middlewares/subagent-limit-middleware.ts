@@ -18,6 +18,8 @@ import { ToolMessage } from '@langchain/core/messages';
  */
 
 export interface SubagentLimitOptions {
+  /** 装配层门控：false 时不挂载（YAML subagent_limit.enabled）。中间件自身不消费。 */
+  enabled?: boolean;
   /** 单线程同时 in-flight task 上限，默认 3。 */
   maxConcurrent?: number;
   /** 单线程累计 task 上限，默认 8。 */

@@ -6,13 +6,15 @@ import {
   buildRetrievalQueries,
   collectRecentHumanTexts,
   readRecentHumanTexts,
+  resolveRuntimeOptions,
 } from '../client';
 import {
   registerExtraMiddleware,
   getExtraMiddlewaresSignature,
   resetExtraMiddlewares,
 } from '../agents/extra-middlewares';
-import type { ModelConfig } from '../types';
+import type { ClientOptions, ModelConfig } from '../types';
+import type { MiddlewareConfigSnapshot } from '../config';
 
 /**
  * buildConfigKey 是 agent 缓存键的唯一来源，此处锁定 extra-middlewares 注册
@@ -37,6 +39,7 @@ const baseOpts = {
   visionEnabled: false,
   agentName: 'lead',
   userId: null,
+  middlewareOptions: {},
 };
 
 const keyWith = () =>
@@ -46,6 +49,7 @@ const keyWith = () =>
     'mcp-sig',
     'skill-sig',
     getExtraMiddlewaresSignature('lead'),
+    'cfg-sig',
   );
 
 describe('buildConfigKey —— extra-middlewares 签名折入', () => {
@@ -81,8 +85,97 @@ describe('buildConfigKey —— skill 签名折入', () => {
   it('仅 skill 签名不同即改变缓存键（L1 注入内容变化 → agent 重建）', () => {
     const extraSig = getExtraMiddlewaresSignature('lead');
     const withSkillSig = (sig: string) =>
-      buildConfigKey(modelConfig, baseOpts, 'mcp-sig', sig, extraSig);
+      buildConfigKey(modelConfig, baseOpts, 'mcp-sig', sig, extraSig, 'cfg-sig');
     expect(withSkillSig('skill-sig-A')).not.toBe(withSkillSig('skill-sig-B'));
+  });
+});
+
+describe('buildConfigKey —— 中间件配置签名折入', () => {
+  it('仅中间件配置签名不同即改变缓存键（改 YAML → 签名变 → agent 重建）', () => {
+    const extraSig = getExtraMiddlewaresSignature('lead');
+    const withCfgSig = (sig: string) =>
+      buildConfigKey(modelConfig, baseOpts, 'mcp-sig', 'skill-sig', extraSig, sig);
+    expect(withCfgSig('cfg-sig-A')).not.toBe(withCfgSig('cfg-sig-B'));
+  });
+});
+
+describe('resolveRuntimeOptions —— 优先级链', () => {
+  const snapshot = (overrides?: Partial<MiddlewareConfigSnapshot>): MiddlewareConfigSnapshot => ({
+    enabled: {
+      summarization: true,
+      guardrail: true,
+      autoTitle: true,
+      memory: true,
+      sandbox: true,
+      todo: true,
+      threadData: true,
+      uploads: true,
+    },
+    memoryMode: 'inject',
+    options: {},
+    signature: 'sig',
+    ...overrides,
+  });
+
+  it('metadata 严格 boolean 最高，snapshot.enabled 次之，baseOptions 兜底', () => {
+    const base: ClientOptions = { memoryEnabled: false };
+    // baseOptions 为 false、snapshot 为 true → snapshot 生效
+    expect(resolveRuntimeOptions(base, modelConfig, undefined, snapshot()).memoryEnabled).toBe(
+      true,
+    );
+    // metadata 显式 false 压过 snapshot true（严格 boolean 判定）
+    expect(
+      resolveRuntimeOptions(base, modelConfig, { memoryEnabled: false }, snapshot()).memoryEnabled,
+    ).toBe(false);
+    // metadata 传 undefined 不覆盖（不会把 undefined 解释为 false）
+    expect(
+      resolveRuntimeOptions(base, modelConfig, { memoryEnabled: undefined }, snapshot())
+        .memoryEnabled,
+    ).toBe(true);
+    // 无 snapshot 时回落 baseOptions
+    expect(resolveRuntimeOptions(base, modelConfig, undefined).memoryEnabled).toBe(false);
+  });
+
+  it('snapshot.memoryMode 覆盖 baseOptions，metadata.memoryMode 最高', () => {
+    const base: ClientOptions = { memoryMode: 'inject' };
+    expect(
+      resolveRuntimeOptions(base, modelConfig, undefined, {
+        ...snapshot(),
+        memoryMode: 'retrieve',
+      }).memoryMode,
+    ).toBe('retrieve');
+    expect(
+      resolveRuntimeOptions(base, modelConfig, { memoryMode: 'inject' }, snapshot()).memoryMode,
+    ).toBe('inject');
+  });
+
+  it('middlewareOptions 取 snapshot.options，缺项回落 baseOptions 平铺字段', () => {
+    const base: ClientOptions = {
+      guardrail: { blockMode: 'none' },
+      subagentLimit: { maxTotal: 2 },
+    };
+    const { middlewareOptions } = resolveRuntimeOptions(
+      base,
+      modelConfig,
+      undefined,
+      snapshot({ options: { guardrail: { blockMode: 'injection' } } }),
+    );
+    expect(middlewareOptions.guardrail).toEqual({ blockMode: 'injection' });
+    expect(middlewareOptions.subagentLimit).toEqual({ maxTotal: 2 });
+    expect(middlewareOptions.loopDetection).toBeUndefined();
+    expect(middlewareOptions.summarization).toBeUndefined();
+  });
+
+  it('mcp/subagents/vision 不进 snapshot（mcp 走独立配置域，vision 由模型能力驱动）', () => {
+    const out = resolveRuntimeOptions(
+      { mcpEnabled: true, subagentsEnabled: true },
+      modelConfig,
+      undefined,
+      snapshot(),
+    );
+    expect(out.mcpEnabled).toBe(true);
+    expect(out.subagentsEnabled).toBe(true);
+    expect(out.visionEnabled).toBe(false);
   });
 });
 

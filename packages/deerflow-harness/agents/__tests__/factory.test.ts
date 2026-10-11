@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMiddleware } from 'langchain';
 
 import { assembleFromFeatures } from '../factory';
 import { DEFAULT_FEATURES } from '../features';
 import { SUBAGENT_FEATURES } from '../../subagents/executor';
+// spy: true 保留原实现只包 spy——链上中间件实例不深 mock，name 断言照常；
+// create* 工厂函数变 vi.fn，用于断言 options 透传。
+vi.mock('../middlewares', { spy: true });
+import {
+  createGuardrailMiddleware,
+  createSubagentLimitMiddleware,
+  createLoopDetectionMiddleware,
+} from '../middlewares';
 
 const toolNames = (extraTools: { name?: string }[]): string[] =>
   extraTools.map((t) => t.name ?? '?');
@@ -155,5 +163,42 @@ describe('assembleFromFeatures —— vision（多模态）', () => {
   it('subagent 拿不到 view_image（与压缩中间件同门，随 features.vision 走）', () => {
     const { extraTools } = assembleFromFeatures(SUBAGENT_FEATURES, {});
     expect(toolNames(extraTools)).not.toContain('view_image');
+  });
+});
+
+describe('assembleFromFeatures —— middlewareOptions 穿装配', () => {
+  it('options 透传给三个 create* 工厂（guardrail/subagentLimit/loopDetection）', () => {
+    const guardrailOpts = { blockMode: 'injection' as const };
+    const subagentOpts = { maxTotal: 2 };
+    const loopOpts = { hardLimit: 2 };
+    assembleFromFeatures(
+      { ...DEFAULT_FEATURES, guardrail: true },
+      {
+        middlewareOptions: {
+          guardrail: guardrailOpts,
+          subagentLimit: subagentOpts,
+          loopDetection: loopOpts,
+        },
+      },
+    );
+    expect(vi.mocked(createGuardrailMiddleware)).toHaveBeenCalledWith(guardrailOpts);
+    expect(vi.mocked(createSubagentLimitMiddleware)).toHaveBeenCalledWith(subagentOpts);
+    expect(vi.mocked(createLoopDetectionMiddleware)).toHaveBeenCalledWith(loopOpts);
+  });
+
+  it('subagentLimit.enabled=false 不挂载（features.subagents 仍启用）', () => {
+    const { chain } = assembleFromFeatures(DEFAULT_FEATURES, {
+      middlewareOptions: { subagentLimit: { enabled: false } },
+    });
+    expect(chain.map((m) => m.name)).not.toContain('SubagentLimitMiddleware');
+  });
+
+  it('loopDetection.enabled=false 不挂载；未提供 options 时恒挂（构造器默认）', () => {
+    const off = assembleFromFeatures(DEFAULT_FEATURES, {
+      middlewareOptions: { loopDetection: { enabled: false } },
+    });
+    expect(off.chain.map((m) => m.name)).not.toContain('LoopDetectionMiddleware');
+    const on = assembleFromFeatures(DEFAULT_FEATURES, {});
+    expect(on.chain.map((m) => m.name)).toContain('LoopDetectionMiddleware');
   });
 });

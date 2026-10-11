@@ -1,6 +1,14 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { AgentMiddleware } from 'langchain';
 
+import type {
+  GuardrailOptions,
+  LoopDetectionOptions,
+  SubagentLimitOptions,
+  SummarizationOptions,
+} from '../agents/middlewares';
+import type { MiddlewareConfigProvider } from '../config';
+
 /**
  * Provider 标识。用于针对不同 OpenAI 兼容后端选择适配策略。
  */
@@ -63,6 +71,30 @@ export interface ClientOptions {
   userId?: string;
   /** 可用的 skill 列表 */
   availableSkills?: string[];
+  /** GuardrailMiddleware 选项（enabled/blockMode）。 */
+  guardrail?: GuardrailOptions;
+  /** SubagentLimitMiddleware 选项（maxConcurrent/maxTotal/maxTrackedThreads + enabled）。 */
+  subagentLimit?: SubagentLimitOptions;
+  /** LoopDetectionMiddleware 选项（阈值/窗口/频次上限 + enabled）。 */
+  loopDetection?: LoopDetectionOptions;
+  /** SummarizationMiddleware 选项（triggerTokens/keepMessages）。 */
+  summarization?: SummarizationOptions;
+  /**
+   * 中间件装配配置读取器（宿主注入，如 YAML config.yaml 的 mtime 缓存读取）。
+   * 每次 agent 构建前调用取 snapshot；未注入时仅用上面四项 options 直接构造。
+   */
+  middlewareConfigProvider?: MiddlewareConfigProvider;
+}
+
+/**
+ * 装配层消费的中间件选项集（factory 的 create* 接收；undefined = 构造器默认）。
+ * 值来源：snapshot.options（YAML）→ baseOptions 平铺字段 → undefined。
+ */
+export interface MiddlewareOptions {
+  guardrail?: GuardrailOptions;
+  subagentLimit?: SubagentLimitOptions;
+  loopDetection?: LoopDetectionOptions;
+  summarization?: SummarizationOptions;
 }
 
 export interface AssembelOptions {
@@ -70,6 +102,8 @@ export interface AssembelOptions {
   extraMiddlewares?: AgentMiddleware[];
   /** 当前 model 的 provider，用于 feature 自动判断（如 qwenToolCallRecovery）。 */
   provider?: ModelProvider;
+  /** 中间件选项（guardrail/subagentLimit/loopDetection；undefined = 构造器默认）。 */
+  middlewareOptions?: MiddlewareOptions;
 }
 
 /**

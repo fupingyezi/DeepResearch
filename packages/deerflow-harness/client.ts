@@ -9,7 +9,14 @@ import { getExtraMiddlewares, getExtraMiddlewaresSignature } from './agents/extr
 import { createSummarizationMiddleware } from './agents/middlewares';
 import { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 import { searchWebTool, askClarificationTool, skillTool } from './tools';
-import { ModelConfig, ClientOptions, AgentConfigKey, SUBAGENT_STREAM_TAG } from './types';
+import {
+  ModelConfig,
+  ClientOptions,
+  AgentConfigKey,
+  SUBAGENT_STREAM_TAG,
+  type MiddlewareOptions,
+} from './types';
+import type { MiddlewareConfigSnapshot } from './config';
 import { AgentEventType, createAgentEvent, type AgentEvent } from './types/agent-event';
 import {
   toClientAgentEvent,
@@ -28,7 +35,7 @@ import {
   type ThreadImageRef,
 } from './vision';
 
-interface RuntimeRunOptions {
+export interface RuntimeRunOptions {
   memoryEnabled: boolean;
   /** 记忆注入模式：inject（默认，全量）/ retrieve（关键词检索 top-K）。 */
   memoryMode: 'inject' | 'retrieve';
@@ -46,6 +53,8 @@ interface RuntimeRunOptions {
   agentName: string;
   userId: string | null;
   availableSkills?: string[];
+  /** 装配层消费的中间件选项（snapshot.options → baseOptions 平铺字段）。 */
+  middlewareOptions: MiddlewareOptions;
 }
 
 /** agent 缓存键（导出仅供单测锁定键形态；装配见 ensureAgent）。 */
@@ -55,6 +64,7 @@ export function buildConfigKey(
   mcpSignature: string,
   skillSignature: string,
   extraMiddlewareSignature: string,
+  middlewareConfigSignature: string,
 ): AgentConfigKey {
   return JSON.stringify([
     modelConfig.modelName,
@@ -74,6 +84,7 @@ export function buildConfigKey(
     mcpSignature,
     skillSignature,
     extraMiddlewareSignature,
+    middlewareConfigSignature,
   ]);
 }
 
@@ -229,6 +240,89 @@ function looksLikeFinalReportStart(text: string): boolean {
 }
 
 /**
+ * 计算本轮 stream 的运行期开关（导出纯函数，不依赖实例状态）。
+ *
+ * 优先级（仅以下键支持运行期覆盖）：
+ *   1. metadata.<key> (boolean)     — 本次请求显式覆盖
+ *   2. snapshot.enabled.<key>       — 中间件装配配置（YAML，宿主 provider 读取）
+ *   3. baseOptions.<key>            — 服务级默认（wiring 装配时注入）
+ *
+ * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
+ * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。
+ * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
+ *
+ * 不修改 baseOptions，所有覆盖只作用于本次 stream。
+ * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
+ * 否则 `metadata.memoryEnabled = undefined` 也会被解释为 false。
+ *
+ * 中间件选项（middlewareOptions）取 snapshot.options → baseOptions 平铺字段，
+ * 不在 metadata 开放（选项是装配形态，不是单请求开关）。
+ */
+export function resolveRuntimeOptions(
+  baseOptions: ClientOptions,
+  modelConfig: ModelConfig,
+  metadata?: Record<string, any>,
+  snapshot?: MiddlewareConfigSnapshot,
+): RuntimeRunOptions {
+  const userId = baseOptions.userId ?? getContext()?.user_id ?? null;
+  const enabled = snapshot?.enabled;
+  return {
+    memoryEnabled: pickBooleanOverride(
+      metadata?.memoryEnabled,
+      enabled?.memory ?? !!baseOptions.memoryEnabled,
+    ),
+    memoryMode: pickMemoryMode(
+      metadata?.memoryMode,
+      snapshot?.memoryMode ?? baseOptions.memoryMode ?? 'inject',
+    ),
+    autoTitleEnabled: pickBooleanOverride(
+      metadata?.autoTitleEnabled,
+      enabled?.autoTitle ?? !!baseOptions.autoTitleEnabled,
+    ),
+    threadDataEnabled: pickBooleanOverride(
+      metadata?.threadDataEnabled,
+      enabled?.threadData ?? !!baseOptions.threadDataEnabled,
+    ),
+    uploadsEnabled: pickBooleanOverride(
+      metadata?.uploadsEnabled,
+      enabled?.uploads ?? !!baseOptions.uploadsEnabled,
+    ),
+    sandboxEnabled: pickBooleanOverride(
+      metadata?.sandboxEnabled,
+      enabled?.sandbox ?? !!baseOptions.sandboxEnabled,
+    ),
+    summarizationEnabled: pickBooleanOverride(
+      metadata?.summarizationEnabled,
+      enabled?.summarization ?? !!baseOptions.summarizationEnabled,
+    ),
+    guardrailEnabled: pickBooleanOverride(
+      metadata?.guardrailEnabled,
+      enabled?.guardrail ?? !!baseOptions.guardrailEnabled,
+    ),
+    todoEnabled: pickBooleanOverride(
+      metadata?.todoEnabled,
+      enabled?.todo ?? !!baseOptions.todoEnabled,
+    ),
+    mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, baseOptions.mcpEnabled !== false),
+    subagentsEnabled: pickBooleanOverride(
+      metadata?.subagentsEnabled,
+      baseOptions.subagentsEnabled !== false,
+    ),
+    // 视觉开关由模型能力决定（preset supportsVision 透传），不开放 metadata 覆盖
+    visionEnabled: !!modelConfig.supportsVision,
+    agentName: baseOptions.agentName ?? 'lead',
+    userId,
+    availableSkills: baseOptions.availableSkills,
+    middlewareOptions: {
+      guardrail: snapshot?.options.guardrail ?? baseOptions.guardrail,
+      subagentLimit: snapshot?.options.subagentLimit ?? baseOptions.subagentLimit,
+      loopDetection: snapshot?.options.loopDetection ?? baseOptions.loopDetection,
+      summarization: snapshot?.options.summarization ?? baseOptions.summarization,
+    },
+  };
+}
+
+/**
  * DeerFlowClient
  *
  * 进程级单例（见 src/server/wiring.ts）。lead-agent 永远启用 subagent
@@ -250,6 +344,11 @@ export class DeerFlowClient {
   private explicitSystemPrompt?: string;
   private checkpointer?: BaseCheckpointSaver;
   private baseOptions: ClientOptions;
+  /**
+   * 中间件装配配置读取器（宿主注入）。每次 agent 构建前调用取 snapshot；
+   * 未注入时装配形态完全由 baseOptions 的选项字段决定（与历史行为一致）。
+   */
+  private middlewareConfigProvider?: ClientOptions['middlewareConfigProvider'];
 
   constructor(
     modelConfig: ModelConfig,
@@ -264,6 +363,7 @@ export class DeerFlowClient {
     this.defaultTools = options?.tools ?? [searchWebTool, askClarificationTool, skillTool];
     this.explicitSystemPrompt = options?.systemPrompt;
     this.checkpointer = options?.checkpointer;
+    this.middlewareConfigProvider = options?.middlewareConfigProvider;
     this.baseOptions = {
       agentName: options?.agentName ?? 'lead',
       memoryEnabled: options?.memoryEnabled ?? false,
@@ -280,70 +380,16 @@ export class DeerFlowClient {
       subagentsEnabled: options?.subagentsEnabled ?? true,
       userId: options?.userId,
       availableSkills: options?.availableSkills,
+      guardrail: options?.guardrail,
+      subagentLimit: options?.subagentLimit,
+      loopDetection: options?.loopDetection,
+      summarization: options?.summarization,
     };
   }
 
   /** 清空所有 agent 缓存（保留 baseOptions）。 */
   resetAgent(): void {
     this.agentCache.clear();
-  }
-
-  /**
-   * 计算本轮 stream 的运行期开关：以 baseOptions 为底，metadata 显式传值时覆盖。
-   *
-   * 优先级（仅以下键支持运行期覆盖）：
-   *   1. metadata.<key> (boolean) — 本次请求显式覆盖
-   *   2. baseOptions.<key>        — 服务级默认（wiring 装配时注入）
-   *
-   * 支持运行期覆盖的键：memoryEnabled / autoTitleEnabled / threadDataEnabled /
-   * uploadsEnabled / sandboxEnabled / summarizationEnabled / guardrailEnabled / todoEnabled。
-   * `agentName` / `userId` / `availableSkills` 暂不开放单次请求覆盖。
-   *
-   * 不修改 this.baseOptions，所有覆盖只作用于本次 stream。
-   * 透传 metadata 不能为 truthy 即覆盖：必须严格判定 typeof === 'boolean'，
-   * 否则 `metadata.memoryEnabled = undefined` 也会被解释为 false。
-   */
-  private resolveRuntimeOptions(metadata?: Record<string, any>): RuntimeRunOptions {
-    const userId = this.baseOptions.userId ?? getContext()?.user_id ?? null;
-    return {
-      memoryEnabled: pickBooleanOverride(metadata?.memoryEnabled, !!this.baseOptions.memoryEnabled),
-      memoryMode: pickMemoryMode(metadata?.memoryMode, this.baseOptions.memoryMode ?? 'inject'),
-      autoTitleEnabled: pickBooleanOverride(
-        metadata?.autoTitleEnabled,
-        !!this.baseOptions.autoTitleEnabled,
-      ),
-      threadDataEnabled: pickBooleanOverride(
-        metadata?.threadDataEnabled,
-        !!this.baseOptions.threadDataEnabled,
-      ),
-      uploadsEnabled: pickBooleanOverride(
-        metadata?.uploadsEnabled,
-        !!this.baseOptions.uploadsEnabled,
-      ),
-      sandboxEnabled: pickBooleanOverride(
-        metadata?.sandboxEnabled,
-        !!this.baseOptions.sandboxEnabled,
-      ),
-      summarizationEnabled: pickBooleanOverride(
-        metadata?.summarizationEnabled,
-        !!this.baseOptions.summarizationEnabled,
-      ),
-      guardrailEnabled: pickBooleanOverride(
-        metadata?.guardrailEnabled,
-        !!this.baseOptions.guardrailEnabled,
-      ),
-      todoEnabled: pickBooleanOverride(metadata?.todoEnabled, !!this.baseOptions.todoEnabled),
-      mcpEnabled: pickBooleanOverride(metadata?.mcpEnabled, this.baseOptions.mcpEnabled !== false),
-      subagentsEnabled: pickBooleanOverride(
-        metadata?.subagentsEnabled,
-        this.baseOptions.subagentsEnabled !== false,
-      ),
-      // 视觉开关由模型能力决定（preset supportsVision 透传），不开放 metadata 覆盖
-      visionEnabled: !!this.modelConfig.supportsVision,
-      agentName: this.baseOptions.agentName ?? 'lead',
-      userId,
-      availableSkills: this.baseOptions.availableSkills,
-    };
   }
 
   /**
@@ -393,12 +439,18 @@ export class DeerFlowClient {
    * mcpTools 由 caller 预加载并透传（与 systemPrompt 注入的工具同源）；缓存键纳入
    * MCP/skill 启用签名，使配置变更后（关闭 memory 的可缓存场景）agent 自动重建。
    * extra-middlewares 注册表签名同契约：晚注册（首建之后）经签名变化使缓存失效。
+   *
+   * snapshot 由 caller 透传（streamWithInput 每轮取一次，此处不双读）；未透传时
+   * 自行经 provider 取（truncateHistory 路径）。快照签名折入缓存键——改 YAML →
+   * 签名变 → 缓存失效重建；快照选项（middlewareOptions）进装配。
    */
   private async ensureAgent(
     systemPrompt: string,
     opts: RuntimeRunOptions,
     mcpTools: StructuredToolInterface[],
+    snapshot?: MiddlewareConfigSnapshot,
   ): Promise<any> {
+    const snap = snapshot ?? (await this.middlewareConfigProvider?.());
     const mcpSignature = await getEnabledMcpSignature();
     const skillSignature = await getEnabledSkillsSignature();
     const extraMiddlewareSignature = getExtraMiddlewaresSignature('lead');
@@ -408,6 +460,7 @@ export class DeerFlowClient {
       mcpSignature,
       skillSignature,
       extraMiddlewareSignature,
+      snap?.signature ?? '',
     );
     const cacheable = !opts.memoryEnabled;
 
@@ -429,6 +482,7 @@ export class DeerFlowClient {
       checkpointer: this.checkpointer,
       provider,
       extraMiddlewares: getExtraMiddlewares('lead'),
+      middlewareOptions: opts.middlewareOptions,
       features: {
         memory: opts.memoryEnabled,
         autoTitle: opts.autoTitleEnabled,
@@ -438,7 +492,9 @@ export class DeerFlowClient {
         subagents: opts.subagentsEnabled,
         // summarization 需要 model 实例（会额外调用 LLM 生成摘要），
         // features.summarization 不接受 true，须在此用当次 model 构造实例
-        summarization: opts.summarizationEnabled ? createSummarizationMiddleware(model) : false,
+        summarization: opts.summarizationEnabled
+          ? createSummarizationMiddleware(model, opts.middlewareOptions?.summarization)
+          : false,
         guardrail: opts.guardrailEnabled,
         todo: opts.todoEnabled,
         vision: opts.visionEnabled,
@@ -516,7 +572,11 @@ export class DeerFlowClient {
    *   锚点，没有 human 消息则整体跳过（返回 false，调用方不视为失败）。
    */
   async truncateHistoryBeforeLatestUserMessage(threadId: string): Promise<boolean> {
-    const agent = await this.ensureAgent('', this.resolveRuntimeOptions(undefined), []);
+    const agent = await this.ensureAgent(
+      '',
+      resolveRuntimeOptions(this.baseOptions, this.modelConfig, undefined),
+      [],
+    );
     const config = { configurable: { thread_id: threadId } };
     const state = (await agent.getState(config)) as
       | { values?: { messages?: BaseMessage[] } }
@@ -542,8 +602,11 @@ export class DeerFlowClient {
     metadata?: Record<string, any>,
     signal?: AbortSignal,
   ): ClientAgentEventStream {
-    // 1. 解析本次调用的运行期开关（不修改 this.baseOptions）
-    const runOpts = this.resolveRuntimeOptions(metadata);
+    // 1. 解析本次调用的运行期开关（不修改 this.baseOptions）。
+    // YAML 快照每轮经 provider 取一次（宿主侧 mtime 缓存），改配置热生效；
+    // ensureAgent 复用同一快照（键签名 + 装配选项），不每轮双读。
+    const snapshot = await this.middlewareConfigProvider?.();
+    const runOpts = resolveRuntimeOptions(this.baseOptions, this.modelConfig, metadata, snapshot);
 
     // 显式参数优先；其次从 ALS 兜底；最后 fallback 到新 uuid
     const ctx = getContext();
@@ -585,7 +648,7 @@ export class DeerFlowClient {
       semanticQuery,
       recentQueries,
     );
-    const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools);
+    const agent = await this.ensureAgent(systemPrompt, runOpts, mcpTools, snapshot);
 
     // 3. lifecycle start
     {

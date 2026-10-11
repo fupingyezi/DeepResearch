@@ -46,6 +46,8 @@ const toolFreqHardStop = (toolName: string, count: number) =>
   `[FORCED STOP] Tool ${toolName} called ${count} times — exceeded the per-tool safety limit. Producing final answer with results collected so far.`;
 
 export interface LoopDetectionOptions {
+  /** 装配层门控：false 时不挂载（YAML loop_detection.enabled）。中间件自身不消费。 */
+  enabled?: boolean;
   warnThreshold?: number;
   hardLimit?: number;
   windowSize?: number;

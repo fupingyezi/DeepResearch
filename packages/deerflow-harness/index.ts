@@ -1,4 +1,5 @@
-export { DeerFlowClient } from './client';
+export { DeerFlowClient, buildConfigKey, resolveRuntimeOptions } from './client';
+export type { RuntimeRunOptions } from './client';
 export { createChatModel } from './models';
 export { createBaseAgent } from './agents/factory';
 export {
@@ -21,7 +22,14 @@ export {
   type SubagentConfig,
   type ParentHistoryProvider,
 } from './subagents';
-export type { ModelConfig, ClientOptions, BaseTool, SubagentEvent, ModelProvider } from './types';
+export type {
+  ModelConfig,
+  ClientOptions,
+  BaseTool,
+  SubagentEvent,
+  ModelProvider,
+  MiddlewareOptions,
+} from './types';
 
 export { SYSTEM_PROMPT, buildLeadAgentSystemPrompt } from './agents/lead-agent';
 export type { BuildLeadAgentPromptOptions } from './agents/lead-agent';
@@ -231,6 +239,11 @@ export {
   type TitleModelOptions,
   consumeTitleUpdate,
   type TitleUpdatePayload,
+  type GuardrailOptions,
+  type GuardrailBlockMode,
+  type SubagentLimitOptions,
+  type LoopDetectionOptions,
+  type SummarizationOptions,
 } from './agents/middlewares';
 
 export {

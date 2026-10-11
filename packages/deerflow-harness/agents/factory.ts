@@ -12,7 +12,7 @@ import {
   anchorDisplayName,
   middlewareDisplayName,
 } from './features';
-import { AssembelOptions, ModelProvider } from '../types';
+import { AssembelOptions, ModelProvider, type MiddlewareOptions } from '../types';
 import { taskTool, SANDBOX_TOOLS, viewImageTool } from '../tools';
 import { visionMiddleware } from '../vision';
 import {
@@ -26,7 +26,7 @@ import {
   sandboxMiddleware,
   createSubagentLimitMiddleware,
   createGuardrailMiddleware,
-  loopDetectionMiddleware,
+  createLoopDetectionMiddleware,
   qwenToolCallRecoveryMiddleware,
   withCallLogAll,
 } from './middlewares';
@@ -42,6 +42,8 @@ export interface CreateAgentOptions {
   checkpointer?: BaseCheckpointSaver;
   /** 当前 model 的 provider，用于按 provider 自动启用相关中间件。 */
   provider?: ModelProvider;
+  /** 中间件选项（guardrail/subagentLimit/loopDetection；undefined = 构造器默认）。 */
+  middlewareOptions?: MiddlewareOptions;
 }
 
 export function createBaseAgent(opts: CreateAgentOptions) {
@@ -54,6 +56,7 @@ export function createBaseAgent(opts: CreateAgentOptions) {
     extraMiddlewares,
     features,
     provider,
+    middlewareOptions,
   } = opts;
 
   if (middlewares && features) {
@@ -74,6 +77,7 @@ export function createBaseAgent(opts: CreateAgentOptions) {
     const { chain, extraTools } = assembleFromFeatures(feat, {
       extraMiddlewares,
       provider,
+      middlewareOptions,
     });
     effectiveMiddlewares = chain;
     if (extraTools.length > 0) {
@@ -135,7 +139,7 @@ export function assembleFromFeatures(
   features: RuntimeFeatures,
   options: AssembelOptions,
 ): { chain: AgentMiddleware[]; extraTools: StructuredToolInterface[] } {
-  const { provider, extraMiddlewares } = options;
+  const { provider, extraMiddlewares, middlewareOptions } = options;
 
   const chain: AgentMiddleware[] = [];
   const extraTools: StructuredToolInterface[] = [];
@@ -172,11 +176,12 @@ export function assembleFromFeatures(
   // (3) 始终启用：消息层面的工具调用完整性（IntegrityRule 形式可插拔）
   chain.push(toolCallIntegrityMiddleware);
 
-  // (4) 可选：规则式护栏。features.guardrail=true 走默认实现（createGuardrailMiddleware），
+  // (4) 可选：规则式护栏。features.guardrail=true 走默认实现（createGuardrailMiddleware，
+  // options 来自 middlewareOptions.guardrail，未提供时回落构造器默认/env），
   // 或传入自定义中间件实例。默认关闭（库级安全默认），服务级由 wiring.ts 开启。
   const guardrailFeat = features.guardrail;
   if (guardrailFeat === true) {
-    chain.push(createGuardrailMiddleware());
+    chain.push(createGuardrailMiddleware(middlewareOptions?.guardrail));
   } else if (typeof guardrailFeat === 'object' && guardrailFeat !== null) {
     chain.push(guardrailFeat as AgentMiddleware);
   }
@@ -215,14 +220,17 @@ export function assembleFromFeatures(
   pushFeature(chain, features.vision, visionMiddleware);
 
   // (11) subagent 频次/并发上限。每个 agent 实例独立 counter——
-  // 仅在启用 subagents 时挂载（features.subagents !== false，默认启用）。
+  // 仅在启用 subagents 时挂载（features.subagents !== false，默认启用）；
+  // middlewareOptions.subagentLimit.enabled=false 时整体不挂载（YAML 门控）。
   const subagentsEnabled = features.subagents !== false;
-  if (subagentsEnabled) {
-    chain.push(createSubagentLimitMiddleware());
+  if (subagentsEnabled && middlewareOptions?.subagentLimit?.enabled !== false) {
+    chain.push(createSubagentLimitMiddleware(middlewareOptions?.subagentLimit));
   }
 
-  // (12) 始终启用：循环检测
-  chain.push(loopDetectionMiddleware);
+  // (12) 循环检测：enabled=false 时整体不挂载（YAML 门控），否则恒挂。
+  if (middlewareOptions?.loopDetection?.enabled !== false) {
+    chain.push(createLoopDetectionMiddleware(middlewareOptions?.loopDetection));
+  }
 
   // task 工具按开关注入到 lead-agent 工具集；subagent 走 SUBAGENT_FEATURES
   // （subagents=false），此处不注入 task，构成防递归硬保证。
