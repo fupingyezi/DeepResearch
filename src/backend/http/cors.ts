@@ -4,9 +4,13 @@
  * - applyCorsHeaders：响应侧。Origin 命中白名单才回 Access-Control-Allow-Origin
  *   （精确回显，禁通配——credentials 模式下浏览器拒绝 *）；同源请求无需 CORS 头。
  * - isOriginAllowed：请求侧（CSRF 用）。无 Origin = 非浏览器客户端，放行（鉴权在前）；
- *   同源恒允许；跨域必须命中白名单。
+ *   同源恒允许；跨域必须命中白名单。同源判定用 Host 头还原的外部 origin
+ *   （requestExternalOrigin）——nextUrl.origin 在 standalone 自托管下是绑定地址，
+ *   恒不等于浏览器 Origin。
  */
 import type { NextRequest } from 'next/server';
+
+import { requestExternalOrigin } from '@/backend/lib/app-origin';
 
 /** 预检允许的请求方法（与路由层实际提供的方法一致即可，保守全量） */
 const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
@@ -41,7 +45,7 @@ export function getAllowedOrigins(): Set<string> {
 export function isOriginAllowed(request: NextRequest): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return true;
-  if (origin === request.nextUrl.origin) return true;
+  if (origin === requestExternalOrigin(request)) return true;
   return getAllowedOrigins().has(origin);
 }
 
@@ -51,7 +55,7 @@ export function applyCorsHeaders(
   preflight = false,
 ): void {
   const origin = request.headers.get('origin');
-  if (!origin || origin === request.nextUrl.origin) return;
+  if (!origin || origin === requestExternalOrigin(request)) return;
   if (!getAllowedOrigins().has(origin)) return;
 
   response.headers.set('Access-Control-Allow-Origin', origin);

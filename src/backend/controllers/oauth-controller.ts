@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import type { ApiRouteHandler } from '@/backend/http';
 import { createRateLimiter, isSecureCookieDisabled, setAuthCookies } from '@/backend/http';
-import { appBaseUrl, oauthRedirectUri } from '@/backend/lib/app-origin';
+import { appBaseUrl, oauthRedirectUri, requestExternalOrigin } from '@/backend/lib/app-origin';
 import { getAuthService } from '@/backend/services/auth-service';
 import {
   OAuthServiceError,
@@ -64,7 +64,7 @@ function clearOAuthStateCookie(response: NextResponse): void {
 export const begin: ApiRouteHandler<undefined, undefined> = async ({ params, request }) => {
   // 302 目标恒为 env 决定的 app 域（同源部署回落请求自身 origin）：
   // 不读任何用户可控的 redirect/return_to，open-redirect 从构造上关闭
-  const app = appBaseUrl() || request.nextUrl.origin;
+  const app = appBaseUrl() || requestExternalOrigin(request) || '';
   const fail = (code: OAuthErrorCode) =>
     NextResponse.redirect(`${app}/login?oauth_error=${code}`, 302);
 
@@ -92,7 +92,7 @@ export const callback: ApiRouteHandler<
   undefined,
   z.infer<typeof oauthCallbackQuerySchema>
 > = async ({ params, query, request }) => {
-  const app = appBaseUrl() || request.nextUrl.origin;
+  const app = appBaseUrl() || requestExternalOrigin(request) || '';
   const redirect = (code: OAuthErrorCode) =>
     NextResponse.redirect(`${app}/login?oauth_error=${code}`, 302);
   const clearAnd = (response: NextResponse) => {

@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-import { appBaseUrl, callbackBaseUrl, oauthRedirectUri } from '../app-origin';
+import {
+  appBaseUrl,
+  callbackBaseUrl,
+  oauthRedirectUri,
+  requestExternalOrigin,
+} from '../app-origin';
 
+/** 模拟一个「浏览器视角 origin 即 origin 参数」的请求：Host/x-forwarded-proto 与之一致 */
 function fakeRequest(origin = 'http://localhost:3000') {
-  return { nextUrl: { origin } } as unknown as NextRequest;
+  const host = origin.replace(/^https?:\/\//, '');
+  const headers = new Map<string, string>([['host', host]]);
+  if (origin.startsWith('https://')) headers.set('x-forwarded-proto', 'https');
+  return {
+    nextUrl: { origin },
+    headers: { get: (name: string) => headers.get(name) ?? null },
+  } as unknown as NextRequest;
 }
 
 const ENV_KEYS = ['APP_BASE_URL', 'CORS_ALLOWED_ORIGINS', 'OAUTH_BASE_URL'] as const;
@@ -68,5 +80,25 @@ describe('oauthRedirectUri', () => {
     expect(oauthRedirectUri(fakeRequest(), 'github')).toBe(
       'https://api.example.com/api/auth/oauth/github/callback',
     );
+  });
+});
+
+describe('requestExternalOrigin', () => {
+  it('直连 HTTP：Host 头拼 http', () => {
+    expect(requestExternalOrigin(fakeRequest('http://1.2.3.4:3000'))).toBe('http://1.2.3.4:3000');
+  });
+
+  it('TLS 反代：x-forwarded-proto 决定协议', () => {
+    expect(requestExternalOrigin(fakeRequest('https://app.example.com'))).toBe(
+      'https://app.example.com',
+    );
+  });
+
+  it('缺 Host → null', () => {
+    const headers = new Map<string, string>();
+    const request = {
+      headers: { get: (name: string) => headers.get(name) ?? null },
+    } as unknown as NextRequest;
+    expect(requestExternalOrigin(request)).toBeNull();
   });
 });
