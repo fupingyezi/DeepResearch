@@ -26,13 +26,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # 构建期不需要真实业务密钥；standalone 产物在运行期由 env_file 注入配置
 ENV NEXT_TELEMETRY_DISABLED=1
-# 构建内存上限：next build 默认按机器内存自适应堆大小，在轻量服务器上会把同机的
-# PG / Redis / app 一起挤出内存，整机（含 SSH）失去响应 —— 2026-09 生产事故的成因之一。
-# 给构建设个上限后，真不够会以明确的 "JavaScript heap out of memory" 失败，
-# 而不是拖死服务器。机器规格较大时可上调这个值。
-# 注意此上限只罩得住构建主进程：Next fork 静态 worker 时主动剥掉该参数，
-# 整体内存边界靠 deploy-remote.sh 的容器级上限（--memory，禁 swap）。
-ENV NODE_OPTIONS=--max-old-space-size=2048
+# 构建主进程的堆上限（旧空间）。整体边界由 deploy-remote.sh 的容器级上限兜住
+# （--memory + 有界 swap 溢出额度）——这个值只管主进程自己：V8 面对高上限会懒 GC
+# 放任堆一路涨满，慢 CPU 上编译期长，主进程 RSS 顶到「堆上限 + 开销」≈ 2.2G，
+# 编译期就撞穿容器额度被 cgroup OOM（exit 137）。压低后 V8 被迫勤 GC，主进程 RSS
+# 显著回落；真不够会以明确的 "JavaScript heap out of memory" 干净失败（此时调回
+# 2048 靠 swap 额度吸收）。注意 Next fork 静态 worker 时主动剥掉该参数，
+# worker 内存不在此限。机器规格较大时可上调。
+ARG NODE_HEAP_MB=1536
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_HEAP_MB}
 # 构建 worker 数上限（进 next.config 的 experimental.cpus）：next build 的页面数据
 # 收集 / 静态生成默认 fork 8 个子进程（pages+app 池各 4），每个装载完整 app 模块图
 # （langchain 等），轻量服务器上与同机 PG / Redis / MinIO / app 互挤内存会触发 swap

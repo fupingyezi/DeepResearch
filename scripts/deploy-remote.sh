@@ -42,19 +42,20 @@ ensure_disk_space() {
 }
 
 # 内存守卫（与磁盘守卫同哲学）：本机构建与 PG/Redis/MinIO/app 同机争内存。构建容器
-# 内存上限 = 当前可用内存 − 同机服务预留，配合 --memory-swap 相等禁构建容器 swap：
-# 真超限以明确 OOM 快速失败，而不是 swap 风暴把整机（含正在跑的旧版本 app）拖死——
-# 那种死法旧 app 跟着不可访问，只能重启整机恢复（见 docs/cicd-notes.md §15）。
+# 内存上限 = 当前可用内存 − 同机服务预留；--memory-swap = 上限 + 溢出额度（有界换入
+# 宿主 swap）：超总限以明确 OOM 快速失败，而不是无界 swap 风暴把整机（含正在跑的
+# 旧版本 app）拖死——那种死法旧 app 跟着不可访问，只能重启整机恢复（见 §15）。
 # 注意 NODE_OPTIONS 的堆上限只罩得住构建主进程（Next fork 静态 worker 时主动剥掉），
-# 只有这里的容器级上限对「主进程 + worker fork 群」整体生效。
-# 预留值按构建峰值实测标定（本机隔离复刻服务器环境：NEXT_BUILD_CPUS=1 +
-# NODE_OPTIONS=--max-old-space-size=2048）：冷构建峰值 1958MB、暖构建（webpack
-# 持久缓存命中）1699MB，峰值出现在收集阶段（构建收尾 ~16 秒）；Linux 侧可能略高。
-# 4G 无 swap 机器预算 = 3719 − 同机服务 ~1.1G − 系统/页缓存，冷构建只有额度 ≈
-# 可用 − 128 才放得下（~200MB 裕量）——预留 512 时额度 1.8~1.9G，冷构建必 OOM
-# （两轮部署实测 exit 137，§15 校准）。128 已是这台机器的极限，扩容后应调回 512。
+# 容器级上限才对「主进程 + worker fork 群」整体生效。
+# 预留值按构建峰值实测标定（本机隔离复刻：NEXT_BUILD_CPUS=1 + NODE_OPTIONS=2048）
+# 冷构建峰值 1958MB / 暖构建 1699MB——但那是快 CPU 的乐观值：服务器慢 CPU 编译期长，
+# 主进程堆顶满 NODE_OPTIONS 上限，实测额度 2.3G 仍在编译期被 cgroup OOM（两轮
+# 42.7s / 67.3s，§15 校准；Dockerfile 已把堆上限压到 1536 抵消这一项）。4G 无 swap
+# 机器预算 = 3719 − 同机服务 ~1.1G − 系统/页缓存，额度 ≈ 可用 − 128 是极限
+# （扩容后应调回 512）；峰值超出额度的余量靠 BUILD_SWAP_MB 溢出到宿主 swap。
 MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-128}" # 给同机 PG/Redis/MinIO/app + 系统预留
 MIN_BUILD_MB="${BUILD_MEM_MIN_MB:-1024}"      # 构建自身下限，低于此值宁可快速失败
+BUILD_SWAP_MB="${BUILD_SWAP_MB:-2048}"        # 内存溢出额度：换入宿主 swap 的上限
 ensure_memory_headroom() {
   local avail_mb
   avail_mb="$(free -m | awk '/^Mem:/ {print $7}')"
@@ -65,7 +66,8 @@ ensure_memory_headroom() {
   if [ "$BUILD_MEM_MB" -lt "$MIN_BUILD_MB" ]; then
     fail "可用内存仅 ${avail_mb}MB，低于 构建下限 ${MIN_BUILD_MB}MB + 预留 ${MEM_RESERVE_MB}MB。请停掉非必要进程或扩容内存后再部署。"
   fi
-  log "内存守卫：可用 ${avail_mb}MB，构建容器上限 ${BUILD_MEM_MB}MB（预留 ${MEM_RESERVE_MB}MB）"
+  BUILD_MEM_SWAP_MB=$((BUILD_MEM_MB + BUILD_SWAP_MB))
+  log "内存守卫：可用 ${avail_mb}MB，构建容器上限 ${BUILD_MEM_MB}MB + swap 额度 ${BUILD_SWAP_MB}MB（预留 ${MEM_RESERVE_MB}MB）"
 }
 
 # 部署成功后的回收：镜像只留最近 3 个版本（回滚只需要上一版，留 3 个够用），构建缓存
@@ -111,8 +113,9 @@ log "构建新镜像: $NEW_IMAGE（首次较慢，后续有 layer 缓存）"
 # 且下一次部署的构建层永远无缓存（被掐掉的层不进缓存）。
 BUILD_FLAGS=(-t "$NEW_IMAGE")
 if [ -n "${BUILD_MEM_MB:-}" ]; then
-  # 内存守卫下发的容器级上限；--memory-swap 相等 = 禁构建容器 swap，超限 OOM 快速失败
-  BUILD_FLAGS+=(--memory "${BUILD_MEM_MB}m" --memory-swap "${BUILD_MEM_MB}m")
+  # 内存守卫下发的容器级上限；--memory-swap 多出 BUILD_SWAP_MB 的溢出额度（有界换入
+  # 宿主 swap：总量封顶，swap 风暴不可能发生）。宿主未配 swap 时该额度天然失效
+  BUILD_FLAGS+=(--memory "${BUILD_MEM_MB}m" --memory-swap "${BUILD_MEM_SWAP_MB}m")
 fi
 timeout "${BUILD_TIMEOUT:-30m}" docker build "${BUILD_FLAGS[@]}" . || {
   log "构建失败后的观测（旧版本容器应仍在运行）："
