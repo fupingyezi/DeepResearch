@@ -23,7 +23,7 @@ import {
   type StampedClientAgentEvent,
 } from '../../sse/client-event';
 import type { RunEventBus } from '../contracts';
-import { getRedisClientFactory, type RedisClient } from '../redis-client-factory';
+import { getRedisClientFactory, type RedisClient } from '../../redis-client-factory';
 import { InMemoryRunEventBus } from './in-memory';
 
 const LOG = '[event-bus]';

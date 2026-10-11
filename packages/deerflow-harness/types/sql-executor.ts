@@ -1,8 +1,8 @@
 /**
- * harness 侧的最小 SQL 接口（query + transaction）。
+ * 宿主注入的最小 SQL 执行面（单查询 + 事务）。
  *
- * 由宿主（app 层）包装自己的连接池注入（构造 PgThreadMetaRepository / PgRunRepository /
- * PgMemoryStorage 时传入）。harness 不反向依赖宿主，也不依赖 pg 驱动的具体类型。
+ * 由宿主（app 层）包装自己的连接池注入（实现 SQL 存储适配时传入）。
+ * harness 不反向依赖宿主，也不依赖 pg 驱动的具体类型。
  */
 export interface SqlExecutor {
   query(

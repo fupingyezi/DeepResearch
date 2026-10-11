@@ -17,10 +17,7 @@
  * 缓存客户端：协调命令（整数计数 / Lua / 锁）与其通用缓存用途不重叠。
  */
 
-import {
-  getRedisClientFactory,
-  type RedisClient,
-} from '../../runtime/coordination/redis-client-factory';
+import { getRedisClientFactory, type RedisClient } from '../../runtime/redis-client-factory';
 
 const KEY_PREFIX = 'deerflow:sandbox:';
 const CONTAINERS_COUNT_KEY = `${KEY_PREFIX}containers:count`;

@@ -22,7 +22,7 @@
 
 import type { RunOwnerInfo, RunRegistry } from '../contracts';
 import { InMemoryRunRegistry } from './in-memory';
-import { getRedisClientFactory, type RedisClient } from '../redis-client-factory';
+import { getRedisClientFactory, type RedisClient } from '../../redis-client-factory';
 import { getInstanceOwner } from '../../lifecycle/instance-id';
 import { OWNER_DEAD_AFTER_MS } from '../../lifecycle/liveness';
 

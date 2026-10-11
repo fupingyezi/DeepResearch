@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisEventBus } from '../redis';
-import { setRedisClientFactory } from '../../redis-client-factory';
+import { setRedisClientFactory } from '../../../redis-client-factory';
 import { describeRunEventBusContract } from '../../../__tests__/helpers/contract-cases';
 import {
   ClientAgentEventType,

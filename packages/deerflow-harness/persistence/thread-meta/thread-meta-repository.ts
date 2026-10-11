@@ -12,7 +12,7 @@ import type {
   ThreadMetaRepository,
   ThreadStatus,
 } from './types';
-import type { SqlExecutor } from '../sql';
+import type { SqlExecutor } from '../../types/sql-executor';
 import { toIso } from '../../utils/common';
 
 const ALLOWED_STATUS = new Set<ThreadStatus>(['idle', 'running', 'error', 'interrupted']);

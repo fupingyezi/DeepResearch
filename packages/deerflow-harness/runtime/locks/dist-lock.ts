@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { getRedisClientFactory, type RedisClient } from '../coordination/redis-client-factory';
+import { getRedisClientFactory, type RedisClient } from '../redis-client-factory';
 
 const LOG = '[dist-lock]';
 

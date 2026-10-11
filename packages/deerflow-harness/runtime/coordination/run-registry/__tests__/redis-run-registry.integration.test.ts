@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisRunRegistry } from '../redis';
-import { setRedisClientFactory } from '../../redis-client-factory';
+import { setRedisClientFactory } from '../../../redis-client-factory';
 import { describeRunRegistryContract } from '../../../__tests__/helpers/contract-cases';
 
 /**

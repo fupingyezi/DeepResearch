@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient } from 'redis';
 
 import { RedisDistLock } from '../dist-lock';
-import { setRedisClientFactory } from '../../coordination/redis-client-factory';
+import { setRedisClientFactory } from '../../redis-client-factory';
 
 /**
  * RedisDistLock 集成测试：真实 Redis 上的互斥语义（两个独立实例共享同一把锁，

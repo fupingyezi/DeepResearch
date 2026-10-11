@@ -288,7 +288,7 @@ export {
   type RedisClientFactory,
   type RedisClientOptions,
   type RedisClient,
-} from './runtime/coordination/redis-client-factory';
+} from './runtime/redis-client-factory';
 
 // runtime/locks（互斥锁：进程内 / Redis 双实现）
 export {
@@ -337,8 +337,8 @@ export {
   type RunListOptions,
 } from './persistence/runs';
 
-// persistence/sql —— 宿主注入的最小 SQL 执行面（单查询 + 事务）
-export type { SqlExecutor } from './persistence/sql';
+// types/sql-executor —— 宿主注入的最小 SQL 执行面（单查询 + 事务）
+export type { SqlExecutor } from './types';
 
 // 宿主注入面：标题存储 / 上传文件 / Tavily Key（实现归宿主，harness 只消费接口）
 export {

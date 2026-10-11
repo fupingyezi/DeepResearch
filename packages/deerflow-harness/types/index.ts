@@ -115,3 +115,5 @@ export type AgentConfigKey = string;
 export * from './agent-event';
 
 export * from './subagent';
+
+export type { SqlExecutor } from './sql-executor';
