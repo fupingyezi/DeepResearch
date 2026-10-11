@@ -2,10 +2,9 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
-import { PgMemoryStorage } from '../pg-storage';
+import { InMemoryMemoryStorage } from '../in-memory-storage';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import { createMemoryFact, MemoryUpdater, setMemoryModelFactory } from '../updater';
-import { FakeSql } from './fake-sql';
 
 /** formatConversationForUpdate 依赖 _getType 识别 human/ai 角色。 */
 function humanMsg(content: string) {
@@ -26,7 +25,7 @@ function fakeModelWithFact(content: string): BaseChatModel {
 describe('updater fact 去重键（casefold）', () => {
   beforeEach(() => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingEnabled: false });
-    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
+    setMemoryStorage(new InMemoryMemoryStorage());
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });

@@ -14,11 +14,10 @@ import {
   setMemoryEmbeddingsFactory,
 } from '../embeddings';
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
-import { PgMemoryStorage } from '../pg-storage';
+import { InMemoryMemoryStorage } from '../in-memory-storage';
 import { getMemoryDegradeStats, resetMemoryDegradeStats } from '../stats';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact } from '../types';
-import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 
@@ -238,7 +237,7 @@ describe('embedQuery / embedTexts', () => {
 describe('backfillMemoryEmbeddings', () => {
   beforeEach(() => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
-    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
+    setMemoryStorage(new InMemoryMemoryStorage());
   });
 
   afterEach(() => {

@@ -142,6 +142,7 @@ export {
   type MemorySqlExecutor,
   type VectorSearchResult,
   PgMemoryStorage,
+  InMemoryMemoryStorage,
   getMemoryStorage,
   resetMemoryStorage,
   setMemoryStorage,

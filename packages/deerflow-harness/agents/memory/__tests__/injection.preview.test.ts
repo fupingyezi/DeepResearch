@@ -3,15 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MEMORY_CONFIG, setMemoryConfig } from '../config';
 import { resetMemoryEmbeddingsFactory } from '../embeddings';
 import { previewMemoryRetrieval } from '../injection.preview';
-import { PgMemoryStorage } from '../pg-storage';
+import { InMemoryMemoryStorage } from '../in-memory-storage';
 import { resetMemoryRerankerFactory, setMemoryRerankerFactory } from '../rerank';
 import { getMemoryStorage, resetMemoryStorage, setMemoryStorage } from '../storage';
 import type { Fact, MemoryData } from '../types';
-import { FakeSql } from './fake-sql';
 
 const DIMS = 4;
 
-/** 检索效果预览端到端：走真实 storage（PgMemoryStorage + 假 SQL），覆盖
+/** 检索效果预览端到端：走真实 storage（InMemoryMemoryStorage），覆盖
  *  previewMemoryRetrieval 的行为（与注入侧同源、rerank 开关、配置开关生效）。 */
 describe('previewMemoryRetrieval · 检索效果预览', () => {
   function fact(content: string, id = content, embedding?: number[]): Fact {
@@ -47,7 +46,7 @@ describe('previewMemoryRetrieval · 检索效果预览', () => {
 
   beforeEach(() => {
     setMemoryConfig({ ...DEFAULT_MEMORY_CONFIG, embeddingDimensions: DIMS });
-    setMemoryStorage(new PgMemoryStorage(new FakeSql()));
+    setMemoryStorage(new InMemoryMemoryStorage());
   });
 
   afterEach(() => {
