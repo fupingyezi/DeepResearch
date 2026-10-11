@@ -41,6 +41,27 @@ ensure_disk_space() {
   log "清理后磁盘可用 ${free_gb}G，继续部署"
 }
 
+# 内存守卫（与磁盘守卫同哲学）：本机构建与 PG/Redis/MinIO/app 同机争内存。构建容器
+# 内存上限 = 当前可用内存 − 同机服务预留，配合 --memory-swap 相等禁构建容器 swap：
+# 真超限以明确 OOM 快速失败，而不是 swap 风暴把整机（含正在跑的旧版本 app）拖死——
+# 那种死法旧 app 跟着不可访问，只能重启整机恢复（见 docs/cicd-notes.md §15）。
+# 注意 NODE_OPTIONS 的堆上限只罩得住构建主进程（Next fork 静态 worker 时主动剥掉），
+# 只有这里的容器级上限对「主进程 + worker fork 群」整体生效。
+MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-1024}" # 给同机 PG/Redis/MinIO/app + 系统预留
+MIN_BUILD_MB="${BUILD_MEM_MIN_MB:-1536}"       # 构建自身下限，低于此值宁可快速失败
+ensure_memory_headroom() {
+  local avail_mb
+  avail_mb="$(free -m | awk '/^Mem:/ {print $7}')"
+  case "$avail_mb" in
+    ''|*[!0-9]*) log "可用内存解析失败（${avail_mb}），跳过内存守卫"; return 0 ;;
+  esac
+  BUILD_MEM_MB=$((avail_mb - MEM_RESERVE_MB))
+  if [ "$BUILD_MEM_MB" -lt "$MIN_BUILD_MB" ]; then
+    fail "可用内存仅 ${avail_mb}MB，低于 构建下限 ${MIN_BUILD_MB}MB + 预留 ${MEM_RESERVE_MB}MB。请停掉非必要进程或扩容内存后再部署。"
+  fi
+  log "内存守卫：可用 ${avail_mb}MB，构建容器上限 ${BUILD_MEM_MB}MB（预留 ${MEM_RESERVE_MB}MB）"
+}
+
 # 部署成功后的回收：镜像只留最近 3 个版本（回滚只需要上一版，留 3 个够用），构建缓存
 # 保留 2G 以维持构建速度。不回收的话磁盘只增不减（每次部署多一份全量镜像）。
 #
@@ -75,14 +96,24 @@ else
 fi
 
 ensure_disk_space
+ensure_memory_headroom
 
 log "构建新镜像: $NEW_IMAGE（首次较慢，后续有 layer 缓存）"
 # 墙钟超时兜底：构建只剩 webpack 编译（lint/typecheck 在 quality 门禁跑，见 next.config），
 # 正常数分钟内完成。若因同机负载等病态挂起，到点主动终止 docker CLI 并以明确错误失败，
 # 而不是被上层 ssh-action 超时连脚本一起掐掉——那种死法构建会残留在 dockerd 继续吃资源，
 # 且下一次部署的构建层永远无缓存（被掐掉的层不进缓存）。
-timeout "${BUILD_TIMEOUT:-30m}" docker build -t "$NEW_IMAGE" . \
-  || fail "docker build 失败或超时 ${BUILD_TIMEOUT:-30m}（见上方构建日志）"
+BUILD_FLAGS=(-t "$NEW_IMAGE")
+if [ -n "${BUILD_MEM_MB:-}" ]; then
+  # 内存守卫下发的容器级上限；--memory-swap 相等 = 禁构建容器 swap，超限 OOM 快速失败
+  BUILD_FLAGS+=(--memory "${BUILD_MEM_MB}m" --memory-swap "${BUILD_MEM_MB}m")
+fi
+timeout "${BUILD_TIMEOUT:-30m}" docker build "${BUILD_FLAGS[@]}" . || {
+  log "构建失败后的观测（旧版本容器应仍在运行）："
+  free -m
+  compose ps || true
+  fail "docker build 失败或超时 ${BUILD_TIMEOUT:-30m}（见上方构建日志）。旧版本容器未受影响仍在运行；若因内存不足 OOM，调参指引见 docs/cicd-notes.md §15。"
+}
 
 log "以新镜像启动 app: $NEW_IMAGE"
 export APP_IMAGE="$NEW_IMAGE"
