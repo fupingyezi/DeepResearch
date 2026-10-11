@@ -98,6 +98,18 @@ export {
   resetMcpClient,
 } from './extensions/mcp';
 
+// 中间件装配 YAML 配置（对齐 deer-flow 2.0 config.yaml 约定）
+export {
+  middlewareConfigYamlSchema,
+  parseMiddlewareConfigYaml,
+  resolveConfigEnvPlaceholders,
+  createDefaultMiddlewareConfigYaml,
+  MIDDLEWARE_CONFIG_VERSION,
+  type MiddlewareConfigYaml,
+  type MiddlewareConfigSnapshot,
+  type MiddlewareConfigProvider,
+} from './config';
+
 // Memory 子系统
 export {
   // types

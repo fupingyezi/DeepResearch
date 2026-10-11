@@ -246,7 +246,7 @@ class LoopTracker {
   }
 }
 
-function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
+export function createLoopDetectionMiddleware(options: LoopDetectionOptions = {}) {
   const warnThreshold = options.warnThreshold ?? DEFAULT_WARN_THRESHOLD;
   const hardLimit = options.hardLimit ?? DEFAULT_HARD_LIMIT;
   const windowSize = options.windowSize ?? DEFAULT_WINDOW_SIZE;

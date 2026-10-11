@@ -64,7 +64,11 @@ export {
   createSubagentLimitMiddleware,
   type SubagentLimitOptions,
 } from './subagent-limit-middleware';
-export { loopDetectionMiddleware } from './loop-detection-middleware';
+export {
+  loopDetectionMiddleware,
+  createLoopDetectionMiddleware,
+  type LoopDetectionOptions,
+} from './loop-detection-middleware';
 export { qwenToolCallRecoveryMiddleware } from './qwen-tool-call-recovery-middleware';
 export { withCallLogAll } from './with-call-log';
 export type { WithCallLogOptions } from './with-call-log';
