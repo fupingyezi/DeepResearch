@@ -1,4 +1,4 @@
-import { modelKeysController } from '@/backend/controllers/model-keys-controller';
+import * as modelKeysController from '@/backend/controllers/model-keys-controller';
 import { withApiHandler } from '@/backend/http';
 
 export { OPTIONS } from '@/backend/http/preflight';

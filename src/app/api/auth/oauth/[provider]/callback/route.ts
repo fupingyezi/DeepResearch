@@ -3,7 +3,8 @@
  */
 
 import { withApiHandler } from '@/backend/http';
-import { oauthController, oauthRateLimits } from '@/backend/controllers/oauth-controller';
+import * as oauthController from '@/backend/controllers/oauth-controller';
+import { oauthRateLimits } from '@/backend/controllers/oauth-controller';
 import { oauthCallbackQuerySchema } from '@/backend/validation/schemas';
 
 export const dynamic = 'force-dynamic';

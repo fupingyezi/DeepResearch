@@ -1,4 +1,4 @@
-import { skillsController } from '@/backend/controllers/skills-controller';
+import * as skillsController from '@/backend/controllers/skills-controller';
 import { withApiHandler } from '@/backend/http';
 import { patchEnabledSchema } from '@/backend/validation/schemas';
 

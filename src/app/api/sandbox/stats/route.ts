@@ -1,5 +1,6 @@
 import { withApiHandler } from '@/backend/http';
-import { isAuthorized, sandboxController } from '@/backend/controllers/sandbox-controller';
+import * as sandboxController from '@/backend/controllers/sandbox-controller';
+import { isAuthorized } from '@/backend/controllers/sandbox-controller';
 import { sandboxStatsQuerySchema } from '@/backend/validation/schemas';
 
 export const runtime = 'nodejs';

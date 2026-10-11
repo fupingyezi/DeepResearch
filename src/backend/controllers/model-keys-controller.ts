@@ -54,5 +54,3 @@ export const deleteKey: ApiRouteHandler<undefined, undefined> = async ({ user, p
   await getModelKeyService().deleteKey(user!.id, params.provider);
   return NextResponse.json({ message: 'Delete model key success!' }, { status: 200 });
 };
-
-export const modelKeysController = { list, saveKey, selectModel, deleteKey };

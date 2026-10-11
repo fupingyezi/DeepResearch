@@ -1,5 +1,5 @@
 import { withApiHandler } from '@/backend/http';
-import { memoryController } from '@/backend/controllers/memory-controller';
+import * as memoryController from '@/backend/controllers/memory-controller';
 import { updateMemoryFactSchema } from '@/backend/validation/schemas';
 
 export { OPTIONS } from '@/backend/http/preflight';

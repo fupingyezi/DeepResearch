@@ -108,14 +108,3 @@ export const retrievePreview: ApiRouteHandler<
   const data = await previewRetrieval(user!.id, query.q);
   return NextResponse.json({ message: 'Retrieve preview success!', data }, { status: 200 });
 };
-
-export const memoryController = {
-  get,
-  clear,
-  createFact,
-  updateFact,
-  deleteFact,
-  getMode,
-  setMode,
-  retrievePreview,
-};

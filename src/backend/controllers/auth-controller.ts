@@ -345,18 +345,3 @@ export const authRateLimits = {
     windowMs: 15 * 60_000,
   }),
 };
-
-export const authController = {
-  changePassword,
-  demoLogin,
-  forgotPassword,
-  initialize,
-  login,
-  logout,
-  me,
-  register,
-  resendVerification,
-  resetPassword,
-  getSetupStatus,
-  verifyEmail,
-};

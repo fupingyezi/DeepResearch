@@ -1,6 +1,6 @@
 // 薄适配器：管线选项在此，handler 见 src/backend/controllers/chat-controller.ts
 import { withApiHandler } from '@/backend/http';
-import { chatController } from '@/backend/controllers/chat-controller';
+import * as chatController from '@/backend/controllers/chat-controller';
 import { chatStreamBodySchema } from '@/backend/validation/schemas';
 
 export { OPTIONS } from '@/backend/http/preflight';

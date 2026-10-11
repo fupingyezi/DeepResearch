@@ -1,4 +1,4 @@
-import { mcpController } from '@/backend/controllers/mcp-controller';
+import * as mcpController from '@/backend/controllers/mcp-controller';
 import { withApiHandler } from '@/backend/http';
 import { patchEnabledSchema } from '@/backend/validation/schemas';
 

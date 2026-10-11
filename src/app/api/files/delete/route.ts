@@ -1,5 +1,5 @@
 import { withApiHandler } from '@/backend/http';
-import { filesController } from '@/backend/controllers/files-controller';
+import * as filesController from '@/backend/controllers/files-controller';
 import { fileIdBodySchema } from '@/backend/validation/schemas';
 
 export { OPTIONS } from '@/backend/http/preflight';
