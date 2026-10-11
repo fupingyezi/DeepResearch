@@ -1,8 +1,8 @@
 /**
- * PgRunStore —— Postgres 版 RunStore 实现
+ * PgRunRepository —— Postgres 版 RunRepository 实现
  */
 
-import type { Run, RunCreateInput, RunListOptions, RunStatus, RunStore } from './types';
+import type { Run, RunCreateInput, RunListOptions, RunStatus, RunRepository } from './types';
 import type { SqlExecutor } from '../sql';
 import { toIso } from '../../utils/common';
 
@@ -38,7 +38,7 @@ const rowToRun = (r: RunRow): Run => ({
   updated_at: toIso(r.updated_at),
 });
 
-export class PgRunStore implements RunStore {
+export class PgRunRepository implements RunRepository {
   constructor(private readonly sql: SqlExecutor) {}
 
   async create(input: RunCreateInput): Promise<Run> {

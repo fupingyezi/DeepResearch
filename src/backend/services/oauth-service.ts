@@ -40,8 +40,8 @@ import {
 } from '@/backend/lib/oauth';
 import {
   OAuthAccountExistsError,
-  PgOAuthAccountStore,
-  type OAuthAccountStore,
+  PgOAuthAccountRepository,
+  type OAuthAccountRepository,
 } from '@/backend/repositories/oauth-account';
 
 export type OAuthErrorCode =
@@ -63,7 +63,7 @@ export class OAuthServiceError extends Error {
 }
 
 export interface OAuthServiceDeps {
-  oauthAccounts?: OAuthAccountStore;
+  oauthAccounts?: OAuthAccountRepository;
   adapters?: OAuthProviderAdapter[];
 }
 
@@ -88,7 +88,7 @@ function statesEqual(a: string, b: string): boolean {
 
 export function createOAuthService(deps: OAuthServiceDeps = {}): OAuthService {
   const adapters = deps.adapters ?? getOAuthAdapters();
-  const accounts = deps.oauthAccounts ?? new PgOAuthAccountStore();
+  const accounts = deps.oauthAccounts ?? new PgOAuthAccountRepository();
 
   /** 未知 provider 与未配置同归 PROVIDER_DISABLED：不泄露枚举信息 */
   function resolveAdapter(provider: string): OAuthProviderAdapter {

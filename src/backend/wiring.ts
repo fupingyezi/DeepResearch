@@ -10,10 +10,10 @@ import {
   DeerFlowClient,
   InMemoryRunEventBus,
   InMemoryRunRegistry,
-  PgRunStore,
+  PgRunRepository,
   RedisEventBus,
   RedisRunRegistry,
-  PgThreadMetaStore,
+  PgThreadMetaRepository,
   buildThreadConfig,
   createChatModel,
   createThreadService,
@@ -211,7 +211,7 @@ export function ensureMemoryRerankerFactory(): void {
 
 /**
  * 把 lib/db 的连接池包装成 harness 的最小 SQL 接口（query + transaction），
- * 供 PgMemoryStorage / PgThreadMetaStore / PgRunStore 复用。transaction 语义：
+ * 供 PgMemoryStorage / PgThreadMetaRepository / PgRunRepository 复用。transaction 语义：
  * fn 抛错 → ROLLBACK 后原样上抛；不支持嵌套（显式抛错防误用）。
  */
 function makePoolSqlExecutor(): SqlExecutor {
@@ -455,8 +455,8 @@ async function build(): Promise<ThreadService> {
   return createThreadService({
     client,
     checkpointer,
-    threads: new PgThreadMetaStore(makePoolSqlExecutor()),
-    runs: new PgRunStore(makePoolSqlExecutor()),
+    threads: new PgThreadMetaRepository(makePoolSqlExecutor()),
+    runs: new PgRunRepository(makePoolSqlExecutor()),
     createClientForModel,
     registry,
     eventBus,
@@ -479,12 +479,12 @@ export async function getThreadService(): Promise<ThreadService> {
 /**
  * runs 表的轻量直读入口（threads/[threadId]/runs GET 与 chat-service 共用）。
  *
- * PgRunStore 无状态（连接池在 @/backend/lib/db 的 globalThis 上），模块级懒单例即可，
+ * PgRunRepository 无状态（连接池在 @/backend/lib/db 的 globalThis 上），模块级懒单例即可，
  * 不需要像 getThreadService 那样挂 globalThis——没有跨路由共享的可变状态。
  */
-let runStore: PgRunStore | null = null;
+let runStore: PgRunRepository | null = null;
 
-export function getRunStore(): PgRunStore {
-  if (!runStore) runStore = new PgRunStore(makePoolSqlExecutor());
+export function getRunStore(): PgRunRepository {
+  if (!runStore) runStore = new PgRunRepository(makePoolSqlExecutor());
   return runStore;
 }

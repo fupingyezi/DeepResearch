@@ -319,9 +319,9 @@ export {
 
 // persistence/thread-meta
 export {
-  PgThreadMetaStore,
+  PgThreadMetaRepository,
   type ThreadMeta,
-  type ThreadMetaStore,
+  type ThreadMetaRepository,
   type ThreadStatus,
   type ThreadMetaCreateInput,
   type ThreadMetaSearchOptions,
@@ -329,9 +329,9 @@ export {
 
 // persistence/runs
 export {
-  PgRunStore,
+  PgRunRepository,
   type Run,
-  type RunStore,
+  type RunRepository,
   type RunStatus,
   type RunCreateInput,
   type RunListOptions,

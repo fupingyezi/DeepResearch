@@ -9,7 +9,7 @@ import type { SqlExecutor } from '../shared';
 
 export type EmailTokenPurpose = 'verify_email' | 'reset_password';
 
-export interface EmailTokenStore {
+export interface EmailTokenRepository {
   /** 发放令牌（返回明文）；同用户过期旧令牌顺带清理 */
   issue(userId: string, purpose: EmailTokenPurpose, db?: SqlExecutor): Promise<string>;
   /** 核销令牌：命中且未用且未过期才返回 userId；否则 null（令牌不可重放） */

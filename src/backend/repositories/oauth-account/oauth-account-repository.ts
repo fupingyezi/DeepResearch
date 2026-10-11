@@ -4,7 +4,7 @@ import { query } from '@/backend/lib/db';
 import type { OAuthProviderName } from '@/backend/lib/oauth';
 
 import type { SqlExecutor } from '../shared';
-import type { OAuthAccountRecord, OAuthAccountStore } from './types';
+import type { OAuthAccountRecord, OAuthAccountRepository } from './types';
 
 const PG_UNIQUE_VIOLATION = '23505';
 
@@ -38,7 +38,7 @@ export class OAuthAccountExistsError extends Error {
   }
 }
 
-export class PgOAuthAccountStore implements OAuthAccountStore {
+export class PgOAuthAccountRepository implements OAuthAccountRepository {
   async findByProvider(
     provider: OAuthProviderName,
     providerUserId: string,

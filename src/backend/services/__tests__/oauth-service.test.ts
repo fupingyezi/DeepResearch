@@ -30,7 +30,7 @@ import { OAuthAdapterError } from '@/backend/lib/oauth';
 import {
   OAuthAccountExistsError,
   type OAuthAccountRecord,
-  type OAuthAccountStore,
+  type OAuthAccountRepository,
 } from '@/backend/repositories/oauth-account';
 import { createOAuthService } from '../oauth-service';
 
@@ -104,7 +104,7 @@ const VALID_STATE = 'a'.repeat(64);
 
 function makeService(accounts: FakeAccountStore, adapters: OAuthProviderAdapter[]) {
   return createOAuthService({
-    oauthAccounts: accounts as unknown as OAuthAccountStore,
+    oauthAccounts: accounts as unknown as OAuthAccountRepository,
     adapters,
   });
 }

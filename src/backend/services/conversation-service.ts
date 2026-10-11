@@ -8,22 +8,28 @@
  */
 
 import type { ChatMessageType, MessagePart, fileMetadataType } from '@/types';
-import { ThreadServiceError, type RunStore, type ThreadService } from '@deerflow-harness';
+import { ThreadServiceError, type RunRepository, type ThreadService } from '@deerflow-harness';
 import { deleteFile } from '@/backend/lib/storage';
 import { AppError } from '@/backend/http';
 import { getRunStore, getThreadService } from '@/backend/wiring';
-import type { ChatMessageStore } from '@/backend/repositories/chat-message';
-import { PgChatMessageStore } from '@/backend/repositories/chat-message';
+import type { ChatMessageRepository } from '@/backend/repositories/chat-message';
+import { PgChatMessageRepository } from '@/backend/repositories/chat-message';
 import type {
   ChatSessionRecord,
-  ChatSessionStore,
+  ChatSessionRepository,
   ChatSessionWireRow,
   CreateChatSessionInput,
 } from '@/backend/repositories/chat-session';
-import { PgChatSessionStore } from '@/backend/repositories/chat-session';
+import { PgChatSessionRepository } from '@/backend/repositories/chat-session';
 import type { SavedFileMetadata } from '@/backend/repositories/file-metadata';
-import { PgFileMetadataStore, type FileMetadataStore } from '@/backend/repositories/file-metadata';
-import { PgFileContentStore, type FileContentStore } from '@/backend/repositories/file-content';
+import {
+  PgFileMetadataRepository,
+  type FileMetadataRepository,
+} from '@/backend/repositories/file-metadata';
+import {
+  PgFileContentRepository,
+  type FileContentRepository,
+} from '@/backend/repositories/file-content';
 import { withTransaction } from '@/backend/repositories/shared';
 
 export interface InsertUserMessageInput {
@@ -54,11 +60,11 @@ export interface LatestMessageRow {
 }
 
 export interface ConversationServiceDeps {
-  chatSessions: ChatSessionStore;
-  chatMessages: ChatMessageStore;
-  fileMetadata: FileMetadataStore;
-  fileContent: FileContentStore;
-  runStore: RunStore;
+  chatSessions: ChatSessionRepository;
+  chatMessages: ChatMessageRepository;
+  fileMetadata: FileMetadataRepository;
+  fileContent: FileContentRepository;
+  runStore: RunRepository;
   getThreadService: () => Promise<ThreadService>;
   deleteFile: (minioKey: string) => Promise<void>;
 }
@@ -320,10 +326,10 @@ export function createConversationService(
   deps?: Partial<ConversationServiceDeps>,
 ): ConversationService {
   return new ConversationService({
-    chatSessions: deps?.chatSessions ?? new PgChatSessionStore(),
-    chatMessages: deps?.chatMessages ?? new PgChatMessageStore(),
-    fileMetadata: deps?.fileMetadata ?? new PgFileMetadataStore(),
-    fileContent: deps?.fileContent ?? new PgFileContentStore(),
+    chatSessions: deps?.chatSessions ?? new PgChatSessionRepository(),
+    chatMessages: deps?.chatMessages ?? new PgChatMessageRepository(),
+    fileMetadata: deps?.fileMetadata ?? new PgFileMetadataRepository(),
+    fileContent: deps?.fileContent ?? new PgFileContentRepository(),
     runStore: deps?.runStore ?? getRunStore(),
     getThreadService: deps?.getThreadService ?? getThreadService,
     deleteFile: deps?.deleteFile ?? deleteFile,

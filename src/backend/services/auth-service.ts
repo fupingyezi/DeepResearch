@@ -18,10 +18,13 @@ import {
 import { getUserByEmail, updateUser } from '@/backend/repositories/user';
 import { appBaseUrl } from '@/backend/lib/app-origin';
 import { isMailConfigured, sendMail } from '@/backend/lib/mailer';
-import { PgEmailTokenStore, type EmailTokenStore } from '@/backend/repositories/email-token';
+import {
+  PgEmailTokenRepository,
+  type EmailTokenRepository,
+} from '@/backend/repositories/email-token';
 
 export interface AuthServiceDeps {
-  emailTokenStore?: EmailTokenStore;
+  emailTokenStore?: EmailTokenRepository;
 }
 
 export interface AuthService {
@@ -38,7 +41,7 @@ export interface AuthService {
 }
 
 export function createAuthService(deps: AuthServiceDeps = {}): AuthService {
-  const emailTokens = deps.emailTokenStore ?? new PgEmailTokenStore();
+  const emailTokens = deps.emailTokenStore ?? new PgEmailTokenRepository();
 
   const safeSend = async (opts: { to: string; subject: string; html: string }): Promise<void> => {
     try {

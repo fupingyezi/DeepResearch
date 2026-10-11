@@ -11,7 +11,7 @@ export interface InsertParsingInput {
   sizeBytes: number;
 }
 
-export interface FileContentStore {
+export interface FileContentRepository {
   /** 上传成功后插入 status='parsing' 行（解析结果随后 markSuccess/markFailed 回写） */
   insertParsing(input: InsertParsingInput): Promise<void>;
   markSuccess(minioKey: string, content: string): Promise<void>;

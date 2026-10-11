@@ -1,5 +1,5 @@
 /**
- * PgThreadMetaStore
+ * PgThreadMetaRepository
  *
  * 安全：所有写入都走 `this.sql.query(text, $1..$n)` 参数化 SQL；jsonb 字段通过
  * `::jsonb` 显式 cast；列名硬编码白名单，绝不拼字符串。
@@ -9,7 +9,7 @@ import type {
   ThreadMeta,
   ThreadMetaCreateInput,
   ThreadMetaSearchOptions,
-  ThreadMetaStore,
+  ThreadMetaRepository,
   ThreadStatus,
 } from './types';
 import type { SqlExecutor } from '../sql';
@@ -49,7 +49,7 @@ const rowToMeta = (r: ThreadMetaRow): ThreadMeta => ({
   updated_at: toIso(r.updated_at),
 });
 
-export class PgThreadMetaStore implements ThreadMetaStore {
+export class PgThreadMetaRepository implements ThreadMetaRepository {
   constructor(private readonly sql: SqlExecutor) {}
 
   async create(input: ThreadMetaCreateInput): Promise<ThreadMeta> {

@@ -55,7 +55,7 @@ export interface ChatSessionWireRow {
   updated_at: Date;
 }
 
-export interface ChatSessionStore {
+export interface ChatSessionRepository {
   create(input: CreateChatSessionInput, db?: SqlExecutor): Promise<ChatSessionRecord>;
   /** 不存在 → null；属于他人 → 抛 ChatSessionAccessError；user_id IS NULL 视为无主放行 */
   getOwned(sessionId: string, userId: string): Promise<ChatSessionRecord | null>;

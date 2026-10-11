@@ -105,7 +105,7 @@ export const listRuns: ApiRouteHandler<undefined, z.infer<typeof listQuerySchema
   const service = await getThreadService();
   const thread = await service.getThread({ thread_id: params.threadId, user_id: user!.id });
   if (!thread) return jsonError('NOT_FOUND', 'not found', 404);
-  // 归属已在上一步经 service.getThread 校验；列表本身复用同一个 PgRunStore 轻量直读
+  // 归属已在上一步经 service.getThread 校验；列表本身复用同一个 PgRunRepository 轻量直读
   const data = await getRunStore().listByThread(params.threadId, {
     limit: query.limit,
     offset: query.offset,

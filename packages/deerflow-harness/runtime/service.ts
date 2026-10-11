@@ -1,7 +1,7 @@
 /**
  * ThreadService —— Thread 系统对外门面
  *
- * 装配：DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore
+ * 装配：DeerFlowClient + Checkpointer + ThreadMetaRepository + RunRepository
  *      + RunRegistry / RunEventBus（进程内或跨进程实现）+ ALS Context
  *
  * 关键不变量：
@@ -23,8 +23,8 @@ import {
 } from './sse/client-event';
 import { consumeTitleUpdate } from '../agents/middlewares/title-bus';
 
-import type { ThreadMeta, ThreadMetaStore, ThreadStatus } from '../persistence/thread-meta';
-import type { RunStore } from '../persistence/runs';
+import type { ThreadMeta, ThreadMetaRepository, ThreadStatus } from '../persistence/thread-meta';
+import type { RunRepository } from '../persistence/runs';
 import type { ModelConfig } from '../types';
 import type { ThreadImageRef } from '../vision';
 
@@ -219,8 +219,8 @@ export interface ThreadService {
 export interface ThreadServiceDeps {
   client: DeerFlowClient;
   checkpointer: BaseCheckpointSaver;
-  threads: ThreadMetaStore;
-  runs: RunStore;
+  threads: ThreadMetaRepository;
+  runs: RunRepository;
   /**
    * 可选：按模型配置解析 DeerFlowClient。用于单次请求切换模型——
    * submitRun 携带 modelConfig 时调用此工厂获取对应 client（实现侧自行缓存）。

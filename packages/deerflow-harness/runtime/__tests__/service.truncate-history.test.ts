@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
 
 import type { DeerFlowClient } from '../../client';
-import type { RunStore } from '../../persistence/runs';
-import type { ThreadMetaStore } from '../../persistence/thread-meta';
+import type { RunRepository } from '../../persistence/runs';
+import type { ThreadMetaRepository } from '../../persistence/thread-meta';
 
 import { createThreadService } from '../service';
 import { ClientAgentEventType, createClientAgentEvent } from '../sse/client-event';
@@ -42,7 +42,7 @@ function makeHarness(mode: 'idle' | 'hang-until-abort' = 'idle') {
     },
   };
 
-  const runs: RunStore = {
+  const runs: RunRepository = {
     async create(input) {
       runRows.set(input.run_id, { status: 'pending', error: null });
       return input as never;
@@ -101,7 +101,7 @@ function makeHarness(mode: 'idle' | 'hang-until-abort' = 'idle') {
   const service = createThreadService({
     client: client as unknown as DeerFlowClient,
     checkpointer: {} as unknown as BaseCheckpointSaver,
-    threads: threads as unknown as ThreadMetaStore,
+    threads: threads as unknown as ThreadMetaRepository,
     runs,
   });
 

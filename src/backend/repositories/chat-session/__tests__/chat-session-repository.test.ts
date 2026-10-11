@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * PgChatSessionStore.ensureOwned 的语义锁定（原 conversations/_service.ts 的
+ * PgChatSessionRepository.ensureOwned 的语义锁定（原 conversations/_service.ts 的
  * ensureChatSessionRecord）。
  *
  * 背景（别再改回「只在没传 sessionId 时建行」）：
@@ -71,7 +71,7 @@ vi.mock('@/backend/lib/db', () => ({
   getClient: vi.fn(),
 }));
 
-const { PgChatSessionStore, ChatSessionAccessError } = await import('../index');
+const { PgChatSessionRepository, ChatSessionAccessError } = await import('../index');
 
 const sessionRow = (over: Row = {}): Row => ({
   id: 'sess-1',
@@ -92,7 +92,7 @@ describe('ensureOwned', () => {
     const fake = makeFakeDb([sessionRow({ title: '用户改过的标题' })]);
     db.query = fake.query as unknown as typeof db.query;
 
-    const record = await new PgChatSessionStore().ensureOwned({
+    const record = await new PgChatSessionRepository().ensureOwned({
       id: 'sess-1',
       title: '这条消息的前 15 字',
       userId: USER,
@@ -107,7 +107,7 @@ describe('ensureOwned', () => {
     const fake = makeFakeDb([sessionRow({ id: 'sess-0', seq_id: 4 })]);
     db.query = fake.query as unknown as typeof db.query;
 
-    const record = await new PgChatSessionStore().ensureOwned({
+    const record = await new PgChatSessionRepository().ensureOwned({
       id: 'temp-uuid-from-client',
       title: '首条消息前 15 字',
       userId: USER,
@@ -123,7 +123,10 @@ describe('ensureOwned', () => {
     const fake = makeFakeDb();
     db.query = fake.query as unknown as typeof db.query;
 
-    const record = await new PgChatSessionStore().ensureOwned({ title: '新对话', userId: USER });
+    const record = await new PgChatSessionRepository().ensureOwned({
+      title: '新对话',
+      userId: USER,
+    });
 
     expect(record.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(fake.insertCount()).toBe(1);
@@ -134,7 +137,7 @@ describe('ensureOwned', () => {
     db.query = fake.query as unknown as typeof db.query;
 
     await expect(
-      new PgChatSessionStore().ensureOwned({ id: 'sess-1', title: 'x', userId: USER }),
+      new PgChatSessionRepository().ensureOwned({ id: 'sess-1', title: 'x', userId: USER }),
     ).rejects.toBeInstanceOf(ChatSessionAccessError);
     expect(fake.insertCount()).toBe(0);
   });
@@ -143,7 +146,7 @@ describe('ensureOwned', () => {
     const fake = makeFakeDb([sessionRow({ user_id: null })]);
     db.query = fake.query as unknown as typeof db.query;
 
-    const record = await new PgChatSessionStore().ensureOwned({
+    const record = await new PgChatSessionRepository().ensureOwned({
       id: 'sess-1',
       title: 'x',
       userId: USER,
@@ -170,7 +173,7 @@ describe('ensureOwned', () => {
       throw new Error(`unexpected sql: ${s}`);
     }) as unknown as typeof db.query;
 
-    const record = await new PgChatSessionStore().ensureOwned({
+    const record = await new PgChatSessionRepository().ensureOwned({
       id: 'sess-1',
       title: 'x',
       userId: USER,

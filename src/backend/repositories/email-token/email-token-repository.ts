@@ -4,11 +4,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '@/backend/lib/db';
 
 import type { SqlExecutor } from '../shared';
-import type { EmailTokenPurpose, EmailTokenStore } from './types';
+import type { EmailTokenPurpose, EmailTokenRepository } from './types';
 
 const TOKEN_TTL_HOURS = 24;
 
-export class PgEmailTokenStore implements EmailTokenStore {
+export class PgEmailTokenRepository implements EmailTokenRepository {
   async issue(userId: string, purpose: EmailTokenPurpose, db?: SqlExecutor): Promise<string> {
     const raw = randomBytes(32).toString('hex');
     const hash = createHash('sha256').update(raw).digest('hex');

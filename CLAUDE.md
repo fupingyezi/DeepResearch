@@ -195,12 +195,12 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 - Repository 方法带可选 `db?: SqlExecutor`：传了走事务连接，不传走 `@/backend/lib/db` 的 `query`。BEGIN/COMMIT/ROLLBACK 只出现在 `repositories/shared.ts` 的 `withTransaction()`，Repository 自身不开事务。零参构造、无状态（池在 lib/db 的 globalThis）、不设单例
 - service 工厂 `createXService(deps?)` + 模块级懒单例 `getXService()`——无跨请求可变状态，模块级单例即可；**只有 wiring.ts 需要 globalThis**
 - `chat-session/types.ts`、`file-metadata/types.ts` 头注释写明：harness 的 `title-middleware`（写 chat_session.title）与 `thread-data-middleware`（读 file_metadata）经 TitleStoreProvider / UploadedFilesProvider 由 `harness-adapters/` 提供实现（SQL 自中间件逐字搬移），改表结构必须同步检查这两处
-- `waitRunError` 不建 Repository：复用 harness `PgRunStore.get()`，轮询循环在 chat-service
+- `waitRunError` 不建 Repository：复用 harness `PgRunRepository.get()`，轮询循环在 chat-service
 - 错误与响应：`toHttpError(e)`——AppError → 其 status；带 `code` 的 Error（ThreadServiceError / ChatSessionAccessError 等）→ 查 `ERROR_STATUS` 表；zod → 400 `INVALID_INPUT`；未知 → 500 `{code:'INTERNAL'}`。**zod v4 错误对象是 `error.issues`**（非 v3 的 `errors`）。宽松 schema 是刻意的：收紧校验会改变状态码（memory 非法 category 回落默认、auth 邮箱不校验走 401）——领域规则在 service 内兜底，不在 schema 里加码
 
 ### 3. ThreadService
 
-**文件：** `packages/deerflow-harness/runtime/service.ts`；**单例入口：** `src/backend/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaStore + RunStore + RunRegistry + RunEventBus + AsyncLocalStorage Context（13 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `truncateHistory` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
+**文件：** `packages/deerflow-harness/runtime/service.ts`；**单例入口：** `src/backend/wiring.ts` → `getThreadService()`。装配 DeerFlowClient + Checkpointer + ThreadMetaRepository + RunRepository + RunRegistry + RunEventBus + AsyncLocalStorage Context（13 个操作：`createThread` / `listThreads` / `getThread` / `deleteThread` / `cancelRun` / `submitRun` / `subscribe` / `getCheckpoint` / `resume` / `truncateHistory` / `beginShutdown` / `health` / `reconcileZombieRuns`）。
 
 **关键不变量：**
 
@@ -328,8 +328,8 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 ### 9. 持久化（PG schema）
 
-- **threads**（PgThreadMetaStore，`persistence/thread-meta/postgres-store.ts`）：id / thread_id / user_id / assistant_id / display_name / status（'idle'|'running'|'error'|'interrupted'）/ metadata JSONB / 时间戳；metadata 用 `@>` 操作符过滤；全部操作带 user_id 访问控制
-- **runs**（PgRunStore，`persistence/runs/postgres-store.ts`）：id / thread_id / assistant_id / user_id / input / status（'running'|'succeeded'|'failed'）/ error / metadata JSONB / 时间戳
+- **threads**（PgThreadMetaRepository，`persistence/thread-meta/thread-meta-repository.ts`）：id / thread_id / user_id / assistant_id / display_name / status（'idle'|'running'|'error'|'interrupted'）/ metadata JSONB / 时间戳；metadata 用 `@>` 操作符过滤；全部操作带 user_id 访问控制
+- **runs**（PgRunRepository，`persistence/runs/run-repository.ts`）：id / thread_id / assistant_id / user_id / input / status（'running'|'succeeded'|'failed'）/ error / metadata JSONB / 时间戳
 - **Checkpointer**：`@langchain/langgraph-checkpoint-postgres`，工厂 `makeCheckpointer()`（`runtime/checkpointer/factory.ts`），代理 lib/db 单例连接池
 
 ### 10. 前端状态管理（Zustand）

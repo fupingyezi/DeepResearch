@@ -6,7 +6,7 @@ import type { MessagePart } from '@/types';
 import type { SqlExecutor } from '../shared';
 import type {
   ChatMessageRow,
-  ChatMessageStore,
+  ChatMessageRepository,
   InsertChatMessageInput,
   LatestAssistantParts,
   LatestMessageRow,
@@ -15,7 +15,7 @@ import type {
 
 type Row = Record<string, unknown>;
 
-export class PgChatMessageStore implements ChatMessageStore {
+export class PgChatMessageRepository implements ChatMessageRepository {
   async insert(input: InsertChatMessageInput, db?: SqlExecutor): Promise<{ messageId: string }> {
     const messageId = input.messageId && input.messageId.length > 0 ? input.messageId : uuidv4();
     const partsJson = JSON.stringify(input.parts ?? []);

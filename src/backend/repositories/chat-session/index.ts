@@ -1,2 +1,2 @@
 export * from './types';
-export { PgChatSessionStore } from './postgres-store';
+export { PgChatSessionRepository } from './chat-session-repository';

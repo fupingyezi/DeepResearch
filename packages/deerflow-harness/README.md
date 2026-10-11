@@ -21,7 +21,7 @@ deerflow agent SDK——多智能体对话运行时（LangChain/LangGraph 1.x）
 
 | 接口                                                                                 | 宿主职责                                                         | 消费方 / 未注册行为                                                                    |
 | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `SqlExecutor`（`persistence/sql`）                                                   | 构造注入 `query` + `transaction` 最小 SQL 能力                   | `PgThreadMetaStore` / `PgRunStore` / `PgMemoryStorage`；构造即需实例                   |
+| `SqlExecutor`（`persistence/sql`）                                                   | 构造注入 `query` + `transaction` 最小 SQL 能力                   | `PgThreadMetaRepository` / `PgRunRepository` / `PgMemoryStorage`；构造即需实例         |
 | `makeCheckpointer({ kind: 'postgres', postgres: { pool } })`                         | PG checkpoint saver（含 `saver.setup()`，池归宿主管理）          | ThreadService checkpointer                                                             |
 | `setTitleStoreProvider`                                                              | 标题读/写落库（`loadCurrentTitle` / `persistTitle`）             | title-middleware；未注册 warn 一次并跳过落库                                           |
 | `setUploadedFilesProvider`                                                           | 按 thread 装载上传文件内容                                       | thread-data-middleware / UploadsMiddleware；未注册 warn 一次，文件不注入               |
@@ -45,7 +45,7 @@ deerflow agent SDK——多智能体对话运行时（LangChain/LangGraph 1.x）
 import {
   DeerFlowClient,
   makeCheckpointer,
-  PgThreadMetaStore,
+  PgThreadMetaRepository,
   SqlExecutor,
 } from '@deerflow-harness';
 ```

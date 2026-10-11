@@ -1,2 +1,2 @@
 export * from './types';
-export { OAuthAccountExistsError, PgOAuthAccountStore } from './postgres-store';
+export { OAuthAccountExistsError, PgOAuthAccountRepository } from './oauth-account-repository';

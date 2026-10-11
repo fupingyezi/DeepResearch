@@ -2,7 +2,7 @@ import { query } from '@/backend/lib/db';
 import type { fileMetadataType } from '@/types';
 
 import type { SqlExecutor } from '../shared';
-import type { FileMetadataStore, SavedFileMetadata } from './types';
+import type { FileMetadataRepository, SavedFileMetadata } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -24,7 +24,7 @@ function rowToFileMetadata(row: Row): fileMetadataType {
   };
 }
 
-export class PgFileMetadataStore implements FileMetadataStore {
+export class PgFileMetadataRepository implements FileMetadataRepository {
   async insertMany(
     rows: SavedFileMetadata[],
     opts: { sessionId: string; messageId: string },

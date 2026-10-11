@@ -19,7 +19,7 @@ export interface SavedFileMetadata {
   minioKey: string;
 }
 
-export interface FileMetadataStore {
+export interface FileMetadataRepository {
   /**
    * 批量写入一条消息关联的文件元信息（与 chat_message insert 同一事务）。
    * MINIO_BUCKET 未配置时告警跳过（与历史行为一致）。

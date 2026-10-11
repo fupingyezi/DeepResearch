@@ -25,7 +25,7 @@ import { verifyAccessToken, verifyRefreshToken } from '@/backend/auth/jwt';
 import type { UserRecord } from '@/backend/auth';
 import { getUserByEmail, updateUser } from '@/backend/repositories/user';
 import { sendMail } from '@/backend/lib/mailer';
-import type { EmailTokenStore } from '@/backend/repositories/email-token';
+import type { EmailTokenRepository } from '@/backend/repositories/email-token';
 
 import { createAuthService } from '../auth-service';
 
@@ -45,7 +45,7 @@ const user: UserRecord = {
   updatedAt: '',
 };
 
-function makeEmailTokenStore(overrides: Partial<EmailTokenStore> = {}): EmailTokenStore {
+function makeEmailTokenStore(overrides: Partial<EmailTokenRepository> = {}): EmailTokenRepository {
   return {
     issue: vi.fn().mockResolvedValue('token-1'),
     consume: vi.fn().mockResolvedValue(null),

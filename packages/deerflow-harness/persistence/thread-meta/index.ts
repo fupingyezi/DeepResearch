@@ -1,2 +1,2 @@
 export * from './types';
-export { PgThreadMetaStore } from './postgres-store';
+export { PgThreadMetaRepository } from './thread-meta-repository';

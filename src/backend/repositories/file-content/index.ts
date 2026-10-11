@@ -1,2 +1,2 @@
 export * from './types';
-export { PgFileContentStore } from './postgres-store';
+export { PgFileContentRepository } from './file-content-repository';

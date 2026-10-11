@@ -6,7 +6,7 @@ import { toIso } from '@/utils/common';
 import type { SqlExecutor } from '../shared';
 import type {
   ChatSessionRecord,
-  ChatSessionStore,
+  ChatSessionRepository,
   ChatSessionWireRow,
   CreateChatSessionInput,
 } from './types';
@@ -30,7 +30,7 @@ function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string })?.code === PG_UNIQUE_VIOLATION;
 }
 
-export class PgChatSessionStore implements ChatSessionStore {
+export class PgChatSessionRepository implements ChatSessionRepository {
   async create(input: CreateChatSessionInput, db?: SqlExecutor): Promise<ChatSessionRecord> {
     const id = input.id && input.id.length > 0 ? input.id : uuidv4();
     const title = input.title && input.title.length > 0 ? input.title : 'New thread';

@@ -30,7 +30,7 @@ export interface RunListOptions {
   status?: RunStatus;
 }
 
-export interface RunStore {
+export interface RunRepository {
   create(input: RunCreateInput): Promise<Run>;
   setStatus(run_id: string, status: RunStatus, error?: string | null): Promise<void>;
   get(run_id: string): Promise<Run | null>;

@@ -39,7 +39,7 @@ export interface ThreadMetaAccessOptions {
   require_existing?: boolean;
 }
 
-export interface ThreadMetaStore {
+export interface ThreadMetaRepository {
   create(input: ThreadMetaCreateInput): Promise<ThreadMeta>;
   get(thread_id: string, opts?: { user_id?: string | null }): Promise<ThreadMeta | null>;
   search(opts: ThreadMetaSearchOptions): Promise<ThreadMeta[]>;

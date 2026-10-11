@@ -1,2 +1,2 @@
 export * from './types';
-export { PgFileMetadataStore } from './postgres-store';
+export { PgFileMetadataRepository } from './file-metadata-repository';

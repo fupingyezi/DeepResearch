@@ -10,8 +10,14 @@ import { uploadFile } from '@/backend/lib/storage';
 import { extractTextFromFile } from '@/backend/lib/files/file-parser';
 import { deleteFile } from '@/backend/lib/storage';
 import { AppError } from '@/backend/http';
-import { PgFileContentStore, type FileContentStore } from '@/backend/repositories/file-content';
-import { PgFileMetadataStore, type FileMetadataStore } from '@/backend/repositories/file-metadata';
+import {
+  PgFileContentRepository,
+  type FileContentRepository,
+} from '@/backend/repositories/file-content';
+import {
+  PgFileMetadataRepository,
+  type FileMetadataRepository,
+} from '@/backend/repositories/file-metadata';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -28,8 +34,8 @@ export interface UploadedFileResult {
 }
 
 export interface FileServiceDeps {
-  fileMetadata: FileMetadataStore;
-  fileContent: FileContentStore;
+  fileMetadata: FileMetadataRepository;
+  fileContent: FileContentRepository;
   deleteObject: (minioKey: string) => Promise<void>;
 }
 
@@ -149,8 +155,8 @@ export class FileService {
 
 export function createFileService(deps?: Partial<FileServiceDeps>): FileService {
   return new FileService({
-    fileMetadata: deps?.fileMetadata ?? new PgFileMetadataStore(),
-    fileContent: deps?.fileContent ?? new PgFileContentStore(),
+    fileMetadata: deps?.fileMetadata ?? new PgFileMetadataRepository(),
+    fileContent: deps?.fileContent ?? new PgFileContentRepository(),
     deleteObject: deps?.deleteObject ?? deleteFile,
   });
 }

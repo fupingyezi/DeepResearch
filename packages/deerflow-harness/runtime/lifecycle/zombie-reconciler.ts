@@ -18,8 +18,8 @@
  * 过滤兜底。
  */
 
-import type { RunStore } from '../../persistence/runs';
-import type { ThreadMetaStore } from '../../persistence/thread-meta';
+import type { RunRepository } from '../../persistence/runs';
+import type { ThreadMetaRepository } from '../../persistence/thread-meta';
 import type { RunRegistry } from '../coordination/contracts';
 import { HEARTBEAT_INTERVAL_MS } from './liveness';
 
@@ -35,8 +35,8 @@ const ZOMBIE_MIN_AGE_MS = HEARTBEAT_INTERVAL_MS;
 const SCAN_LIMIT = 500;
 
 export interface ZombieReconcileDeps {
-  runs: Pick<RunStore, 'listByStatus' | 'listByThread' | 'setStatus'>;
-  threads: Pick<ThreadMetaStore, 'updateStatus'>;
+  runs: Pick<RunRepository, 'listByStatus' | 'listByThread' | 'setStatus'>;
+  threads: Pick<ThreadMetaRepository, 'updateStatus'>;
   registry: Pick<RunRegistry, 'ownerOf' | 'isDistributed' | 'ready'>;
   /**
    * 归还被回收 run 的全局并发名额（跨进程槽键释放）：kill -9 的 run 走不到

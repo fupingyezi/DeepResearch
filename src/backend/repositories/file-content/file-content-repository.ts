@@ -1,11 +1,11 @@
 import { query } from '@/backend/lib/db';
 
 import type { SavedFileMetadata } from '../file-metadata/types';
-import type { FileContentStore, InsertParsingInput } from './types';
+import type { FileContentRepository, InsertParsingInput } from './types';
 
 type Row = Record<string, unknown>;
 
-export class PgFileContentStore implements FileContentStore {
+export class PgFileContentRepository implements FileContentRepository {
   async insertParsing(input: InsertParsingInput): Promise<void> {
     await query(
       `

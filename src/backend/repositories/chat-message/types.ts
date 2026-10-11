@@ -42,7 +42,7 @@ export interface LatestAssistantParts {
   parts: MessagePart[];
 }
 
-export interface ChatMessageStore {
+export interface ChatMessageRepository {
   insert(input: InsertChatMessageInput, db?: SqlExecutor): Promise<{ messageId: string }>;
   /** resume 续写回写：where id = $1 and role = 'assistant'（不碰 user 消息） */
   updateParts(messageId: string, parts: MessagePart[]): Promise<void>;

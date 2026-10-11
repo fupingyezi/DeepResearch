@@ -1,2 +1,2 @@
 export * from './types';
-export { PgRunStore } from './postgres-store';
+export { PgRunRepository } from './run-repository';

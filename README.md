@@ -109,7 +109,7 @@ src/
 │   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
 │   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
 │   │   └── context.ts                  # AsyncLocalStorage 上下文传播
-│   ├── persistence/                    # ThreadMetaStore + RunStore（PostgreSQL）
+│   ├── persistence/                    # ThreadMetaRepository + RunRepository（PostgreSQL）
 │   ├── tools/builtins/                 # 内置工具（task、search_web、clarification、view_image）
 │   ├── models/                         # createChatModel 模型工厂 + provider 推断 + LLM 用量记账挂接（MODEL_PRESETS 在 src/config/models.ts）
 │   ├── auth/                           # 认证模块
@@ -489,7 +489,7 @@ StreamBridge（进程内 typed EventEmitter 总线）
 - Tool Call Chunk 缓冲机制（OpenAI 流式分片按 index 拼接）
 - 中间件组装顺序与 `RuntimeFeatures` 开关（13 层位序中间件 + Qwen 恢复层 + Tool Call 完整性子规则）
 - Memory LLM 更新流程（含显式 `callbacks: []` 切断回调链的关键约束）
-- ThreadMetaStore / RunStore 的 PG schema
+- ThreadMetaRepository / RunRepository 的 PG schema
 - MCP 客户端连接与工具加载缓存策略
 - Skill frontmatter 解析与 prompt 注入机制（7 种内置技能）
 - 扩展统一配置（extensions_config.json）的读写与校验

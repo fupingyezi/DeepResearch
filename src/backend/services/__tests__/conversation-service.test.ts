@@ -8,10 +8,10 @@ vi.mock('@/backend/lib/db', () => ({
 import { getClient } from '@/backend/lib/db';
 import type { MessagePart } from '@/types';
 import { ThreadServiceError } from '@deerflow-harness';
-import type { ChatMessageStore } from '@/backend/repositories/chat-message';
-import type { ChatSessionRecord, ChatSessionStore } from '@/backend/repositories/chat-session';
-import type { FileContentStore } from '@/backend/repositories/file-content';
-import type { FileMetadataStore } from '@/backend/repositories/file-metadata';
+import type { ChatMessageRepository } from '@/backend/repositories/chat-message';
+import type { ChatSessionRecord, ChatSessionRepository } from '@/backend/repositories/chat-session';
+import type { FileContentRepository } from '@/backend/repositories/file-content';
+import type { FileMetadataRepository } from '@/backend/repositories/file-metadata';
 import { ConversationService } from '../conversation-service';
 import type { ConversationServiceDeps } from '../conversation-service';
 
@@ -56,7 +56,7 @@ function makeDeps(order: string[]): {
       getOwned: vi.fn(),
       nextSeqId: vi.fn(),
       create: vi.fn(),
-    } as unknown as ChatSessionStore,
+    } as unknown as ChatSessionRepository,
     chatMessages: {
       insert: vi.fn(async () => {
         order.push('chatMessages.insert');
@@ -73,7 +73,7 @@ function makeDeps(order: string[]): {
       deleteBySession: vi.fn(async () => {
         order.push('chatMessages.deleteBySession');
       }),
-    } as unknown as ChatMessageStore,
+    } as unknown as ChatMessageRepository,
     fileMetadata: {
       insertMany: vi.fn(async () => {
         order.push('fileMetadata.insertMany');
@@ -92,7 +92,7 @@ function makeDeps(order: string[]): {
       }),
       getByFileId: vi.fn(),
       deleteByFileId: vi.fn(),
-    } as unknown as FileMetadataStore,
+    } as unknown as FileMetadataRepository,
     fileContent: {
       insertParsing: vi.fn(),
       markSuccess: vi.fn(),
@@ -103,7 +103,7 @@ function makeDeps(order: string[]): {
       deleteByMinioKeys: vi.fn(async () => {
         order.push('fileContent.deleteByMinioKeys');
       }),
-    } as unknown as FileContentStore,
+    } as unknown as FileContentRepository,
     runStore: { get: vi.fn(async () => null) },
     getThreadService: vi.fn(async () => ({
       deleteThread: vi.fn(async () => {

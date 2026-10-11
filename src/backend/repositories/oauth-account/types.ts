@@ -16,7 +16,7 @@ export interface OAuthAccountRecord {
   createdAt: string;
 }
 
-export interface OAuthAccountStore {
+export interface OAuthAccountRepository {
   findByProvider(
     provider: OAuthProviderName,
     providerUserId: string,
