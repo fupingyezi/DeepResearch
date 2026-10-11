@@ -67,6 +67,7 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 - `NEXT_MANUAL_SIG_HANDLE=1`——多进程部署必须置位：关掉 Next 自带 SIGTERM 清理（server.close → exit(0)），否则排水序列跑不到第一步
 - `DEERFLOW_VISION_MAX_IMAGE_MB`——单图上限（默认 5）；**前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它**，否则「发送成功但模型没看到图」静默降级
 - `DEERFLOW_GUARDRAIL_ENABLED` / `DEERFLOW_GUARDRAIL_BLOCK`——规则式护栏（默认开，仅告警）
+- `DEERFLOW_CONFIG_PATH`——中间件装配配置路径（默认 `{cwd}/config.yaml`；缺失走 SDK 默认，非法启动报错，改文件热生效）
 - `STREAM_BRIDGE_BUFFER_MAX` / `DEERFLOW_EXTENSIONS_CONFIG_PATH` / `DEERFLOW_SKILLS_DIR` / `DEERFLOW_SANDBOX_DIR`
 
 > 模型预设不再依赖 `OPENAI_MODEL_NAME`：默认预设 `deepseek-v4-flash`，各 provider baseUrl 内置默认（对应 `*_BASE_URL` 环境变量可覆盖）；主聊天链路用用户 Key，环境 Key 仅供副链路兜底。
@@ -222,8 +223,8 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 
 **文件：** `packages/deerflow-harness/client.ts`（进程级单例，注入到 ThreadService）。
 
-- **Agent 实例缓存**：缓存键由 `[modelName, 运行期开关布尔组(memory/autoTitle/threadData/uploads/sandbox/summarization/guardrail/todo/mcp/subagents/vision), agentName, sortedSkills, mcpSignature, skillSignature, extraMiddlewareSignature]` JSON 签名组成（`buildConfigKey`）。**重要例外：`memoryEnabled=true` 时不缓存**（每轮 prompt 含最新 memory，必须每次重建）
-- **运行期选项两级优先级**：`resolveRuntimeOptions(metadata)`——① metadata 显式开关（最高）② 构造时 `baseOptions`（wiring 默认 `agentName: 'lead'` + memory/autoTitle/threadData/uploads/sandbox/summarization/guardrail/todo 全开）。布尔覆盖必须严格 `typeof === 'boolean'` 才生效（`undefined` 不会被解释为 false）；`visionEnabled` 由 `modelConfig.supportsVision` 驱动，不开放 metadata 覆盖。解析结果是局部变量，不修改 `this.baseOptions`
+- **Agent 实例缓存**：缓存键由 `[modelName, 运行期开关布尔组(memory/autoTitle/threadData/uploads/sandbox/summarization/guardrail/todo/mcp/subagents/vision), agentName, sortedSkills, mcpSignature, skillSignature, extraMiddlewareSignature, middlewareConfigSignature]` JSON 签名组成（`buildConfigKey`）——config.yaml 签名（mtime+哈希）变化即缓存失效重建，改 YAML 下轮对话热生效。**重要例外：`memoryEnabled=true` 时不缓存**（每轮 prompt 含最新 memory，必须每次重建）
+- **运行期选项三级优先级**：`resolveRuntimeOptions(baseOptions, modelConfig, metadata, snapshot)`——① metadata 显式开关（最高，严格 `typeof === 'boolean'` 才生效，`undefined` 不会被解释为 false）② `snapshot.enabled`（config.yaml，经 middlewareConfigProvider 每轮读取）③ 构造时 `baseOptions`（wiring 由 config.yaml 派生：`agentName: 'lead'` + 8 开关 + memoryMode + 4 个中间件 options）。`visionEnabled` 由 `modelConfig.supportsVision` 驱动，不开放 metadata 覆盖。解析结果是局部变量，不修改 `this.baseOptions`
 - **stream()**：LangGraph `streamMode: ['messages', 'updates', 'custom']` 三模式同时订阅——messages：AI token 分片（`tool_call_chunks` 按 index 缓冲拼接 args，ToolMessage 到达才发 `TOOL_CALL_START` 完整调用信息）；updates：补抓 ToolMessage；custom：writer 推送的 payload（state*update / human_interrupt / task*\* 六种）
 - `wiring.ts` 的 `createClientForModel`：请求携带 `modelConfig` 时按**完整 modelConfig 签名**（JSON.stringify）缓存 DeerFlowClient——支持单请求切模型，同时隔离不同用户的 apiKey。缓存键若是模型名，两个用户用同一模型会共用第一个用户的 Key；且 client 构造时固化 modelConfig，配置变化后旧实例永不刷新
 
@@ -248,7 +249,7 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 **文件：** `packages/deerflow-harness/agents/factory.ts`
 
 - `createBaseAgent(opts)`：`middlewares` 与 `features` / `extraMiddlewares` 互斥；extraTools 与 tools 按工具 `name` 去重合并；`withCallLogAll()` 给所有中间件包调用日志（`MW_TRACE` 控制）；用 `ThreadStateAnnotation` 作 state schema
-- **`assembleFromFeatures` 按 `ORDERED_MIDDLEWARES` 位序装配**（「服务级默认」指 wiring.ts 的 sharedClientOptions）：
+- **`assembleFromFeatures` 按 `ORDERED_MIDDLEWARES` 位序装配**（「服务级默认」指 wiring.ts 的 sharedClientOptions——由根目录 config.yaml 派生，YAML 只做 enabled 开关 + 中间件选项 + extensions.middlewares，顺序不进 YAML；开关/选项经 middlewareConfigProvider 折入 agent 缓存键热生效，见 `docs/middleware-yaml-config.md`）：
 
 - — `QwenToolCallRecovery`（provider='qwen' 或 feature 显式）
 - 0 `ThreadData`（默认开；beforeAgent 从 `file_metadata` 装载 uploadedFiles）
@@ -371,7 +372,8 @@ MEMORY_DEBUG=1 pnpm dev      # 记忆更新日志（LLM 调用 / JSON 修复 / �
 
 ### 13. 关键文件索引
 
-- `src/backend/wiring.ts`——ThreadService 进程单例工厂（globalThis）+ harness 注入面注册（title/uploaded-files provider、RedisClientFactory、Tavily key、checkpointer 池、StreamBridge bufferMax）
+- `src/backend/wiring.ts`——ThreadService 进程单例工厂（globalThis）+ harness 注入面注册（title/uploaded-files provider、RedisClientFactory、Tavily key、checkpointer 池、StreamBridge bufferMax）+ config.yaml 装配接线（middlewareConfigProvider）
+- `src/backend/config/`（deerflow-config.ts / middleware-loader.ts）——config.yaml 宿主侧读取（mtime 缓存 + 配置签名）/ extensions.middlewares 模块加载；`config.yaml` / `config.example.yaml`——中间件装配配置（约定与优先级见 `docs/middleware-yaml-config.md`）
 - `src/backend/controllers/`（14 个按域文件）——HTTP 层 handler（裸 `ApiRouteHandler` + `createRateLimiter` 限流器）；route.ts 只做 withApiHandler 装配与 Next 配置导出
 - `src/backend/harness-adapters/`——harness 注入接口的 app 实现（title-store / uploaded-files，SQL 自中间件逐字搬移）
 - `src/backend/http/`（api-handler / errors / auth / logger / rate-limit）——统一请求管线 / 错误映射（toHttpError）/ 会话 cookie / HTTP 访问日志 / 限流占位

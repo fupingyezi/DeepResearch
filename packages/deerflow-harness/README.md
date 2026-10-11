@@ -19,21 +19,23 @@ deerflow agent SDK——多智能体对话运行时（LangChain/LangGraph 1.x）
 
 全部 setter 走 globalThis 单例（Next dev HMR 分包安全），由宿主在组合根（本仓库为 `src/backend/wiring.ts`）注册一次：
 
-| 接口                                                         | 宿主职责                                                         | 消费方 / 未注册行为                                                                 |
-| ------------------------------------------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `SqlExecutor`（`persistence/sql`）                           | 构造注入 `query` + `transaction` 最小 SQL 能力                   | `PgThreadMetaStore` / `PgRunStore` / `PgMemoryStorage`；构造即需实例                |
-| `makeCheckpointer({ kind: 'postgres', postgres: { pool } })` | PG checkpoint saver（含 `saver.setup()`，池归宿主管理）          | ThreadService checkpointer                                                          |
-| `setTitleStoreProvider`                                      | 标题读/写落库（`loadCurrentTitle` / `persistTitle`）             | title-middleware；未注册 warn 一次并跳过落库                                        |
-| `setUploadedFilesProvider`                                   | 按 thread 装载上传文件内容                                       | thread-data-middleware / UploadsMiddleware；未注册 warn 一次，文件不注入            |
-| `setRedisClientFactory`                                      | 按需构造 Redis 客户端（socket 选项由消费者自定）                 | event-bus / run-registry / dist-lock / docker-coordinator；未注册全部降级进程内实现 |
-| `setTavilyApiKey`                                            | 联网搜索 Key                                                     | `search_web` 工具                                                                   |
-| `setMemoryModelFactory` / `setTitleModelFactory`             | 记忆更新 / 标题生成 LLM                                          | 副链路；未注册静默降级                                                              |
-| `setMemoryEmbeddingsFactory` / `setMemoryRerankerFactory`    | 向量化 / 精排 API                                                | 记忆检索；未注册回落词面 / 保持 RRF 序                                              |
-| `setThreadImageFetcher`                                      | 图片字节读取（MinIO 等）                                         | vision 多模态注入                                                                   |
-| `setParentHistoryProvider`                                   | 子 agent 父历史只读读取（checkpoint）                            | subagent 上下文注入                                                                 |
-| `setMemoryStorage`                                           | 记忆存储后端                                                     | Noop 为默认：记忆功能关闭、聊天不阻断                                               |
-| `setSandboxProvider`                                         | 沙箱后端（测试注入用）                                           | 默认 local                                                                          |
-| `StreamBridge` 构造参数 `options.bufferMax`                  | 事件缓冲上限（默认 2000，`STREAM_BRIDGE_BUFFER_MAX` 由宿主解析） | ThreadChannel 缓冲回放                                                              |
+| 接口                                                                                 | 宿主职责                                                         | 消费方 / 未注册行为                                                                    |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `SqlExecutor`（`persistence/sql`）                                                   | 构造注入 `query` + `transaction` 最小 SQL 能力                   | `PgThreadMetaStore` / `PgRunStore` / `PgMemoryStorage`；构造即需实例                   |
+| `makeCheckpointer({ kind: 'postgres', postgres: { pool } })`                         | PG checkpoint saver（含 `saver.setup()`，池归宿主管理）          | ThreadService checkpointer                                                             |
+| `setTitleStoreProvider`                                                              | 标题读/写落库（`loadCurrentTitle` / `persistTitle`）             | title-middleware；未注册 warn 一次并跳过落库                                           |
+| `setUploadedFilesProvider`                                                           | 按 thread 装载上传文件内容                                       | thread-data-middleware / UploadsMiddleware；未注册 warn 一次，文件不注入               |
+| `setRedisClientFactory`                                                              | 按需构造 Redis 客户端（socket 选项由消费者自定）                 | event-bus / run-registry / dist-lock / docker-coordinator；未注册全部降级进程内实现    |
+| `setTavilyApiKey`                                                                    | 联网搜索 Key                                                     | `search_web` 工具                                                                      |
+| `setMemoryModelFactory` / `setTitleModelFactory`                                     | 记忆更新 / 标题生成 LLM                                          | 副链路；未注册静默降级                                                                 |
+| `setMemoryEmbeddingsFactory` / `setMemoryRerankerFactory`                            | 向量化 / 精排 API                                                | 记忆检索；未注册回落词面 / 保持 RRF 序                                                 |
+| `setThreadImageFetcher`                                                              | 图片字节读取（MinIO 等）                                         | vision 多模态注入                                                                      |
+| `setParentHistoryProvider`                                                           | 子 agent 父历史只读读取（checkpoint）                            | subagent 上下文注入                                                                    |
+| `setMemoryStorage`                                                                   | 记忆存储后端                                                     | Noop 为默认：记忆功能关闭、聊天不阻断                                                  |
+| `setSandboxProvider`                                                                 | 沙箱后端（测试注入用）                                           | 默认 local                                                                             |
+| `StreamBridge` 构造参数 `options.bufferMax`                                          | 事件缓冲上限（默认 2000，`STREAM_BRIDGE_BUFFER_MAX` 由宿主解析） | ThreadChannel 缓冲回放                                                                 |
+| `ClientOptions.middlewareConfigProvider`                                             | 每次 agent 构建前返回装配快照（开关 + 中间件选项 + 配置签名）    | `ensureAgent`：enabled 门控、`create*` 选项、签名折入缓存键；未注册 = baseOptions 直用 |
+| `ClientOptions` 的 `guardrail` / `subagentLimit` / `loopDetection` / `summarization` | 四个中间件的构造选项（服务级默认）                               | `assembleFromFeatures` 的 `create*`；不传 = 构造器常量默认                             |
 
 本仓库的 app 侧实现：`src/backend/wiring.ts`（注册）+ `src/backend/harness-adapters/`（title-store / uploaded-files 的 SQL 实现）。
 
