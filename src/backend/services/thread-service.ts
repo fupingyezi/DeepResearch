@@ -144,8 +144,8 @@ export interface SubmitRunInput {
   images?: ThreadImageRef[];
   metadata?: Record<string, any>;
   /**
-   * 本次 run 使用的模型配置。带模型配置时由 createClientForModel 解析出对应
-   * DeerFlowClient；不传则使用装配时的默认 client。
+   * 本次 run 使用的模型配置：进入本 run 的 client 构造（每 run 独立实例）。
+   * 不传则使用宿主默认模型配置。
    * 注意：modelConfig 不会进入 client.stream 的 metadata（避免污染事件载荷）。
    */
   modelConfig?: ModelConfig;
@@ -164,7 +164,7 @@ export interface ResumeRunInput {
   /** 用户对 interrupt（如 ask_clarification）的决策，作为 Command(resume) 的载荷。 */
   decision: unknown;
   metadata?: Record<string, any>;
-  /** 与 submitRun 一致：带模型配置时解析对应 client。 */
+  /** 与 submitRun 一致：进入本 run 的 client 构造。 */
   modelConfig?: ModelConfig;
 }
 
@@ -223,11 +223,12 @@ export interface ThreadServiceDeps {
   threads: ThreadMetaRepository;
   runs: RunRepository;
   /**
-   * 可选：按模型配置解析 DeerFlowClient。用于单次请求切换模型——
-   * submitRun 携带 modelConfig 时调用此工厂获取对应 client（实现侧自行缓存）。
-   * 缺省时一律使用默认 client。
+   * 必选：每 run 新建 DeerFlowClient。submitRun / resume 都经此工厂拿独立
+   * client 实例——agent / 中间件实例不跨 run 共享，并发 run 之间绝对隔离
+   * （单次请求切换模型也走这里：modelConfig 进入本次构造）。
+   * modelConfig 为 undefined 时由实现侧回落宿主默认模型配置。
    */
-  createClientForModel?: (modelConfig: ModelConfig) => DeerFlowClient;
+  createRunClient: (modelConfig?: ModelConfig) => DeerFlowClient;
   /**
    * 可选：进程间契约实现（RunRegistry / RunEventBus）。缺省为进程内实现；
    * 跨进程部署在装配侧注入对应实现。
@@ -270,7 +271,7 @@ async function getTupleSafe(
 }
 
 export function createThreadService(deps: ThreadServiceDeps): ThreadService {
-  const { client, checkpointer, threads, runs, createClientForModel } = deps;
+  const { client, checkpointer, threads, runs, createRunClient } = deps;
   const heartbeatIntervalMs = deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
   const runRegistry: RunRegistry = deps.registry ?? new InMemoryRunRegistry();
   const runEventBus: RunEventBus = deps.eventBus ?? new InMemoryRunEventBus();
@@ -675,10 +676,9 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           );
         }
 
-        // 单次请求模型切换：带 modelConfig 且注入了工厂时解析对应 client，
-        // 否则用装配时的默认 client。统一走「submitRun → channel」单路径。
-        const runClient =
-          modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+        // 每 run 独立 client：agent / 中间件实例不跨 run 共享（并发 run 绝对隔离）。
+        // 统一走「submitRun → channel」单路径。
+        const runClient = createRunClient(modelConfig);
 
         return executeRun({
           thread_id,
@@ -724,8 +724,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           );
         }
 
-        const runClient =
-          modelConfig && createClientForModel ? createClientForModel(modelConfig) : client;
+        const runClient = createRunClient(modelConfig);
         const decisionText =
           typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
 

@@ -94,6 +94,7 @@ function makeHarness(opts: HarnessOpts = {}) {
 
   const service = createThreadService({
     client: client as unknown as DeerFlowClient,
+    createRunClient: () => client as unknown as DeerFlowClient,
     checkpointer: { deleteThread: async () => {} } as unknown as BaseCheckpointSaver,
     threads: threads as unknown as ThreadMetaRepository,
     runs,
