@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 
+/** 程序化滚动标志的兜底清理窗口：scrollTop 赋值未改变位置时不会产生 scroll 事件，标志无人消费会残留 */
 const PROGRAMMATIC_WINDOW_MS = 120;
 
 export interface UseAutoScrollToBottomOptions {
@@ -20,7 +21,7 @@ export interface UseAutoScrollToBottomOptions {
 }
 
 export interface UseAutoScrollToBottomReturn {
-  /** 绑定到容器 onScroll：用户任意方式滚动均关闭跟随 */
+  /** 绑定到容器 onScroll：忽略程序化滚动自身的 scroll 事件，用户滚动（键盘/滚动条）关闭跟随 */
   onScroll: () => void;
   /** 绑定到容器 onWheel：滚轮/触控板滑动也关闭跟随 */
   onWheel: () => void;
@@ -35,6 +36,15 @@ export interface UseAutoScrollToBottomReturn {
  * 1) trigger 变化 + enabled === true → 自动 scrollTop = scrollHeight；
  * 2) 用户任何滑动（wheel / 触控板 / 触摸 / 拖滚动条 / 键盘）→ 立刻 setEnabled(false)，
  *    且**不会自动恢复**——必须等外部把 enabled 重新置 true（发送消息时）。
+ *
+ * 用户手势优先的两个不变量：
+ * - wheel / touchmove 只可能由用户产生（程序化 scrollTop 赋值不触发这两个事件），
+ *   所以这两个入口不做任何过滤，无条件关闭跟随——流式高频滚动时用户手势
+ *   不会被程序化标志误吞；
+ * - scroll 事件程序化与用户滚动都会触发，需靠标志区分：每次 scrollToBottom
+ *   置位，首个到达的 scroll 事件消费标志并忽略。不能用固定时间窗口判定——
+ *   流式期间 trigger 每帧变化，滚动调用间隔远小于窗口，窗口会被不断重置，
+ *   标志恒真，用户滚动会被永远当成程序化滚动而失效。
  */
 export function useAutoScrollToBottom(
   opts: UseAutoScrollToBottomOptions,
@@ -59,6 +69,8 @@ export function useAutoScrollToBottom(
 
     container.scrollTop = container.scrollHeight;
 
+    // 兜底清理：赋值未改变位置（内容高度没变的 token）不产生 scroll 事件，
+    // 标志无人消费，超窗自动清除，避免残留标志吞掉用户的下一次滚动
     programmaticScrollTimerRef.current = setTimeout(() => {
       programmaticScrollRef.current = false;
       programmaticScrollTimerRef.current = null;
@@ -81,16 +93,24 @@ export function useAutoScrollToBottom(
     };
   }, []);
 
-  /** 唯一的关闭路径：用户任何滑动都走这里。同步写 ref 防止下一帧 trigger effect 仍读旧值。 */
+  /** 唯一的关闭路径：wheel/touchmove 只可能由用户产生，直接关；同步写 ref 防止下一帧 trigger effect 仍读旧值。 */
   const disableByUser = useCallback(() => {
-    if (programmaticScrollRef.current) return;
     if (!enabledRef.current) return;
     enabledRef.current = false;
     setEnabled(false);
   }, [setEnabled]);
 
+  /** scroll 事件程序化与用户滚动都会触发：先消费程序化标志，未消费到的才是用户滚动 */
+  const handleScroll = useCallback(() => {
+    if (programmaticScrollRef.current) {
+      programmaticScrollRef.current = false;
+      return;
+    }
+    disableByUser();
+  }, [disableByUser]);
+
   return {
-    onScroll: disableByUser,
+    onScroll: handleScroll,
     onWheel: disableByUser,
     onTouchMove: disableByUser,
   };

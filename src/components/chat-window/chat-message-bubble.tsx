@@ -277,7 +277,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
     if (!isEditing) {
       return (
-        <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+        <div className="relative mb-12 flex w-full flex-col items-end gap-2 px-3">
           {/* 历史加载场景：file_metadata 表里的文件 */}
           {message.files && message.files.length !== 0 && (
             <div className="grid w-1/3 grid-cols-1 gap-2">
@@ -325,7 +325,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       );
     }
     return (
-      <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+      <div className="relative mb-12 flex w-full flex-col items-end gap-2 px-3">
         <textarea
           value={reEditValue}
           onChange={(e) => setReEditValue(e.target.value)}
@@ -372,29 +372,30 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     <button
       type="button"
       onClick={handleOpenArtifact}
-      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
+      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-4 py-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
     >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-          <FileTextOutlined />
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+          <FileTextOutlined className="text-lg" />
         </span>
-        <div className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium text-gray-800">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-[15px] font-medium text-gray-800">
             {artifactPart.content.title}
           </span>
-          <span className="text-[11px] text-gray-400">点击查看完整研究报告</span>
+          <span className="text-xs text-gray-400">点击查看完整研究报告</span>
         </div>
       </div>
-      <span className="shrink-0 text-xs font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
+      <span className="shrink-0 text-sm font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
         查看产物 →
       </span>
     </button>
   ) : null;
 
   return (
-    <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
+    <div className="relative mb-12 flex w-full flex-wrap justify-start px-3">
+      {/* AI 气泡不做白色卡片：占满整行、直接铺在页面背景上（timeline 卡片样式保留） */}
       <div
-        className="flex max-w-[85%] min-w-0 flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
+        className="flex w-full min-w-0 flex-col gap-2"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >
@@ -427,6 +428,14 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             {bodyText.length > 0 && <CustomMarkdown content={bodyText} />}
             {artifactEntry}
           </>
+        )}
+        {/* 流式进行中的底部提示：timeline 头部的「正在思考」在正文变长后会滚出屏幕，
+            底部需要常驻一条加载信息，让用户知道本轮还没结束 */}
+        {timelineStatus === 'processing' && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <LoadingOutlined className="text-teal-500" />
+            <span>正在生成…</span>
+          </div>
         )}
         {/* 本轮被取消：正文之后单独一行说明（内容保留，只标注中断原因） */}
         {cancelledText && (
