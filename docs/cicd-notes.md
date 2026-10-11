@@ -579,6 +579,12 @@ production build」后零输出挂满墙钟（`[deploy][ERROR] docker build 失�
 Dockerfile `NEXT_BUILD_CPUS=1`（fork 4→2）把峰值压进额度。仍 OOM 时按需下调
 预留或扩容。
 
+**增量构建（后续补充）**：编译阶段经 BuildKit cache mount 复用 webpack 持久缓存
+（`.next/cache`，Next 14 默认 filesystem 缓存）与 pnpm store——未改动模块不重编译，
+缓存命中时编译时长与主进程峰值显著下降；页面数据收集阶段无跨构建缓存，worker
+fork 尖峰照旧，内存守卫与 cpus 上限仍需保留。缓存命中脏数据报诡异错误（幽灵
+module not found）时 `docker builder prune -f` 清掉重来。
+
 **教训**：
 
 1. 同机构建的内存边界必须落在**容器（cgroup）层**——进程内 `NODE_OPTIONS` 这类

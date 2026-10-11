@@ -13,7 +13,10 @@ ENV npm_config_registry=https://registry.npmmirror.com
 # pnpm install --frozen-lockfile 会因 lockfile 与工作区声明不一致而失败
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+# pnpm 全局 store 走 BuildKit cache mount：packages/ 内任何源码变动都会失效本层并
+# 重跑 install（国内源分钟级），store 跨构建复用后只剩依赖解析与 node_modules 链接
+RUN --mount=type=cache,target=/pnpm-store \
+  pnpm install --store-dir /pnpm-store --frozen-lockfile
 
 # ---- builder：编译产出 .next/standalone ----
 FROM node:22-slim AS builder
@@ -41,7 +44,12 @@ ENV NODE_OPTIONS=--max-old-space-size=2048
 # 机器规格较大时 --build-arg NEXT_BUILD_CPUS=4 可上调。
 ARG NEXT_BUILD_CPUS=1
 ENV NEXT_BUILD_CPUS=$NEXT_BUILD_CPUS
-RUN pnpm build
+# .next/cache 走 BuildKit cache mount：webpack 持久缓存（.next/cache/webpack，Next 14
+# 默认开 filesystem 缓存）+ swc 缓存跨部署复用，未改动模块不重编译——缓存命中时
+# 编译时长与主进程内存峰值都显著下降。页面数据收集阶段无跨构建缓存、worker fork
+# 尖峰照旧，内存守卫与 cpus 上限仍需保留。缓存命中脏数据报诡异错误（幽灵 module
+# not found）时 docker builder prune -f 清掉重来即可。
+RUN --mount=type=cache,target=/app/.next/cache pnpm build
 
 # ---- runner：仅拷贝 standalone 运行所需文件，非 root 运行 ----
 FROM node:22-slim AS runner
