@@ -9,7 +9,7 @@ import {
 import type { RunRepository } from '@/backend/repositories/runs';
 import type { ThreadMetaRepository } from '@/backend/repositories/thread-meta';
 
-import { createThreadService } from '../thread-service';
+import { ThreadService } from '../thread-service';
 
 /**
  * run 取消语义的锁定 —— 三条路径共用同一套「abort signal + 等收尾」机制：
@@ -143,7 +143,7 @@ function makeHarness(
     },
   };
 
-  const service = createThreadService({
+  const service = new ThreadService({
     client: client as unknown as DeerFlowClient,
     createRunClient: () => client as unknown as DeerFlowClient,
     checkpointer: checkpointer as unknown as BaseCheckpointSaver,

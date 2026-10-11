@@ -51,7 +51,7 @@ import { InMemoryRunRegistry } from '@/backend/runtime/coordination/run-registry
 import { RedisRunRegistry } from '@/backend/runtime/coordination/run-registry/redis';
 import { InMemoryRunEventBus } from '@/backend/runtime/coordination/event-bus/in-memory';
 import { RedisEventBus } from '@/backend/runtime/coordination/event-bus/redis';
-import { createThreadService, type ThreadService } from '@/backend/services/thread-service';
+import { ThreadService } from '@/backend/services/thread-service';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,
@@ -440,7 +440,7 @@ async function build(): Promise<ThreadService> {
     ? new RedisEventBus({ maxlen: bufferMax })
     : new InMemoryRunEventBus(undefined, { bufferMax });
 
-  return createThreadService({
+  return new ThreadService({
     client,
     checkpointer,
     threads: new PgThreadMetaRepository(makePoolSqlExecutor()),

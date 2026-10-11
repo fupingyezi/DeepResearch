@@ -9,7 +9,7 @@ import {
 import type { RunRepository } from '@/backend/repositories/runs';
 import type { ThreadMetaRepository } from '@/backend/repositories/thread-meta';
 
-import { createThreadService } from '../thread-service';
+import { ThreadService } from '../thread-service';
 
 /**
  * run 存活心跳的接线：执行体运行期间按注入间隔持续发布 HEARTBEAT 事件（跨进程
@@ -81,7 +81,7 @@ function makeHarness(heartbeatIntervalMs: number) {
     },
   };
 
-  const service = createThreadService({
+  const service = new ThreadService({
     client: client as unknown as DeerFlowClient,
     createRunClient: () => client as unknown as DeerFlowClient,
     checkpointer: { deleteThread: async () => {} } as unknown as BaseCheckpointSaver,

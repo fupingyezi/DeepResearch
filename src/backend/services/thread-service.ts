@@ -1,5 +1,6 @@
 /**
- * ThreadService —— Thread 系统对外门面
+ * ThreadService —— Thread 系统对外门面（class + 构造器注入 deps，对齐 app 侧 service
+ * 统一形态；进程级单例由 wiring.ts 的 getThreadService() 持有）。
  *
  * 装配：DeerFlowClient + Checkpointer + ThreadMetaRepository + RunRepository
  *      + RunRegistry / RunEventBus（进程内或跨进程实现）+ ALS Context
@@ -178,45 +179,6 @@ export interface TruncateHistoryInput {
   user_id?: string;
 }
 
-export interface ThreadService {
-  createThread(input: CreateThreadInput): Promise<{ thread_id: string }>;
-  listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]>;
-  getThread(input: GetThreadInput): Promise<{ meta: ThreadMeta; checkpoint?: any } | null>;
-  deleteThread(input: DeleteThreadInput): Promise<void>;
-  /**
-   * 取消该 thread 在跑的 run（用户点「停止」）。返回取消请求投递数——单进程
-   * 实现即命中数，跨进程实现为「已送达 owner」的投递数（拿不到远端命中回报）；
-   * thread 不存在抛 NOT_FOUND。
-   */
-  cancelRun(input: CancelRunInput): Promise<{ cancelled: number }>;
-  submitRun(input: SubmitRunInput): Promise<{ run_id: string }>;
-  subscribe(input: SubscribeInput): AsyncIterable<StampedClientAgentEvent>;
-  getCheckpoint(input: GetCheckpointInput): Promise<any>;
-  /**
-   * 续跑被 interrupt 暂停的 thread：以用户决策 decision 作为 Command(resume) 输入，
-   * 复用同一 thread_id（共享 checkpoint），返回新的 run_id。事件经 StreamBridge 推送。
-   */
-  resume(input: ResumeRunInput): Promise<{ run_id: string }>;
-  /**
-   * recall / reEditCall 的 checkpoint 截断：移除「最近一条 human 消息起至结尾」的
-   * 全部消息。模型看到的历史由 checkpoint 决定，DB 截断只决定 UI 显示，两者必须
-   * 同步截断。返回 truncated = 是否真的截到了（checkpoint 里没有 human 消息 →
-   * false，不是失败）。
-   */
-  truncateHistory(input: TruncateHistoryInput): Promise<{ truncated: boolean }>;
-  /**
-   * 优雅停机：置 draining 后不再接受新 run（submitRun / resume 抛 SERVER_DRAINING），
-   * 等待本进程在跑的 run 自然收尾，超时后取消它们并再等一轮收尾（执行体 finally
-   * 保证 END 落流）。幂等：重复调用返回同一 Promise。返回 cancelled = 超时后取消
-   * 的 run 数，pending = 取消后仍未收尾的残留数（正常为 0）。
-   */
-  beginShutdown(drainMs?: number): Promise<{ cancelled: number; pending: number }>;
-  /** 健康视图：distributed = 跨进程登记表与事件总线均可用；draining = 停机流程已启动。 */
-  health(): Promise<{ distributed: boolean; draining: boolean }>;
-  /** 启动对账：把「running 但 owner 已死」的 run 修正为 failed（语义见 zombie-reconciler）。 */
-  reconcileZombieRuns(): Promise<{ reaped: number }>;
-}
-
 export interface ThreadServiceDeps {
   client: DeerFlowClient;
   checkpointer: BaseCheckpointSaver;
@@ -270,11 +232,15 @@ async function getTupleSafe(
   }
 }
 
-export function createThreadService(deps: ThreadServiceDeps): ThreadService {
-  const { client, checkpointer, threads, runs, createRunClient } = deps;
-  const heartbeatIntervalMs = deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
-  const runRegistry: RunRegistry = deps.registry ?? new InMemoryRunRegistry();
-  const runEventBus: RunEventBus = deps.eventBus ?? new InMemoryRunEventBus();
+export class ThreadService {
+  private readonly client: DeerFlowClient;
+  private readonly checkpointer: BaseCheckpointSaver;
+  private readonly threads: ThreadMetaRepository;
+  private readonly runs: RunRepository;
+  private readonly createRunClient: (modelConfig?: ModelConfig) => DeerFlowClient;
+  private readonly heartbeatIntervalMs: number;
+  private readonly runRegistry: RunRegistry;
+  private readonly runEventBus: RunEventBus;
 
   // 进程内「在跑的 run」控制句柄表：run_id → { thread_id, controller }。
   //
@@ -282,21 +248,40 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
   // threads_meta / checkpoint 被清掉之后继续为自己的 thread 写 checkpoint，把刚清理
   // 干净的数据又写回来。
   //
-  // controller 不可序列化，只能留在 owner 进程的闭包里；取消请求经 runRegistry 以
-  // 消息式送达本进程（下方 handler），handler 命中这里才真正 abort。句柄表与
+  // controller 不可序列化，只能留在 owner 进程的内存里；取消请求经 runRegistry 以
+  // 消息式送达本进程（构造器里的 handler），handler 命中这里才真正 abort。句柄表与
   // registry 的登记严格同步：executeRun 里同点 set / register，finally 里同点注销。
-  // 必须按 run_id 挂在 createThreadService 的闭包里：service 与 client 都是进程级共享
-  // 实例，多 run 并行时不能把控制句柄做成单例字段。
-  const activeRuns = new Map<string, { thread_id: string; controller: AbortController }>();
+  // 挂在 service 实例字段上（非全局单例字段）：service 与 client 都是进程级共享
+  // 实例，多 run 并行时每个 run 的句柄必须按 run_id 独立存放。
+  private readonly activeRuns = new Map<
+    string,
+    { thread_id: string; controller: AbortController }
+  >();
 
-  // 消息式取消的唯一落点：收到本进程名下 run 的取消请求时 abort 对应 controller。
-  // 返回 1 = 命中（本进程是 owner 且 run 还在跑），0 = run 不在本进程（已收尾）。
-  runRegistry.onCancelRequest((runId, reason) => {
-    const entry = activeRuns.get(runId);
-    if (!entry) return 0;
-    entry.controller.abort(new Error(reason));
-    return 1;
-  });
+  // 优雅停机状态。draining 置位后 submitRun / resume 在入口即拒绝（SERVER_DRAINING），
+  // 已提交的执行体照常跑到收尾；beginShutdown 幂等，重复调用复用同一 Promise。
+  private draining = false;
+  private shutdownPromise: Promise<{ cancelled: number; pending: number }> | null = null;
+
+  constructor(deps: ThreadServiceDeps) {
+    this.client = deps.client;
+    this.checkpointer = deps.checkpointer;
+    this.threads = deps.threads;
+    this.runs = deps.runs;
+    this.createRunClient = deps.createRunClient;
+    this.heartbeatIntervalMs = deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
+    this.runRegistry = deps.registry ?? new InMemoryRunRegistry();
+    this.runEventBus = deps.eventBus ?? new InMemoryRunEventBus();
+
+    // 消息式取消的唯一落点：收到本进程名下 run 的取消请求时 abort 对应 controller。
+    // 返回 1 = 命中（本进程是 owner 且 run 还在跑），0 = run 不在本进程（已收尾）。
+    this.runRegistry.onCancelRequest((runId, reason) => {
+      const entry = this.activeRuns.get(runId);
+      if (!entry) return 0;
+      entry.controller.abort(new Error(reason));
+      return 1;
+    });
+  }
 
   /**
    * 取消某 thread 名下所有在跑的 run。
@@ -305,22 +290,22 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
    * 不允许两个 run 并发写）；用户点「停止」用 wait=false，立刻返回不拖慢交互。
    * 取消请求经 runRegistry 投递（跨进程时到达 owner 进程），投递数即取消数。
    */
-  const cancelThreadRuns = async (
+  private async cancelThreadRuns(
     thread_id: string,
     reason: string,
     wait: boolean,
-  ): Promise<number> => {
-    const running = await runRegistry.listByThread(thread_id);
+  ): Promise<number> {
+    const running = await this.runRegistry.listByThread(thread_id);
     if (running.length === 0) return 0;
     let cancelled = 0;
     for (const info of running) {
-      cancelled += await runRegistry.requestCancel(info.runId, reason);
+      cancelled += await this.runRegistry.requestCancel(info.runId, reason);
     }
     if (wait) {
-      await waitForRunsDrained(runRegistry, thread_id, RUN_CANCEL_GRACE_MS);
+      await waitForRunsDrained(this.runRegistry, thread_id, RUN_CANCEL_GRACE_MS);
     }
     return cancelled;
-  };
+  }
 
   /**
    * thread 级互斥临界区：包住「取消在跑的 run → 等清空 → 建新 run / 删数据」。
@@ -331,7 +316,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
    * 等待期轮询获取（50ms）；超预算说明对方异常，继续执行并告警——锁是防错
    * 而非门禁，不应把正常请求挡在等锁上。
    */
-  const withThreadLock = async <T>(thread_id: string, fn: () => Promise<T>): Promise<T> => {
+  private async withThreadLock<T>(thread_id: string, fn: () => Promise<T>): Promise<T> {
     const lock = getDistLock();
     const lockKey = `deerflow:lock:thread:${thread_id}`;
     const deadline = Date.now() + THREAD_LOCK_WAIT_MS;
@@ -352,32 +337,31 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     } finally {
       await handle?.release();
     }
-  };
+  }
 
-  // 优雅停机状态。draining 置位后 submitRun / resume 在入口即拒绝（SERVER_DRAINING），
-  // 已提交的执行体照常跑到收尾；beginShutdown 幂等，重复调用复用同一 Promise。
-  let draining = false;
-  let shutdownPromise: Promise<{ cancelled: number; pending: number }> | null = null;
-
-  const beginShutdown = (
-    drainMs = GRACEFUL_DRAIN_MS,
-  ): Promise<{ cancelled: number; pending: number }> => {
-    if (shutdownPromise) return shutdownPromise;
-    shutdownPromise = (async () => {
-      draining = true;
+  /**
+   * 优雅停机：置 draining 后不再接受新 run（submitRun / resume 抛 SERVER_DRAINING），
+   * 等待本进程在跑的 run 自然收尾，超时后取消它们并再等一轮收尾（执行体 finally
+   * 保证 END 落流）。幂等：重复调用返回同一 Promise。返回 cancelled = 超时后取消
+   * 的 run 数，pending = 取消后仍未收尾的残留数（正常为 0）。
+   */
+  beginShutdown(drainMs = GRACEFUL_DRAIN_MS): Promise<{ cancelled: number; pending: number }> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shutdownPromise = (async () => {
+      this.draining = true;
       // activeRuns 是「本进程在跑的 run」的收尾完成标志：执行体 finally 在
       // 状态落库 + END 落流之后才摘除条目，轮询到空即全部善后完成
       const waitEmpty = async (ms: number): Promise<void> => {
         const deadline = Date.now() + ms;
-        while (activeRuns.size > 0) {
+        while (this.activeRuns.size > 0) {
           if (Date.now() >= deadline) return;
           await new Promise<void>((resolve) => setTimeout(resolve, 100));
         }
       };
       await waitEmpty(drainMs);
       let cancelled = 0;
-      if (activeRuns.size > 0) {
-        for (const [, entry] of activeRuns) {
+      if (this.activeRuns.size > 0) {
+        for (const [, entry] of this.activeRuns) {
           entry.controller.abort(new Error(RUN_CANCELLED_DRAINING));
           cancelled += 1;
         }
@@ -385,34 +369,34 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         // 残留由进程退出兜底，不无限等待
         await waitEmpty(RUN_CANCEL_GRACE_MS);
       }
-      console.info(`${LOG} drain done cancelled=${cancelled} pending=${activeRuns.size}`);
-      return { cancelled, pending: activeRuns.size };
+      console.info(`${LOG} drain done cancelled=${cancelled} pending=${this.activeRuns.size}`);
+      return { cancelled, pending: this.activeRuns.size };
     })();
-    return shutdownPromise;
-  };
+    return this.shutdownPromise;
+  }
 
   // 统一的 run 执行器：submitRun（首轮）与 resume（续跑）共用。
   // 关键不变量：fire-and-forget 立即返回 run_id；try/catch/finally 三段收敛状态，
   // finally 始终 publish END（channel 对已 closed 的 publish 是 no-op）。
-  const executeRun = async (params: {
+  private async executeRun(params: {
     thread_id: string;
     user_id?: string;
     threadMeta: ThreadMeta;
     inputForDb: string;
     makeStream: (signal: AbortSignal) => AsyncIterable<ClientAgentEvent>;
-  }): Promise<{ run_id: string }> => {
+  }): Promise<{ run_id: string }> {
     const { thread_id, user_id, threadMeta, inputForDb, makeStream } = params;
 
     const run_id = uuidv4();
-    await runs.create({
+    await this.runs.create({
       run_id,
       thread_id,
       assistant_id: threadMeta.assistant_id,
       user_id: user_id ?? null,
       input: inputForDb,
     });
-    await threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
-    await runs.setStatus(run_id, 'running');
+    await this.threads.updateStatus(thread_id, 'running', { user_id: user_id ?? null });
+    await this.runs.setStatus(run_id, 'running');
 
     const ctx: RuntimeContext = {
       thread_id,
@@ -422,8 +406,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
     };
 
     const controller = new AbortController();
-    activeRuns.set(run_id, { thread_id, controller });
-    await runRegistry.register({
+    this.activeRuns.set(run_id, { thread_id, controller });
+    await this.runRegistry.register({
       runId: run_id,
       threadId: thread_id,
       owner: getInstanceOwner(),
@@ -436,15 +420,15 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       // 存活心跳贯穿整个执行体（含排队窗口）：unref 不阻止进程退出；finally 里
       // 与 END 发布前停止，晚到的心跳不会复活已释放的事件流
       const heartbeat = setInterval(() => {
-        void runEventBus.publish(
+        void this.runEventBus.publish(
           thread_id,
           run_id,
           createClientAgentEvent(ClientAgentEventType.HEARTBEAT, threadMeta.assistant_id, {}),
         );
         // 同步续租 owner 登记键：键存活 = owner 存活，跨进程僵尸回收凭 ownerOf
         // 判死。心跳停摆（进程崩溃 / kill -9）后键在死亡窗口内到期
-        void runRegistry.touch(run_id);
-      }, heartbeatIntervalMs);
+        void this.runRegistry.touch(run_id);
+      }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
 
       // 取消收尾：RunStatus 是 DB CHECK 约束的枚举（无 cancelled 值），复用 failed +
@@ -460,8 +444,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       const settleCancelled = async (): Promise<void> => {
         const reason = cancelReasonText();
         try {
-          await runs.setStatus(run_id, 'failed', reason);
-          await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
+          await this.runs.setStatus(run_id, 'failed', reason);
+          await this.threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
         } catch (e) {
           console.error(`${LOG} status persist on cancel failed:`, (e as Error)?.message);
         }
@@ -480,7 +464,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           () => {
             // 闸门回调是同步的，publish 用 void 触发：进程内实现的发布体同步执行，
             // 「排队中」帧保证落在后续任何事件之前。
-            void runEventBus.publish(
+            void this.runEventBus.publish(
               thread_id,
               run_id,
               createClientAgentEvent(ClientAgentEventType.TASK_PROGRESS, threadMeta.assistant_id, {
@@ -501,7 +485,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
 
         await runWithContext(ctx, async () => {
           for await (const ev of makeStream(controller.signal)) {
-            await runEventBus.publish(thread_id, run_id, ev);
+            await this.runEventBus.publish(thread_id, run_id, ev);
           }
         });
 
@@ -513,8 +497,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           return;
         }
 
-        await runs.setStatus(run_id, 'succeeded');
-        await threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
+        await this.runs.setStatus(run_id, 'succeeded');
+        await this.threads.updateStatus(thread_id, 'idle', { user_id: user_id ?? null });
         console.info(`${LOG} run succeeded thread_id=${thread_id} run_id=${run_id}`);
       } catch (e) {
         // 取消可能以异常形式冒出来（且被 LangChain 中间件链包上前缀），此时按取消处理：
@@ -522,7 +506,7 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         const cancelled = controller.signal.aborted;
         const message = cancelled ? cancelReasonText() : ((e as Error)?.message ?? String(e));
         if (!cancelled) {
-          await runEventBus.publish(
+          await this.runEventBus.publish(
             thread_id,
             run_id,
             createClientAgentEvent(ClientAgentEventType.ERROR, threadMeta.assistant_id, {
@@ -533,8 +517,8 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
           );
         }
         try {
-          await runs.setStatus(run_id, 'failed', message);
-          await threads.updateStatus(thread_id, cancelled ? 'idle' : 'error', {
+          await this.runs.setStatus(run_id, 'failed', message);
+          await this.threads.updateStatus(thread_id, cancelled ? 'idle' : 'error', {
             user_id: user_id ?? null,
           });
         } catch (e2) {
@@ -546,12 +530,12 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
       } finally {
         clearInterval(heartbeat);
         if (releaseRunSlot) releaseRunSlot();
-        activeRuns.delete(run_id);
-        await runRegistry.unregister(run_id);
+        this.activeRuns.delete(run_id);
+        await this.runRegistry.unregister(run_id);
         // autoTitle 结果折进 END 载荷：跨进程部署下消费端可能不在 owner 进程，
         // 拿不到进程内 title-bus，标题更新必须随事件流本身走
         const titleUpdate = consumeTitleUpdate(thread_id);
-        await runEventBus.publish(
+        await this.runEventBus.publish(
           thread_id,
           run_id,
           createClientAgentEvent(
@@ -563,226 +547,264 @@ export function createThreadService(deps: ThreadServiceDeps): ThreadService {
         // 延迟释放事件通道（宽限后）：内存实现丢弃 buffer 回收内存，Redis 实现
         // 依赖 stream TTL。unref 不阻止进程退出，测试环境不产生悬挂 timer。
         const releaseTimer = setTimeout(() => {
-          void runEventBus.release(thread_id, run_id);
+          void this.runEventBus.release(thread_id, run_id);
         }, EVENT_RELEASE_GRACE_MS);
         releaseTimer.unref?.();
       }
     })();
 
     return { run_id };
-  };
+  }
 
-  return {
-    async createThread(input) {
-      const thread_id = input.thread_id ?? uuidv4();
-      // 外部指定 thread_id 时支持幂等：已存在则直接返回，不重复 create
-      if (input.thread_id) {
-        const existing = await threads.get(thread_id, { user_id: input.user_id ?? null });
-        if (existing) {
-          console.info(`${LOG} createThread idempotent thread_id=${thread_id}`);
-          return { thread_id };
-        }
+  async createThread(input: CreateThreadInput): Promise<{ thread_id: string }> {
+    const thread_id = input.thread_id ?? uuidv4();
+    // 外部指定 thread_id 时支持幂等：已存在则直接返回，不重复 create
+    if (input.thread_id) {
+      const existing = await this.threads.get(thread_id, { user_id: input.user_id ?? null });
+      if (existing) {
+        console.info(`${LOG} createThread idempotent thread_id=${thread_id}`);
+        return { thread_id };
       }
-      await threads.create({
-        thread_id,
-        assistant_id: input.assistant_id ?? 'lead',
-        user_id: input.user_id ?? null,
-        display_name: input.display_name ?? 'New thread',
-        metadata: input.metadata ?? {},
-      });
-      console.info(`${LOG} createThread thread_id=${thread_id}`);
-      return { thread_id };
-    },
+    }
+    await this.threads.create({
+      thread_id,
+      assistant_id: input.assistant_id ?? 'lead',
+      user_id: input.user_id ?? null,
+      display_name: input.display_name ?? 'New thread',
+      metadata: input.metadata ?? {},
+    });
+    console.info(`${LOG} createThread thread_id=${thread_id}`);
+    return { thread_id };
+  }
 
-    async listThreads(opts) {
-      return threads.search({
-        user_id: opts.user_id ?? null,
-        status: opts.status,
-        metadata: opts.metadata,
-        limit: opts.limit,
-        offset: opts.offset,
-      });
-    },
+  listThreads(opts: ListThreadsOptions): Promise<ThreadMeta[]> {
+    return this.threads.search({
+      user_id: opts.user_id ?? null,
+      status: opts.status,
+      metadata: opts.metadata,
+      limit: opts.limit,
+      offset: opts.offset,
+    });
+  }
 
-    async getThread({ thread_id, user_id, includeCheckpoint }) {
-      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
-      if (!threadMeta) return null;
-      if (!includeCheckpoint) return { meta: threadMeta };
-      const checkpoint = await getTupleSafe(checkpointer, thread_id);
-      return { meta: threadMeta, checkpoint };
-    },
+  async getThread({
+    thread_id,
+    user_id,
+    includeCheckpoint,
+  }: GetThreadInput): Promise<{ meta: ThreadMeta; checkpoint?: any } | null> {
+    const threadMeta = await this.threads.get(thread_id, { user_id: user_id ?? null });
+    if (!threadMeta) return null;
+    if (!includeCheckpoint) return { meta: threadMeta };
+    const checkpoint = await getTupleSafe(this.checkpointer, thread_id);
+    return { meta: threadMeta, checkpoint };
+  }
 
-    async deleteThread({ thread_id, user_id }) {
-      await withThreadLock(thread_id, async () => {
-        // 先取消这个 thread 还在跑的 run，并等它收尾（最多 RUN_CANCEL_GRACE_MS）：
-        // 否则 run 会在 meta / checkpoint 清完之后继续写 checkpoint，把刚删掉的数据写回来。
-        const cancelled = await cancelThreadRuns(thread_id, RUN_CANCELLED_ERROR, true);
-        if (cancelled > 0) {
-          console.info(
-            `${LOG} deleteThread cancelled ${cancelled} running run(s) thread_id=${thread_id}`,
-          );
-        }
+  async deleteThread({ thread_id, user_id }: DeleteThreadInput): Promise<void> {
+    await this.withThreadLock(thread_id, async () => {
+      // 先取消这个 thread 还在跑的 run，并等它收尾（最多 RUN_CANCEL_GRACE_MS）：
+      // 否则 run 会在 meta / checkpoint 清完之后继续写 checkpoint，把刚删掉的数据写回来。
+      const cancelled = await this.cancelThreadRuns(thread_id, RUN_CANCELLED_ERROR, true);
+      if (cancelled > 0) {
+        console.info(
+          `${LOG} deleteThread cancelled ${cancelled} running run(s) thread_id=${thread_id}`,
+        );
+      }
 
-        await threads.delete(thread_id, { user_id: user_id ?? null });
-        // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
+      await this.threads.delete(thread_id, { user_id: user_id ?? null });
+      // 销毁对话时联动销毁其沙箱容器（Local 后端为 no-op）。
+      try {
+        getSandboxProvider().releaseByThreadId(thread_id);
+      } catch (e) {
+        console.warn(`${LOG} deleteThread sandbox release failed:`, (e as Error)?.message);
+      }
+      // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
+      const saver = this.checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
+      if (typeof saver.deleteThread === 'function') {
         try {
-          getSandboxProvider().releaseByThreadId(thread_id);
+          await saver.deleteThread.call(saver, thread_id);
         } catch (e) {
-          console.warn(`${LOG} deleteThread sandbox release failed:`, (e as Error)?.message);
+          console.warn(`${LOG} deleteThread checkpoint cleanup failed:`, (e as Error)?.message);
         }
-        // PostgresSaver 1.x 提供 deleteThread；其它实现没有则跳过。
-        const saver = checkpointer as BaseCheckpointSaver & CheckpointerWithDeleteThread;
-        if (typeof saver.deleteThread === 'function') {
-          try {
-            await saver.deleteThread.call(saver, thread_id);
-          } catch (e) {
-            console.warn(`${LOG} deleteThread checkpoint cleanup failed:`, (e as Error)?.message);
-          }
-        }
-        console.info(`${LOG} deleteThread thread_id=${thread_id}`);
+      }
+      console.info(`${LOG} deleteThread thread_id=${thread_id}`);
+    });
+  }
+
+  /**
+   * 取消该 thread 在跑的 run（用户点「停止」）。返回取消请求投递数——单进程
+   * 实现即命中数，跨进程实现为「已送达 owner」的投递数（拿不到远端命中回报）；
+   * thread 不存在抛 NOT_FOUND。
+   */
+  async cancelRun({ thread_id, user_id }: CancelRunInput): Promise<{ cancelled: number }> {
+    // 归属校验：threads.get 按 user_id 过滤，别人的 / 不存在的 thread 都拿不到
+    const threadMeta = await this.threads.get(thread_id, { user_id: user_id ?? null });
+    if (!threadMeta) {
+      throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+    }
+    // 不等收尾：用户点「停止」要立刻有响应，run 自己会走取消收尾（状态落 failed）
+    const cancelled = await this.cancelThreadRuns(thread_id, RUN_CANCELLED_BY_USER, false);
+    console.info(`${LOG} cancelRun thread_id=${thread_id} cancelled=${cancelled}`);
+    return { cancelled };
+  }
+
+  async submitRun({
+    thread_id,
+    user_id,
+    input,
+    images,
+    metadata,
+    modelConfig,
+  }: SubmitRunInput): Promise<{ run_id: string }> {
+    if (this.draining) {
+      throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+    }
+    const threadMeta = await this.threads.get(thread_id, { user_id: user_id ?? null });
+    if (!threadMeta) {
+      throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+    }
+
+    // 抢占 + 登记在 thread 锁内完成：锁住的不是 run 全程，而是「取消旧的 → 登记新的」
+    // 这段临界区。run 全程锁会与新 submit 的抢占死锁（新 submit 等锁、锁被旧 run 占着）。
+    return this.withThreadLock(thread_id, async () => {
+      // 同一 thread 只允许一个 run：上一个还没停就先取消并等它停笔，否则两个 run 会并发写
+      // 同一份 LangGraph checkpoint（实测交错增长），对话状态会坏。
+      const superseded = await this.cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+      if (superseded > 0) {
+        console.info(
+          `${LOG} submitRun superseded ${superseded} running run(s) thread_id=${thread_id}`,
+        );
+      }
+
+      // 每 run 独立 client：agent / 中间件实例不跨 run 共享（并发 run 绝对隔离）。
+      // 统一走「submitRun → channel」单路径。
+      const runClient = this.createRunClient(modelConfig);
+
+      return this.executeRun({
+        thread_id,
+        user_id,
+        threadMeta,
+        inputForDb: input,
+        makeStream: (signal) =>
+          runClient.stream(
+            input,
+            thread_id,
+            metadata ?? {},
+            images?.length ? { images } : undefined,
+            signal,
+          ),
       });
-    },
+    });
+  }
 
-    async cancelRun({ thread_id, user_id }) {
-      // 归属校验：threads.get 按 user_id 过滤，别人的 / 不存在的 thread 都拿不到
-      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
-      if (!threadMeta) {
-        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+  subscribe({
+    thread_id,
+    run_id,
+    fromEventId,
+  }: SubscribeInput): AsyncIterable<StampedClientAgentEvent> {
+    return this.runEventBus.subscribe(thread_id, run_id, fromEventId);
+  }
+
+  async getCheckpoint({ thread_id, checkpoint_id }: GetCheckpointInput): Promise<any> {
+    return getTupleSafe(this.checkpointer, thread_id, checkpoint_id);
+  }
+
+  /**
+   * 续跑被 interrupt 暂停的 thread：以用户决策 decision 作为 Command(resume) 输入，
+   * 复用同一 thread_id（共享 checkpoint），返回新的 run_id。事件经 StreamBridge 推送。
+   */
+  async resume({
+    thread_id,
+    user_id,
+    decision,
+    metadata,
+    modelConfig,
+  }: ResumeRunInput): Promise<{ run_id: string }> {
+    if (this.draining) {
+      throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+    }
+    const threadMeta = await this.threads.get(thread_id, { user_id: user_id ?? null });
+    if (!threadMeta) {
+      throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+    }
+
+    // 与 submitRun 同一把 thread 锁：续跑同样要「停旧的 → 登记新的」原子成段。
+    return this.withThreadLock(thread_id, async () => {
+      // 同上：续跑也占用同一个 thread 的 checkpoint，先让在跑的 run 停笔
+      const superseded = await this.cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+      if (superseded > 0) {
+        console.info(
+          `${LOG} resume superseded ${superseded} running run(s) thread_id=${thread_id}`,
+        );
       }
-      // 不等收尾：用户点「停止」要立刻有响应，run 自己会走取消收尾（状态落 failed）
-      const cancelled = await cancelThreadRuns(thread_id, RUN_CANCELLED_BY_USER, false);
-      console.info(`${LOG} cancelRun thread_id=${thread_id} cancelled=${cancelled}`);
-      return { cancelled };
-    },
 
-    async submitRun({ thread_id, user_id, input, images, metadata, modelConfig }) {
-      if (draining) {
-        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
-      }
-      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
-      if (!threadMeta) {
-        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
-      }
+      const runClient = this.createRunClient(modelConfig);
+      const decisionText = typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
 
-      // 抢占 + 登记在 thread 锁内完成：锁住的不是 run 全程，而是「取消旧的 → 登记新的」
-      // 这段临界区。run 全程锁会与新 submit 的抢占死锁（新 submit 等锁、锁被旧 run 占着）。
-      return withThreadLock(thread_id, async () => {
-        // 同一 thread 只允许一个 run：上一个还没停就先取消并等它停笔，否则两个 run 会并发写
-        // 同一份 LangGraph checkpoint（实测交错增长），对话状态会坏。
-        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
-        if (superseded > 0) {
-          console.info(
-            `${LOG} submitRun superseded ${superseded} running run(s) thread_id=${thread_id}`,
-          );
-        }
-
-        // 每 run 独立 client：agent / 中间件实例不跨 run 共享（并发 run 绝对隔离）。
-        // 统一走「submitRun → channel」单路径。
-        const runClient = createRunClient(modelConfig);
-
-        return executeRun({
-          thread_id,
-          user_id,
-          threadMeta,
-          inputForDb: input,
-          makeStream: (signal) =>
-            runClient.stream(
-              input,
-              thread_id,
-              metadata ?? {},
-              images?.length ? { images } : undefined,
-              signal,
-            ),
-        });
+      return this.executeRun({
+        thread_id,
+        user_id,
+        threadMeta,
+        inputForDb: decisionText,
+        makeStream: (signal) => runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
       });
-    },
+    });
+  }
 
-    subscribe({ thread_id, run_id, fromEventId }) {
-      return runEventBus.subscribe(thread_id, run_id, fromEventId);
-    },
+  /**
+   * recall / reEditCall 的 checkpoint 截断：移除「最近一条 human 消息起至结尾」的
+   * 全部消息。模型看到的历史由 checkpoint 决定，DB 截断只决定 UI 显示，两者必须
+   * 同步截断。返回 truncated = 是否真的截到了（checkpoint 里没有 human 消息 →
+   * false，不是失败）。
+   */
+  async truncateHistory({
+    thread_id,
+    user_id,
+  }: TruncateHistoryInput): Promise<{ truncated: boolean }> {
+    // draining 时同样拒绝：截断是为新一轮 run 铺路，此时截了也没法跑（且 prepare
+    // 以 checkpoint 截断为前置，这里抛错保证 DB 侧原封不动）
+    if (this.draining) {
+      throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+    }
+    const threadMeta = await this.threads.get(thread_id, { user_id: user_id ?? null });
+    if (!threadMeta) {
+      throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
+    }
 
-    async getCheckpoint({ thread_id, checkpoint_id }) {
-      return getTupleSafe(checkpointer, thread_id, checkpoint_id);
-    },
-
-    async resume({ thread_id, user_id, decision, metadata, modelConfig }) {
-      if (draining) {
-        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
+    // 与 submitRun 同一把 thread 锁：先取消在跑的 run 并等停笔——否则被取消的旧
+    // run 收尾时会把刚删掉的消息写回 checkpoint（截断在它停笔前生效）。
+    return this.withThreadLock(thread_id, async () => {
+      const superseded = await this.cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
+      if (superseded > 0) {
+        console.info(
+          `${LOG} truncateHistory superseded ${superseded} running run(s) thread_id=${thread_id}`,
+        );
       }
-      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
-      if (!threadMeta) {
-        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
-      }
+      // 截断用默认 client：所有 client 共享同一 checkpointer，用哪个实例结果一致
+      const truncated = await this.client.truncateHistoryBeforeLatestUserMessage(thread_id);
+      console.info(`${LOG} truncateHistory thread_id=${thread_id} truncated=${truncated}`);
+      return { truncated };
+    });
+  }
 
-      // 与 submitRun 同一把 thread 锁：续跑同样要「停旧的 → 登记新的」原子成段。
-      return withThreadLock(thread_id, async () => {
-        // 同上：续跑也占用同一个 thread 的 checkpoint，先让在跑的 run 停笔
-        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
-        if (superseded > 0) {
-          console.info(
-            `${LOG} resume superseded ${superseded} running run(s) thread_id=${thread_id}`,
-          );
-        }
+  /** 健康视图：distributed = 跨进程登记表与事件总线均可用；draining = 停机流程已启动。 */
+  async health(): Promise<{ distributed: boolean; draining: boolean }> {
+    // 先确保实现就绪再判模式：懒建连下「尚未连接」与「连接失败已降级」都表现为
+    // connected=false，只有前者不该被报告为降级
+    await this.runRegistry.ready();
+    await this.runEventBus.ready();
+    return {
+      distributed: this.runRegistry.isDistributed() && this.runEventBus.isDistributed(),
+      draining: this.draining,
+    };
+  }
 
-        const runClient = createRunClient(modelConfig);
-        const decisionText =
-          typeof decision === 'string' ? decision : JSON.stringify(decision ?? '');
-
-        return executeRun({
-          thread_id,
-          user_id,
-          threadMeta,
-          inputForDb: decisionText,
-          makeStream: (signal) =>
-            runClient.resumeStream(decision, thread_id, metadata ?? {}, signal),
-        });
-      });
-    },
-
-    async truncateHistory({ thread_id, user_id }) {
-      // draining 时同样拒绝：截断是为新一轮 run 铺路，此时截了也没法跑（且 prepare
-      // 以 checkpoint 截断为前置，这里抛错保证 DB 侧原封不动）
-      if (draining) {
-        throw new ThreadServiceError('server is draining', 'SERVER_DRAINING');
-      }
-      const threadMeta = await threads.get(thread_id, { user_id: user_id ?? null });
-      if (!threadMeta) {
-        throw new ThreadServiceError(`thread not found: ${thread_id}`, 'NOT_FOUND');
-      }
-
-      // 与 submitRun 同一把 thread 锁：先取消在跑的 run 并等停笔——否则被取消的旧
-      // run 收尾时会把刚删掉的消息写回 checkpoint（截断在它停笔前生效）。
-      return withThreadLock(thread_id, async () => {
-        const superseded = await cancelThreadRuns(thread_id, RUN_CANCELLED_SUPERSEDED, true);
-        if (superseded > 0) {
-          console.info(
-            `${LOG} truncateHistory superseded ${superseded} running run(s) thread_id=${thread_id}`,
-          );
-        }
-        // 截断用默认 client：所有 client 共享同一 checkpointer，用哪个实例结果一致
-        const truncated = await client.truncateHistoryBeforeLatestUserMessage(thread_id);
-        console.info(`${LOG} truncateHistory thread_id=${thread_id} truncated=${truncated}`);
-        return { truncated };
-      });
-    },
-
-    beginShutdown,
-    health: async () => {
-      // 先确保实现就绪再判模式：懒建连下「尚未连接」与「连接失败已降级」都表现为
-      // connected=false，只有前者不该被报告为降级
-      await runRegistry.ready();
-      await runEventBus.ready();
-      return {
-        distributed: runRegistry.isDistributed() && runEventBus.isDistributed(),
-        draining,
-      };
-    },
-    reconcileZombieRuns: () =>
-      reconcileZombieRuns({
-        runs,
-        threads,
-        registry: runRegistry,
-        releaseRunSlot: (runId) => getSandboxCoordinator().releaseRun(runId),
-      }),
-  };
+  /** 启动对账：把「running 但 owner 已死」的 run 修正为 failed（语义见 zombie-reconciler）。 */
+  reconcileZombieRuns(): Promise<{ reaped: number }> {
+    return reconcileZombieRuns({
+      runs: this.runs,
+      threads: this.threads,
+      registry: this.runRegistry,
+      releaseRunSlot: (runId) => getSandboxCoordinator().releaseRun(runId),
+    });
+  }
 }

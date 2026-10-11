@@ -9,7 +9,7 @@ import {
 import type { RunRepository } from '@/backend/repositories/runs';
 import type { ThreadMetaRepository } from '@/backend/repositories/thread-meta';
 
-import { createThreadService } from '../thread-service';
+import { ThreadService } from '../thread-service';
 
 /**
  * truncateHistory（recall / reEditCall 的 checkpoint 截断）语义锁定：
@@ -101,7 +101,7 @@ function makeHarness(mode: 'idle' | 'hang-until-abort' = 'idle') {
     },
   };
 
-  const service = createThreadService({
+  const service = new ThreadService({
     client: client as unknown as DeerFlowClient,
     createRunClient: () => client as unknown as DeerFlowClient,
     checkpointer: {} as unknown as BaseCheckpointSaver,
