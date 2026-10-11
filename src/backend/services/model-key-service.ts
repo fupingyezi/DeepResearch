@@ -9,12 +9,9 @@
  */
 
 import {
-  deleteModelKey,
-  getSelectedModel,
-  listConfiguredProviders,
-  setSelectedModel,
-  upsertModelKey,
+  PgUserModelKeyRepository,
   type ConfiguredProvider,
+  type UserModelKeyRepository,
 } from '@/backend/repositories/user-model-key';
 import { MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import { AppError } from '@/backend/http';
@@ -24,11 +21,7 @@ const VALID_PROVIDERS = new Set<string>(
 );
 
 export interface ModelKeyServiceDeps {
-  listConfigured: typeof listConfiguredProviders;
-  getSelected: typeof getSelectedModel;
-  upsert: typeof upsertModelKey;
-  setSelected: typeof setSelectedModel;
-  deleteKey: typeof deleteModelKey;
+  userModelKeys: UserModelKeyRepository;
 }
 
 export class ModelKeyService {
@@ -40,8 +33,8 @@ export class ModelKeyService {
     selectedModel: string | null;
   }> {
     const [configured, selectedModel] = await Promise.all([
-      this.deps.listConfigured(userId),
-      this.deps.getSelected(userId),
+      this.deps.userModelKeys.listConfiguredProviders(userId),
+      this.deps.userModelKeys.getSelectedModel(userId),
     ]);
     return { configured, selectedModel };
   }
@@ -51,7 +44,7 @@ export class ModelKeyService {
     if (!VALID_PROVIDERS.has(provider)) {
       throw new AppError('Invalid or unsupported provider', 'PROVIDER_NOT_SUPPORTED', 400);
     }
-    return this.deps.upsert(userId, provider, apiKey);
+    return this.deps.userModelKeys.upsertModelKey(userId, provider, apiKey);
   }
 
   /**
@@ -64,7 +57,7 @@ export class ModelKeyService {
       throw new AppError('Invalid model preset', 'INVALID_INPUT', 400);
     }
 
-    const configured = await this.deps.listConfigured(userId);
+    const configured = await this.deps.userModelKeys.listConfiguredProviders(userId);
     const hasKey = configured.some((c) => c.provider === preset.provider);
     if (!hasKey) {
       throw new AppError(
@@ -74,7 +67,7 @@ export class ModelKeyService {
       );
     }
 
-    await this.deps.setSelected(userId, selectedModel);
+    await this.deps.userModelKeys.setSelectedModel(userId, selectedModel);
   }
 
   /** 删除本人某 provider 的 Key。 */
@@ -83,16 +76,12 @@ export class ModelKeyService {
     if (!provider || !VALID_PROVIDERS.has(provider)) {
       throw new AppError('Invalid or unsupported provider', 'PROVIDER_NOT_SUPPORTED', 400);
     }
-    await this.deps.deleteKey(userId, provider);
+    await this.deps.userModelKeys.deleteModelKey(userId, provider);
   }
 }
 
 const defaultDeps: ModelKeyServiceDeps = {
-  listConfigured: listConfiguredProviders,
-  getSelected: getSelectedModel,
-  upsert: upsertModelKey,
-  setSelected: setSelectedModel,
-  deleteKey: deleteModelKey,
+  userModelKeys: new PgUserModelKeyRepository(),
 };
 
 /**

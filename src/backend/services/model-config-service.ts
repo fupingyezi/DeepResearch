@@ -4,9 +4,12 @@
  * 单一链路：按「当前登录用户」解析主聊天链路的 ModelConfig（用户自带 Key）。
  */
 
-import { getDecryptedKey, getSelectedModel } from '@/backend/repositories/user-model-key';
+import { PgUserModelKeyRepository } from '@/backend/repositories/user-model-key';
 import { buildModelConfigForUser, MODEL_PRESETS, type ModelPresetName } from '@/config/models';
 import type { ModelConfig } from '@deerflow-harness';
+
+// 仓库零参构造、无状态（连接池在 lib/db），模块级实例即可
+const userModelKeys = new PgUserModelKeyRepository();
 
 /**
  * 用户感知的模型解析结果（discriminated union）。
@@ -35,7 +38,7 @@ export async function resolveUserModelConfig(
   if (typeof explicit === 'string' && MODEL_PRESETS[explicit as ModelPresetName]) {
     presetKey = explicit as ModelPresetName;
   } else {
-    const selected = await getSelectedModel(userId);
+    const selected = await userModelKeys.getSelectedModel(userId);
     if (selected && MODEL_PRESETS[selected as ModelPresetName]) {
       presetKey = selected as ModelPresetName;
     }
@@ -44,7 +47,7 @@ export async function resolveUserModelConfig(
   if (!presetKey) return { ok: false, reason: 'NO_MODEL' };
 
   const preset = MODEL_PRESETS[presetKey];
-  const apiKey = await getDecryptedKey(userId, preset.provider);
+  const apiKey = await userModelKeys.getDecryptedKey(userId, preset.provider);
   if (!apiKey) return { ok: false, reason: 'NO_KEY', provider: preset.provider };
 
   return { ok: true, modelConfig: buildModelConfigForUser(presetKey, apiKey), presetKey };
