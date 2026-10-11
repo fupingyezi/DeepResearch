@@ -27,6 +27,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # PG / Redis / app 一起挤出内存，整机（含 SSH）失去响应 —— 2026-09 生产事故的成因之一。
 # 给构建设个上限后，真不够会以明确的 "JavaScript heap out of memory" 失败，
 # 而不是拖死服务器。机器规格较大时可上调这个值。
+# 注意此上限只罩得住构建主进程：Next fork 静态 worker 时主动剥掉该参数，
+# 整体内存边界靠 deploy-remote.sh 的容器级上限（--memory，禁 swap）。
 ENV NODE_OPTIONS=--max-old-space-size=2048
 # 构建 worker 数上限（进 next.config 的 experimental.cpus）：next build 的页面数据
 # 收集 / 静态生成默认 fork 8 个子进程（pages+app 池各 4），每个装载完整 app 模块图
