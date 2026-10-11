@@ -63,6 +63,8 @@ push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/m
 - `DEERFLOW_RERANK_ENABLED`（'0' 显式关）/ `DEERFLOW_RERANK_API_KEY`（回落 ZHIPU_API_KEY）/ `DEERFLOW_RERANK_MODEL`（默认 rerank）/ `DEERFLOW_RERANK_BASE_URL`——记忆检索精排（默认开，失败静默保持 RRF 序）
 - `DEERFLOW_SANDBOX_BACKEND`——local（默认，宿主直连）/ docker（每线程加固容器）/ remote（每线程 SSH）；`DEERFLOW_ALLOW_HOST_BASH` 只门控 local（docker/remote 是隔离边界）
 - `DEERFLOW_MAX_CONCURRENT_RUNS`（run 级闸门，默认 16）/ `DEERFLOW_DOCKER_MAX_LIVE_CONTAINERS`（容器级闸门，默认 32）
+- `DEERFLOW_RATE_LIMIT_ENABLED`（默认开；'0' 关闭登录/注册等入口限流）
+- `DEERFLOW_INSTANCE_ID`——多进程部署的 run owner 路由键（缺省 hostname:pid）
 - `DEERFLOW_GRACEFUL_DRAIN_MS`——优雅停机排水窗口（默认 30000）
 - `NEXT_MANUAL_SIG_HANDLE=1`——多进程部署必须置位：关掉 Next 自带 SIGTERM 清理（server.close → exit(0)），否则排水序列跑不到第一步
 - `DEERFLOW_VISION_MAX_IMAGE_MB`——单图上限（默认 5）；**前端 `MAX_IMAGE_SIZE_MB` 必须 ≤ 它**，否则「发送成功但模型没看到图」静默降级
@@ -124,7 +126,7 @@ Agent 执行流水线：`RunConcurrencyGate`（run 级并发闸门）→ `create
 
 ### 1. API 路由层
 
-全部 35 条路由走 `src/backend/http/api-handler.ts` 的 `withApiHandler(options, handler)` 统一管线（route.ts 是薄适配器：横切选项与 Next 配置导出在此，handler 体在 `src/backend/controllers/`）：try/catch 全包裹 → auth（缺省 cookie=getCurrentUser；null → 401）→ guard（sandbox token 等非用户主体门禁）→ userIdHeader（threads 的 x-user-id → `ctx.userId`）→ rateLimit（占位 no-op）→ body/query zod 解析 → `handler(ctx)`。每条返回路径记一条 `[http]` 完成日志；catch 先 `logHttpError` 再 `toHttpError(e, fallbackMessage)`。**约定：wrapper 是 body 唯一读取方**（handler 内不得再调 `request.json()/formData()`）；错误响应统一 `{code,message}`；成功 envelope 逐路由冻结；SSE 两路由（v3/chat、threads streams）直接 `new Response(createSseStream(...))`；`runtime='nodejs'` / `force-dynamic` 留在各自 route.ts 原地。
+全部 41 条路由走 `src/backend/http/api-handler.ts` 的 `withApiHandler(options, handler)` 统一管线（route.ts 是薄适配器：横切选项与 Next 配置导出在此，handler 体在 `src/backend/controllers/`）：try/catch 全包裹 → auth（缺省 cookie=getCurrentUser；null → 401）→ guard（sandbox token 等非用户主体门禁）→ userIdHeader（threads 的 x-user-id → `ctx.userId`）→ rateLimit（Redis 固定窗口计数跨进程一致，未配 Redis / 不可用降级进程内 Map，`DEERFLOW_RATE_LIMIT_ENABLED='0'` 显式关闭）→ body/query zod 解析 → `handler(ctx)`。每条返回路径记一条 `[http]` 完成日志；catch 先 `logHttpError` 再 `toHttpError(e, fallbackMessage)`。**约定：wrapper 是 body 唯一读取方**（handler 内不得再调 `request.json()/formData()`）；错误响应统一 `{code,message}`；成功 envelope 逐路由冻结；SSE 两路由（v3/chat、threads streams）直接 `new Response(createSseStream(...))`；`runtime='nodejs'` / `force-dynamic` 留在各自 route.ts 原地。
 
 #### `POST /api/v3/chat`（主聊天接口）
 
@@ -159,7 +161,7 @@ interface ChatStreamBody {
 
 预设与该 provider 的用户 Key 任一缺失 → 400（`no_model_selected` / `no_api_key`）。运行期开关只影响本次 Agent 行为，不修改 baseOptions。
 
-#### 其他路由（全量 35 条见 README「主要 API」）
+#### 其他路由（全量 41 条见 README「主要 API」）
 
 - `/api/threads` POST/GET——创建线程；分页列表（?limit=&offset=&status=）
 - `/api/threads/[threadId]` GET/DELETE——获取详情（可附带 checkpoint）；删除
@@ -175,7 +177,7 @@ interface ChatStreamBody {
 后端按 **route（薄适配器）/ controller / service / repository** 四层分离，全部位于 `src/app/api/**/route.ts` 与 `src/backend/`：
 
 - 路由 `src/app/api/**/route.ts`——薄适配器：withApiHandler 横切选项（auth/body/query/guard/rateLimit/fallbackMessage/userIdHeader）+ controller 一行调用；Next 配置导出（`runtime`/`dynamic`/OPTIONS）只认 route 文件，必须留在此层
-- 控制器 `src/backend/controllers/`——HTTP 层逻辑（14 文件按域分组）；handler 是裸函数（`ApiRouteHandler<TBody, TQuery>` 标注，不感知 withApiHandler）；`createRateLimiter` 限流器、自定义 body 解析（multipart）、guard 纯函数（sandbox token）都在这层。**统一形态：裸函数导出，route.ts 消费走 namespace import（`import * as xxxController`）——不设聚合对象/类**
+- 控制器 `src/backend/controllers/`——HTTP 层逻辑（14 文件按域分组）；handler 是裸函数（`ApiRouteHandler<TBody, TQuery>` 标注，不感知 withApiHandler）；`createRateLimiter` 限流器（Redis 固定窗口 + 进程内降级，另含账号维度登录失败锁定 `recordLoginFailure` / `isLoginLocked`，锁定判定在密码校验前省 bcrypt 算力）、自定义 body 解析（multipart）、guard 纯函数（sandbox token）都在这层。**统一形态：裸函数导出，route.ts 消费走 namespace import（`import * as xxxController`）——不设聚合对象/类**
 - 服务 `src/backend/services/`——领域编排、业务规则、错误映射（AppError）；无 SQL。**统一形态：`export class XService` + 构造器注入 deps**（纯函数模块如 model-config / run-stream-guard 除外）
 - 仓库 `src/backend/repositories/`——单表 SQL（app 侧四张表 + email-token / oauth-account / user / user-model-key）。**统一形态：每域 types.ts 契约 + `PgXxxRepository implements` 类 + index 桶**
 - 组合根 `src/backend/wiring.ts`——ThreadService 进程单例 + harness 注入面注册
@@ -348,6 +350,8 @@ harness（packages/deerflow-harness）→ 永不 import @/*（零反向依赖，
 3. 取消后消息要收尾：新增 `cancelled` part（文案「用户已取消」/「已被新消息取代」）——前端在 abort 分支追加（否则模型还没吐 token 时 parts 为空，气泡永远转圈）；服务端在落库前用 `waitRunError(run_id)` 等 run 落到终态、判定取消后把同一条标记补进 parts 末尾（**落库 parts 才是刷新后的真相源**，前端加而服务端不加，刷新就丢）。服务端那条必须等：客户端先断流再（几乎同时）发 cancel，断流那一刻 run 还在 running。气泡转圈条件收紧为「parts 为空且 isChating 且是最后一条 assistant」
 
 **前端 SSE 处理链**：`useAgentEvent().run()` → `AgentEventProvider` 泵（`fetch() POST /api/v3/chat` → `create-agent-event-stream.ts` → `sse-frame-parser.ts` 逐行解析 data: JSON 帧 → `event-bus.ts` 广播；`RoutedClientAgentEvent = ClientAgentEvent & { sessionId, streamId }` 是前端本地分拣戳，不进线协议）→ `agent-event-sink.ts`（SessionStreamSink 通配订阅者：占位消息 / START id 迁移 / rAF 合帧 commit / 错误兜底）→ zustand 桶；组件侧 `useAgentEventListener()` 就近订阅 EventBus。`event-bus.ts` 基于官方 `events` 包（显式依赖 ^3.3.0，Next 14 客户端不能用 `node:` 前缀），补三样官方没有的语义：通配 `'*'` 订阅、handler 异常隔离（try/catch 包装）、`on` 返回 unsubscribe。
+
+**聊天窗口 UI 状态**：顶栏显示当前会话标题（autoTitle 经 END 事件的 `titleUpdate` 实时更新，直接读 `chatSessions` 列表拿最新值，新建会话回落「新对话」）；生成中最后一条 AI 气泡底部常驻「生成中」指示器（条件 `isChating && isLastAIMessage`，与气泡转圈条件独立——parts 非空也显示）；自动滚动遵循**用户手势优先**：`useAutoScrollToBottom` 的 `enabled` 只由「发送消息」置 true，任何用户滑动（wheel/touchmove 只可能由用户产生、无条件关闭跟随；scroll 靠程序化标志过滤）即关闭且不自动恢复——流式期间程序化滚动高频，不能用固定时间窗口判定用户滚动（标志会被不断重置，用户滚动会被永远当程序化滚动而失效），见 hook 注释。`AuthProvider`（`src/events/context/auth-provider.tsx`）挂载时拉 `/api/auth/me` 初始化登录态，并监听全局 401 事件清登录态硬导航登录页（只在已登录态响应，多请求并发 401 首个事件清态后其余 no-op；受保护页面由 middleware 兜底）。
 
 ### 11. 关键设计模式
 

@@ -11,11 +11,11 @@
 - 🧠 **长期记忆系统**：LLM 驱动的事实提取与记忆更新（`workContext` / `personalContext` / `topOfMind` / `recentMonths` 等多 section + facts 数组），按用户持久化到 PostgreSQL（`memory_state` jsonb + `memory_vectors` pgvector）；支持通过 API 或设置界面手动 CRUD 记忆事实。注入支持**全量注入 / 按需检索**两种模式（设置页可切换），检索为 RAG 管线：pgvector 向量召回 + BM25 词面召回双路 → RRF 融合 → 智谱 rerank 精排（智谱 `embedding-3` 出向量）；无 Key 时静默降级为纯 BM25 词面检索。
 - 🔌 **MCP 服务器扩展**：通过 `@langchain/mcp-adapters` 接入外部 MCP server（stdio / HTTP），动态加载工具并注入 Agent 工具集；支持在设置界面管理启停。
 - 🧩 **Skill 技能系统（三层渐进披露）**：对齐主流 Agent Skills 架构——`SKILL.md`（frontmatter + 精简正文）+ `references/`（只读知识）+ `scripts/`（可执行脚本）。系统提示只注入名称/描述/资源目录（L1），模型按需经内置 `skill` 工具读取正文与参考资料、或在沙箱中执行脚本（脚本内容不进上下文）；内置 7 种技能（深度研究、咨询分析、代码文档、学术论文评审、新闻稿生成、前端设计、Web 设计指南），opt-in 默认关闭以节省 token。
-- 🛰️ **进程内事件总线（StreamBridge）**：fire-and-forget 提交 Run，立即返回 `run_id`；ThreadChannel 是每 run 一个的 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放，断线重连可补帧。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
+- 🛰️ **事件总线（RunEventBus 双实现）**：fire-and-forget 提交 Run，立即返回 `run_id`；进程内实现直包 StreamBridge——每 run 一个 typed `EventEmitter`（10 种 `ClientAgentEvent` 即事件名）+ 缓冲晚订阅回放；配置 Redis 时事件镜像到 Redis Stream（24h TTL），跨进程回放 + 游标续读，断线重连可补帧，LB 无需粘性。SSE 协议白名单仅暴露 10 种 `ClientAgentEvent`。
 - 💾 **完整持久化**：PostgreSQL 存 `threads` / `runs` 元数据 + LangGraph checkpoint（父图对话状态；子 agent 状态不落盘，其产出经 `task` 工具结果写入父线程）；Redis 缓存；MinIO 存上传文件。
 - 🔎 **子 agent 继承父线程上下文**：subagent 每次执行前，从父线程 checkpoint **只读**取历史并剪枝为纯文本背景块（4k 字符预算、剥离 base64 与上传文件正文、跳过纯工具调用消息），作为 SystemMessage 前置——与「子图状态不落 checkpoint」的决定正交，读取失败静默降级不阻断 task。
 - 🧹 **删除即清干净**：删除对话会连带清掉聊天记录、MinIO 文件对象与 agent 侧全部数据（`threads_meta` / runs / LangGraph checkpoint / 沙箱容器）；若该对话此刻还在跑，先取消它的 run 再清理，不留孤儿数据。
-- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、Vision、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
+- 🧩 **可装配的中间件管线**：`createBaseAgent` 按 `RuntimeFeatures` 组装最多 14 层中间件（Qwen 工具调用恢复层 + 13 层位序中间件：ThreadData、Uploads、Sandbox、ToolCallIntegrity、Guardrail、ToolError、Summarization、Todo、Title、Memory、Vision、SubagentLimit、LoopDetection），支持 `@Next` / `@Prev` 装饰器自定义插入锚点；含 Tool Call 完整性子规则（悬空调用检测 + 未知调用检测）。装配的 enabled 开关与各中间件选项由根目录 `config.yaml` 控制（顺序不进 YAML；改文件下轮对话热生效，详见 `docs/middleware-yaml-config.md`）。澄清中断（Clarification）不是中间件，而是基于 LangGraph 原生 `interrupt` 的 `ask_clarification` 工具。
 - 📄 **思考时间线 + Artifact 浮窗**：聊天气泡内嵌折叠时间线（reasoning / tool_call / tool_result / task_progress），长报告自动收进右侧 Artifact 面板，避免淹没对话。
 - 📁 **多格式文件上传**：PDF（pdf-parse）、Word（mammoth）、图片等，自动入 MinIO 并参与上下文。
 - 🖼️ **图片多模态**：图片上传时先做 OCR（智谱 `layout_parsing` 版面解析，失败降级到视觉模型读图）写入解析文本；模型支持视觉时按 `image_url` data URL 直接把原图发给模型，历史轮次的图片自动压成文本占位（`VisionMiddleware`），模型还可用 `view_image` 工具按文件名重新查看本会话的图片。
@@ -43,7 +43,7 @@
 | 校验        | Zod                                                                                            |
 | 导出        | jsPDF + html2canvas                                                                            |
 | 存储        | PostgreSQL、Redis、MinIO                                                                       |
-| 鉴权        | JWT（jsonwebtoken）、bcryptjs                                                                  |
+| 鉴权        | JWT（jsonwebtoken）、bcryptjs、nodemailer（SMTP 邮件：邮箱验证 / 找回密码）                    |
 | 测试        | Vitest（`src/**/__tests__/**/*.test.ts`，收在各目录 `__tests__/` 子目录）                      |
 
 ## 📁 项目结构
@@ -54,21 +54,26 @@ src/
 │   ├── (app)/                          # 主应用路由组（需认证）
 │   │   ├── layout.tsx                  # 应用布局
 │   │   └── page.tsx                    # ⭐ 主页（聊天 + Artifact 浮窗）
-│   ├── (auth)/                         # 认证路由组（公开页面）
-│   ├── api/                            # API 路由
+│   ├── (auth)/                         # 认证路由组（登录 / 注册 / 重置密码 / 邮箱验证 / 初始化）
+│   ├── api/                            # API 路由（41 条，全部走 withApiHandler 统一管线）
 │   │   ├── v3/chat/                    # ⭐ 主聊天入口（SSE 流，threadId 走请求体 sessionId）
 │   │   ├── threads/                    # 线程 CRUD / runs 列表 / SSE 流回放
-│   │   ├── conversations/              # 对话会话管理（获取/历史/更新）
+│   │   ├── conversations/              # 对话会话管理（列表/历史/重命名/删除/取消 run）
 │   │   ├── files/                      # 文件上传 / 删除
-│   │   ├── memory/                     # 记忆数据查询 / facts CRUD
+│   │   ├── memory/                     # 记忆查询 / facts CRUD / 注入模式 / 检索预览
 │   │   ├── mcp/                        # MCP 服务器管理（CRUD + 启停）
 │   │   ├── skills/                     # 技能管理（列表 / 新建 / 启停）
 │   │   ├── tools/                      # 已绑定工具列表
-│   │   └── auth/                       # 用户认证（注册/登录/OAuth/密码修改/初始化）
+│   │   ├── model-keys/                 # 用户模型 Key（加密存取 + 模型选择）
+│   │   ├── prompt/                     # 提示词增强
+│   │   ├── sandbox/                    # 沙箱运行态快照（token 门控）
+│   │   ├── health/                     # 健康检查（免鉴权，LB 探针）
+│   │   └── auth/                       # 用户认证（注册/登录/OAuth/邮箱验证/密码重置/初始化）
 │   ├── globals.css                     # 全局样式 + 主题 token
 │   └── layout.tsx                      # 根布局（Sider + 主体）
 │
 ├── components/                         # UI 组件（kebab-case）
+│   ├── auth/                           # 登录 / 注册 / 忘记密码表单页
 │   ├── chat-window/                    # 聊天窗口、输入框、消息气泡、思考时间线
 │   ├── markdown/                       # CustomMarkdown + 复制按钮
 │   ├── message-tool-bar/               # 复制 / 编辑 / 下载
@@ -84,79 +89,30 @@ src/
 │   │   └── mcp-servers-section.tsx     # MCP 服务器管理（工具页内嵌）
 │   └── sider/                          # 左侧会话侧边栏
 │
-├── deerflow-harness/                   # ⭐ 多智能体编排核心
-│   ├── client.ts                       # DeerFlowClient：Agent 缓存 + LangGraph 流式调用
-│   ├── agents/                         # Agent 工厂、中间件、记忆、特性装配
-│   │   ├── factory.ts                  # createBaseAgent + assembleFromFeatures
-│   │   ├── features.ts                 # RuntimeFeatures + Next/Prev 装饰器
-│   │   ├── thread-state.ts             # ThreadStateAnnotation 定义
-│   │   ├── lead-agent/prompt.ts        # lead agent 系统提示词
-│   │   ├── middlewares/                # 位序中间件实现（全部平铺，装配序见 index.ts）
-│   │   └── memory/                     # MemoryUpdater（LLM 驱动）+ PG 存储 + embeddings + retrieval（双路召回 / RRF / rerank）
-│   ├── extensions/                     # 统一扩展域：配置存储 + MCP 客户端 + Skill 加载器
-│   │   ├── mcp/                        # MCP 客户端（MultiServerMCPClient 封装）
-│   │   └── skills/                     # Skill 加载器（frontmatter 解析 + prompt 注入）
-│   ├── subagents/                      # SubagentExecutor、注册表、schema、general-purpose 内置、父历史只读注入
-│   ├── vision/                         # 图片多模态
-│   │   ├── image-fetcher.ts            # ThreadImageRef + buildHumanMessageContent（image_url data URL）
-│   │   ├── vision-middleware.ts        # VisionMiddleware：历史图片压成文本占位（注入 view_image）
-│   │   └── content-blocks.ts           # 多模态 ToolMessage → 纯文本（SSE 脱敏入口）
-│   ├── runtime/                        # ThreadService、StreamBridge、SSE、Checkpointer
-│   │   ├── service.ts                  # ThreadService（fire-and-forget 提交 + 状态收敛）
-│   │   ├── run-concurrency-gate.ts     # run 级并发闸门（双层背压之一，FIFO 信号量 + 跨进程占位）
-│   │   ├── usage-accounting.ts         # LLM 用量记账（模型工厂挂接，ALS 累加器 + pricing）
-│   │   ├── stream-bridge/              # 进程内事件总线 + ThreadChannel（typed EventEmitter + 缓冲回放）
-│   │   ├── sse/                        # ClientAgentEvent 白名单 + 内→外过滤
-│   │   ├── checkpointer/               # PostgreSQL checkpoint 工厂
-│   │   └── context.ts                  # AsyncLocalStorage 上下文传播
-│   ├── persistence/                    # ThreadMetaRepository + RunRepository（PostgreSQL）
-│   ├── tools/builtins/                 # 内置工具（task、search_web、clarification、view_image）
-│   ├── models/                         # createChatModel 模型工厂 + provider 推断 + LLM 用量记账挂接（MODEL_PRESETS 在 src/config/models.ts）
-│   ├── auth/                           # 认证模块
-│   ├── config/                         # 应用配置
-│   ├── sandbox/                        # 可插拔安全沙箱（路径校验、文件操作锁、异常隔离）
-│   │   ├── provider-factory.ts         # ⭐ 后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker/remote）
-│   │   ├── sandbox-provider.ts         # SandboxProvider 基类（acquire/release/retain/isSecureIsolation）
-│   │   ├── sandbox-monitor.ts          # 沙箱运行态快照（供 stats API）
-│   │   ├── tools.ts                    # 沙箱内置工具集（读/写/搜索/list/bash 等）
-│   │   ├── search.ts                   # 沙箱内搜索
-│   │   ├── security.ts                 # 安全策略
-│   │   ├── file-operation-lock.ts      # 并发文件操作锁
-│   │   ├── path-utils.ts               # 路径安全处理
-│   │   ├── exceptions.ts               # 异常定义
-│   │   ├── local/                      # 本地文件系统沙箱实现
-│   │   ├── docker/                     # ⭐ Docker 沙箱后端
-│   │   │   ├── docker-config.ts        # env-only 配置（镜像/限额/网络/并发/锁 TTL）
-│   │   │   ├── docker-cli.ts           # execFile 封装 docker CLI（禁 shell 拼接）
-│   │   │   ├── docker-sandbox.ts       # DockerSandbox（仅重写 executeCommand 走 docker exec）
-│   │   │   ├── docker-sandbox-provider.ts # 每 thread 长驻容器 + 引用计数 + 空闲回收
-│   │   │   └── docker-coordinator.ts   # 跨进程协调（Redis 原子计数/登记/分布式锁，可降级进程内）
-│   │   └── remote/                     # ⭐ Remote SSH 沙箱后端
-│   │       ├── remote-config.ts        # env-only 配置（host/私钥/并发/超时/写上限）
-│   │       ├── ssh-connection-manager.ts # per-thread SSH 连接池（复用/回收/并发闸门）
-│   │       ├── remote-sandbox.ts       # 远程执行与文件 IO（全部经 SSH 往返）
-│   │       └── remote-sandbox-provider.ts # 远程 Provider（isSecureIsolation=true）
-│   └── types/                          # AgentEvent 等共享类型
+├── backend/                            # ⭐ 服务端四层（route → controller → service → repository）
+│   ├── wiring.ts                       # 组合根：ThreadService 进程单例 + harness 注入面注册
+│   ├── controllers/                    # HTTP 层逻辑（14 文件按域分组）
+│   ├── services/                       # 领域编排、业务规则（无 SQL）
+│   ├── repositories/                   # 单表 SQL（chat-session/chat-message/file-metadata/file-content + email-token/oauth-account/user/user-model-key）
+│   ├── harness-adapters/               # harness 注入接口的 app 实现（title-store / uploaded-files）
+│   ├── http/                           # withApiHandler 统一管线 / 错误映射 / 会话 cookie / 限流
+│   ├── validation/                     # 全部路由 body/query 的 zod schema（v4）
+│   ├── auth/                           # JWT 双 token / 密码 / OAuth provider / 体验账号
+│   ├── config/                         # config.yaml 读取（mtime 缓存）+ extensions.middlewares 加载
+│   └── lib/                            # db(PG) / storage(MinIO) / crypto(模型 Key 加密) / files(解析+OCR) / zhipu-rerank / mailer / oauth
 │
 ├── events/                             # 前端事件域（SSE 解析、EventBus、Context）
 │   ├── client/                         # sse-frame-parser、event-bus、create-agent-event-stream
-│   ├── context/                        # AgentEventProvider（每 session 泵）+ hooks
+│   ├── context/                        # AgentEventProvider（每 session 泵）+ AuthProvider（全局 401 兜底）+ hooks
 │   └── protocol/                       # ClientAgentEvent re-export（前后端共享协议）
 │
 ├── store/                              # Zustand 切片
 │   ├── index.ts                        # 统一导出
 │   ├── chat-session-store.ts           # 聊天会话 / 消息 / 流式状态（按 sessionId 分桶 + 运行态投影）
 │   ├── file-upload-store.ts            # 文件上传
-│   ├── modelStore.ts                   # 模型选择
+│   ├── model-store.ts                  # 模型选择
 │   ├── memory-mode-store.ts            # 记忆注入模式（全量注入 / 按需检索）
 │   └── auth-store.ts                   # 用户认证状态
-│
-├── lib/                                # 基础设施
-│   ├── db/                             # PostgreSQL 连接桩
-│   ├── cache/                          # Redis 客户端
-│   ├── storage/                        # MinIO 客户端
-│   ├── crypto/                         # 模型 API Key 加密（model-key-crypto）
-│   └── file-parser.ts                  # PDF / Word / 图片 OCR 解析
 │
 ├── hooks/                              # 自定义 React hooks
 │   ├── use-auto-scroll-to-bottom.ts    # 自动滚动到底部
@@ -169,20 +125,77 @@ src/
 │
 ├── utils/
 │   ├── auth/                           # 认证相关工具
-│   ├── chat/                           # SessionStreamSink（事件→store）、parts collector / reducer、请求体组装、取消请求
+│   ├── chat/                           # SessionStreamSink（事件→store）、parts collector / reducer、请求体组装、取消请求、提示词增强客户端
 │   ├── common/                         # message-content 等通用工具
 │   ├── files/                          # 文件相关工具
-│   ├── prompt.ts                       # 提示词增强（/api/prompt/enhance 客户端）
 │   └── request/                        # API 请求封装
 ├── types/                              # 全局类型
-├── config/models.ts                    # 模型配置
+├── config/models.ts                    # 模型配置（MODEL_PRESETS 预设）
 ├── middleware.ts                       # Next.js 中间件（鉴权守卫等）
 └── global.d.ts                         # 全局类型声明
 
+config.yaml / config.example.yaml       # 中间件装配配置（enabled 开关 + 各中间件选项）
 docker-compose.yaml                     # PostgreSQL + Redis + MinIO 一键启动（开发）
 extensions_config.example.json          # MCP/Skills 扩展配置模板
+pnpm-workspace.yaml                     # workspace 配置（packages/*；allowBuilds 白名单）
 CLAUDE.md                               # 架构与协作指引（详细版）
 project.md                              # AI 协作代码规范
+
+packages/deerflow-harness/              # ⭐ 多智能体编排核心（@deerflow/harness，pnpm workspace 包，零 @/ 依赖）
+├── index.ts                            # barrel（无 build 产物，tsconfig paths 直编译包源码）
+├── client.ts                           # DeerFlowClient：Agent 缓存 + LangGraph 流式调用
+├── agents/                             # Agent 工厂、中间件、记忆、特性装配
+│   ├── factory.ts                      # createBaseAgent + assembleFromFeatures（ORDERED_MIDDLEWARES 位序）
+│   ├── features.ts                     # RuntimeFeatures + Next/Prev 装饰器
+│   ├── thread-state.ts                 # ThreadStateAnnotation 定义
+│   ├── lead-agent/                     # lead agent 系统提示词
+│   ├── middlewares/                    # 位序中间件实现（装配序见 index.ts）
+│   └── memory/                         # MemoryUpdater（LLM 驱动）+ PG 存储 + embeddings + retrieval（双路召回 / RRF / rerank）
+├── extensions/                         # 统一扩展域：配置存储 + MCP 客户端 + Skill 加载器
+│   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
+│   └── skills/                         # Skill 加载器（frontmatter 解析 + prompt 注入）
+├── subagents/                          # SubagentExecutor、注册表、schema、general-purpose 内置、父历史只读注入
+├── vision/                             # 图片多模态
+│   ├── image-fetcher.ts                # ThreadImageRef + buildHumanMessageContent（image_url data URL）
+│   ├── vision-middleware.ts            # VisionMiddleware：历史图片压成文本占位（注入 view_image）
+│   └── content-blocks.ts               # 多模态 ToolMessage → 纯文本（SSE 脱敏入口）
+├── runtime/                            # ThreadService、事件总线、SSE、Checkpointer、生命周期
+│   ├── service.ts                      # ThreadService（fire-and-forget 提交 + 状态收敛）
+│   ├── coordination/                   # RunEventBus 契约 + 双实现（进程内 / Redis Stream 镜像）+ RedisClientFactory + run 登记
+│   ├── stream-bridge/                  # StreamBridge + ThreadChannel（typed EventEmitter + 缓冲回放）
+│   ├── lifecycle/                      # run 级并发闸门 / 心跳与 owner 存活 / 僵尸回收 / 优雅停机
+│   ├── usage/                          # LLM 用量记账（模型工厂挂接，ALS 累加器 + pricing）
+│   ├── sse/                            # ClientAgentEvent 白名单 + 内→外过滤 + createSseStream
+│   ├── checkpointer/                   # PostgreSQL checkpoint 工厂
+│   └── context.ts                      # AsyncLocalStorage 上下文传播
+├── persistence/                        # ThreadMetaRepository + RunRepository（PostgreSQL）
+├── tools/builtins/                     # 内置工具（task、search_web、clarification、view_image、skill）
+├── models/                             # createChatModel 模型工厂 + provider 推断（MODEL_PRESETS 在 src/config/models.ts）
+├── config/                             # YAML 中间件装配配置解析（宿主侧读取在 src/backend/config）
+├── sandbox/                            # 可插拔安全沙箱（路径校验、文件操作锁、异常隔离）
+│   ├── provider-factory.ts             # ⭐ 后端工厂（按 DEERFLOW_SANDBOX_BACKEND 选 local/docker/remote）
+│   ├── sandbox-provider.ts             # SandboxProvider 基类（acquire/release/retain/isSecureIsolation）
+│   ├── sandbox-monitor.ts              # 沙箱运行态快照（供 stats API）
+│   ├── tools.ts                        # 沙箱内置工具集（读/写/搜索/list/bash 等）
+│   ├── search.ts                       # 沙箱内搜索
+│   ├── security.ts                     # 安全策略
+│   ├── file-operation-lock.ts          # 并发文件操作锁
+│   ├── path-utils.ts                   # 路径安全处理
+│   ├── exceptions.ts                   # 异常定义
+│   ├── local/                          # 本地文件系统沙箱实现（宿主直连）
+│   ├── docker/                         # ⭐ Docker 沙箱后端
+│   │   ├── docker-config.ts            # env-only 配置（镜像/限额/网络/并发/锁 TTL）
+│   │   ├── docker-cli.ts               # execFile 封装 docker CLI（禁 shell 拼接）
+│   │   ├── docker-sandbox.ts           # DockerSandbox（仅重写 executeCommand 走 docker exec）
+│   │   ├── docker-sandbox-provider.ts  # 每 thread 长驻容器 + 引用计数 + 空闲回收
+│   │   └── docker-coordinator.ts       # 跨进程协调（Redis 原子计数/登记/分布式锁，可降级进程内）
+│   └── remote/                         # ⭐ Remote SSH 沙箱后端
+│       ├── remote-config.ts            # env-only 配置（host/私钥/并发/超时/写上限）
+│       ├── ssh-connection-manager.ts   # per-thread SSH 连接池（复用/回收/并发闸门）
+│       ├── remote-sandbox.ts           # 远程执行与文件 IO（全部经 SSH 往返）
+│       └── remote-sandbox-provider.ts  # 远程 Provider（isSecureIsolation=true）
+├── types/                              # AgentEvent 等共享类型
+└── utils/                              # 通用工具（common.ts）
 
 # ── CI/CD 与生产部署 ──
 .github/workflows/deploy.yml            # 流水线：质量门禁 + 自动部署（仅 push main）
@@ -193,6 +206,8 @@ docker-compose.prod.yaml                # 生产编排（app + PG/Redis/MinIO，
 scripts/deploy-remote.sh                # 服务器端部署（build→起服务→健康检查→失败回滚）
 scripts/health-check.sh                 # HTTP 探活
 scripts/rollback.sh                     # 回滚到上一版本镜像
+scripts/migrate-memory-to-pg.mjs        # 旧文件记忆 → PG 一次性迁移脚本
+nginx/deepresearch.conf                 # 反向代理示例配置（生产参考）
 
 benchmarks/                             # 基准测试与评估框架
 ├── config.ts                           # 测试配置（模型 / 评分 / 并发，读 .env）
@@ -214,6 +229,10 @@ benchmarks/                             # 基准测试与评估框架
 docs/                                   # 设计文档
 ├── deerflow-alignment-plan.md          # DeerFlow 架构对齐计划
 ├── sandbox-implementation.md           # 沙箱实现设计文档
+├── middleware-yaml-config.md           # config.yaml 中间件装配约定
+├── backend-structure-analysis.md       # 后端四层结构分析与统一形态
+├── user-system-plan.md                 # 用户系统实施计划（JWT / 邮箱 / OAuth）
+├── 记忆检索-review.md                  # 记忆检索方案评审
 ├── deployment.md                       # 部署运维文档（系统设计视角）
 ├── deploy-runbook.md                   # 部署操作手册（GitHub 端 + 服务器端步骤）
 └── cicd-notes.md                       # 技术沉淀（设计缘由 + 踩坑实录 + 排查方法论）
@@ -286,6 +305,11 @@ ZHIPU_API_KEY=your-zhipu-api-key
 DEERFLOW_EMBEDDING_MODEL=embedding-3
 DEERFLOW_EMBEDDING_DIMENSIONS=1024       # 256..2048；变更后存量向量视为失效并自动重嵌
 
+# === 记忆检索精排（缺省开启；无 Key / API 失败自动回落 RRF 序）===
+# DEERFLOW_RERANK_ENABLED='0'            # 显式关闭精排
+# DEERFLOW_RERANK_API_KEY=
+# DEERFLOW_RERANK_MODEL=rerank
+
 # === 视觉多模态 ===
 DEERFLOW_VISION_MAX_IMAGE_MB=5           # 单图字节上限；前端 MAX_IMAGE_SIZE_MB 必须 ≤ 它
 
@@ -314,6 +338,9 @@ MODEL_KEY_ENC_SECRET=                    # 生成：openssl rand -base64 32；�
 # === 体验账号一键登录（可选；不配则 /api/auth/demo-login 返回 404）===
 # AUTH_DEMO_EMAIL=
 # AUTH_DEMO_PASSWORD=
+
+# 邮箱验证 / 忘记密码（SMTP_*）、OAuth 第三方登录（OAUTH_*）、限流（DEERFLOW_RATE_LIMIT_ENABLED）
+# 等完整变量见 .env.example
 ```
 
 > `.env` 中的账密、端口需与 `docker-compose.yaml` 保持一致。模型预设（`MODEL_PRESETS`，默认 `deepseek-v4-flash`）位于 `src/config/models.ts`，可在设置页选择或通过聊天请求体 `configuration.model.value` 切换。完整变量清单（模型 Key 加密、Docker / Remote 沙箱、护栏等）见 [`.env.example`](./.env.example)。
@@ -366,9 +393,10 @@ push 到 `main` 即触发 GitHub Actions 全自动部署（目标：腾讯云 Ub
 单进程撑不住时（run 级并发闸门 / LLM 调用量触顶），可横向扩到多实例。控制面
 （取消 / 抢占 / 删除）与事件面（SSE 回放 / 重连）均已跨进程化，前提是 `REDIS_URL`：
 
-- **取消 / 抢占 / 删除跨进程可达**：run 经 Redis 登记 owner（心跳续租），取消请求广播到
-  任一进程，owner 进程执行 abort；Redis 不可用时自动降级为进程内语义（`/api/health`
-  的 `distributed` 字段可见）。
+- **取消 / 抢占 / 删除跨进程可达**：run 经 Redis 登记 owner（心跳续租，owner 路由键默认
+  `hostname:pid`，可经 `DEERFLOW_INSTANCE_ID` 固定），取消请求广播到任一进程，owner
+  进程执行 abort；Redis 不可用时自动降级为进程内语义（`/api/health` 的 `distributed`
+  字段可见）。
 - **SSE 事件经 Redis Stream 镜像**（24h TTL，回放 + 重连续读）：**负载均衡不需要粘性**，
   任意实例都能接住任意线程的流（sessionId 在请求 JSON body 里，`hash $arg_sessionId`
   这类 nginx 片段也不适用）。
@@ -421,6 +449,10 @@ PM2 cluster 亦可，但 drain 依赖信号送达每个 worker。完整设计见
 | `/api/auth/logout`                            | POST          | 登出                                                                              |
 | `/api/auth/me`                                | GET           | 当前用户信息                                                                      |
 | `/api/auth/change-password`                   | POST          | 修改密码                                                                          |
+| `/api/auth/forgot-password`                   | POST          | 发送重置密码邮件（SMTP；未配置则降级跳过）                                        |
+| `/api/auth/reset-password`                    | POST          | 凭邮件 token 重置密码                                                             |
+| `/api/auth/verify-email`                      | GET           | 邮箱验证链接落地页                                                                |
+| `/api/auth/resend-verification`               | POST          | 重发邮箱验证邮件                                                                  |
 | `/api/auth/initialize`                        | POST          | 初始化管理员账户                                                                  |
 | `/api/auth/setup-status`                      | GET           | 查询初始化状态                                                                    |
 | `/api/auth/demo-login`                        | POST          | 体验账号一键登录（凭据取自服务端环境变量，未配置则 404）                          |
@@ -464,7 +496,7 @@ interface ChatStreamBody {
 前端（React/Next.js + Zustand + EventBus + 设置管理）
         │ HTTP + SSE
         ▼
-API Routes（route.ts 薄适配器 → Controllers（HTTP 层逻辑））
+API Routes（route.ts 薄适配器 → Controllers → Services → Repositories；wiring 组合根装配 harness）
         │
         ▼
 ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
@@ -479,8 +511,8 @@ ThreadService（fire-and-forget 提交 Run，立即返回 run_id）
    │ └── Stores（threads / runs）
         │
         ▼
-StreamBridge（进程内 typed EventEmitter 总线）
-        └── ThreadChannel（EventEmitter + buffer 晚订阅回放）→ SSE → 前端
+RunEventBus（进程内 StreamBridge / Redis Stream 镜像 + 游标续读）
+        └── ThreadChannel（typed EventEmitter + buffer 晚订阅回放）→ SSE → 前端
 ```
 
 详细设计见 [`CLAUDE.md`](./CLAUDE.md)，包含：
@@ -512,7 +544,7 @@ StreamBridge（进程内 typed EventEmitter 总线）
 - **需要联网** → 自动调用 `search_web`
 - **复杂研究** → 通过 `task("general-purpose", ...)` 启动一个或多个 subagent 并行检索，最终汇总报告
 
-研究产出的完整报告自动收进右侧 **Artifact 浮窗面板**，气泡内仅保留入口卡片。
+研究产出的完整报告自动收进右侧 **Artifact 浮窗面板**，气泡内仅保留入口卡片。聊天窗口顶栏显示当前会话标题（autoTitle 生成并实时更新）；生成中最后一条 AI 气泡底部常驻「生成中」指示器。
 
 ### 停止生成
 
@@ -529,6 +561,8 @@ StreamBridge（进程内 typed EventEmitter 总线）
 ### 用户认证
 
 系统内置用户注册/登录功能，使用 JWT 进行鉴权。首次部署时可通过 `/api/auth/initialize` 初始化管理员账户。支持 OAuth 第三方登录（按需配置 provider）。
+
+注册支持邮箱验证、忘记密码重置（需 SMTP 配置，未配置自动降级跳过）。登录 / 注册 / 找回密码等入口带限流保护（Redis 固定窗口，未配 Redis 降级进程内；账号连续登录失败会临时锁定）。
 
 模型 API Key 按用户隔离：每个用户在「设置-模型管理」选择模型并填写该 provider 的 Key，经 `MODEL_KEY_ENC_SECRET` 加密后落库；主聊天链路按「当前用户」解析模型配置，服务端环境变量里的模型 Key 只供标题生成 / 提示词增强 / 记忆更新等副链路使用。
 
@@ -683,13 +717,16 @@ pnpm bench:longmem
 
 ## ⚠️ 已知限制
 
-1. StreamBridge 与 **run 取消**均为**进程内**语义（取消句柄挂在 ThreadService 闭包里）：多实例水平扩展时，SSE 回放与停止请求都必须落到跑该 run 的那个进程，需与 StreamBridge 一起换成 Redis 协调
-2. 单次请求只能使用一个模型
-3. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配、防递归、护栏规则、记忆检索与向量、run 取消语义、checkpoint 行为约束、remote 沙箱等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
-4. 记忆检索为 pgvector **精确扫描**（B-tree 按 scope 过滤 + 精确 `<=>` 排序，无 ANN 索引）：单 scope 向量数超 ~5k 再评估 HNSW；facts 上限 100 不变
-5. remote 沙箱并发上限按进程独立计（多进程部署时实际连接数 = 上限 × 进程数）
-6. `view_image` 只支持**本会话上传的图片**（按文件名查找）；沙箱产物图片（如 matplotlib 输出）暂不支持
-7. 上传的文件对象在「删除对话」时才清理；未发送就放弃的上传（没有关联到任何消息）会在 MinIO 里留下未引用的对象
+1. 跨进程全局 run 上限与进程内同源：Redis `runs:count` 以 `DEERFLOW_MAX_CONCURRENT_RUNS` 为全局闸门，多进程总并发 ≈ 该值（不是 × 实例数），扩容需同步调大；僵尸回收死亡窗口为 3 个心跳（45s），kill -9 后线程在该窗口内仍显示 running（下轮对账修正）
+2. 单个 ThreadChannel 事件 buffer 默认上限 2000 条（`STREAM_BRIDGE_BUFFER_MAX` 可调），超限丢弃最旧非关键帧（`start`/`error`/`end`/`human_interrupt` 关键帧永不丢弃）
+3. 单次请求只能使用一个模型（不支持混合 Qwen + OpenAI）
+4. 单元测试覆盖仍在建设中（已引入 vitest，当前覆盖中间件装配、防递归、护栏规则、记忆检索与向量、run 取消语义、checkpoint 行为约束、remote 沙箱等核心纯逻辑；`benchmarks/` 提供研究 QA 与长期记忆两套离线评估）
+5. 记忆检索为 pgvector **精确扫描**（B-tree 按 scope 过滤 + 精确 `<=>` 排序，无 ANN 索引）：单 scope 向量数超 ~5k 再评估 HNSW；facts 上限 100 不变
+6. remote 沙箱并发上限按进程独立计（多进程部署时实际连接数 = 上限 × 进程数）
+7. `view_image` 只支持**本会话上传的图片**（按文件名查找）；沙箱产物图片（如 matplotlib 输出）暂不支持
+8. 智谱 `glm-5.3-flash` 是**推理模型**：reasoning 计入 completion_tokens，`max_tokens` 过小（实测 32）会让 content 为空。副链路（标题生成）若被指定为该模型需注意；主聊天链路不设 maxTokens，不受影响
+9. 改 `embeddingDimensions`（256..2048）是一次性全量代价：启动时比对列维度不一致会清空全部 scope 向量再 `ALTER`，之后靠检索时异步回填补向量
+10. 上传的文件对象在「删除对话」时才清理；未发送就放弃的上传（没有关联到任何消息）会在 MinIO 里留下未引用的对象
 
 ## 📝 License
 
