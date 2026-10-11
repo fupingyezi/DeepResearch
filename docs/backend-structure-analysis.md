@@ -2,6 +2,7 @@
 
 > 分支 `analysis/controller-service-structure`，2026-10-11。
 > 起因：controller 为什么「写一堆函数最后又单例导出」、service 为什么「一会统一类一会工厂 return 里放一堆函数」。本文记录形态现状、成因（git 溯源）与统一建议。
+> **状态：P0/P1 已实施**（见 §8 实施记录），P2 为可选项。
 
 ## 1. 结论摘要
 
@@ -87,3 +88,20 @@ handler 按设计是无状态的：`withApiHandler` 把 user/body/params 全喂�
 - 服务侧：测试文件 import 的是 `createXService` / `createOAuthService`（`services/__tests__/`），工厂签名保持则测试零改动；类转换后 private 助手变成私有方法，对外行为不变。
 - 路由侧：route.ts 从具名 import 改 namespace import，`xxxController.post` 引用点不变，仅 import 行；`xxxRateLimits` 是独立导出不受影响。
 - 建议与四层重构同款节奏：分阶段提交（services → controllers → repositories/lib），每阶段 `pnpm lint && pnpm typecheck && pnpm test` 门禁。
+
+## 8. 实施记录
+
+| 阶段 | commit    | 内容                                                                                                                                                               |
+| ---- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P0a  | `75bee63` | auth/oauth service 从 interface + 对象字面量工厂改为 class（`AuthService`/`OAuthService` 接口折叠成 class 类型；工厂签名与消费者不变）                             |
+| P0b  | `4e9d1f2` | 14 个 controller 删除尾部聚合对象导出；41 个 route.ts 改 `import * as xxxController`，附加导出（`xxxRateLimits` / `parseUploadBody` / `isAuthorized`）保留具名导入 |
+| P1a  | `5fcf4e8` | user-model-key 仓库改类：`types.ts` 契约 + `PgUserModelKeyRepository` + index 桶；model-key-service deps 改仓库接口、model-config-service 经模块级实例调用         |
+| P1b  | `328d928` | `loginFailures` 对象字面量拆为 `recordLoginFailure` / `clearLoginFailures` / `isLoginLocked` 命名函数                                                              |
+
+P2（`lib/oauth` adapters 改类、工厂参数写法统一）未实施，收益低，维持现状。
+
+实施后统一形态（已固化进 CLAUDE.md「后端分层规范」）：
+
+- controllers：裸 handler 函数导出，route.ts 经 namespace import 消费；
+- services：`export class XService` + `createXService(deps?)` + 模块级懒单例 `getXService()`；
+- repositories：每域 types.ts 契约 + `PgXxxRepository implements` 类 + index 桶。
