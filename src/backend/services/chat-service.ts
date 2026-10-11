@@ -20,8 +20,8 @@ import {
   type ModelConfig,
   type SseStreamEvent,
   type ThreadImageRef,
-  type ThreadService,
 } from '@deerflow-harness';
+import type { ThreadService } from '@/backend/services/thread-service';
 import type { ChatMessageType, MessagePart } from '@/types';
 import { AssistantPartsCollector } from '@/utils/chat/assistant-parts-collector';
 import { getThreadService } from '@/backend/wiring';

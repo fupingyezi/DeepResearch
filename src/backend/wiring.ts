@@ -8,21 +8,13 @@
 
 import {
   DeerFlowClient,
-  InMemoryRunEventBus,
-  InMemoryRunRegistry,
-  PgRunRepository,
-  RedisEventBus,
-  RedisRunRegistry,
-  PgThreadMetaRepository,
   buildThreadConfig,
   createChatModel,
-  createThreadService,
   makeCheckpointer,
   EMBEDDING_BATCH_LIMIT,
   getMemoryConfig,
   loadMemoryConfigFromDict,
   maxImageBytesFromEnv,
-  PgMemoryStorage,
   setMemoryConfig,
   setMemoryEmbeddingsFactory,
   setMemoryModelFactory,
@@ -36,7 +28,6 @@ import {
   setTitleStoreProvider,
   setUploadedFilesProvider,
   type SqlExecutor,
-  type ThreadService,
   type ModelConfig,
   type MiddlewareConfigProvider,
 } from '@deerflow-harness';
@@ -53,6 +44,14 @@ import {
 import { loadConfiguredExtraMiddlewares } from '@/backend/config/middleware-loader';
 import { titleStoreProvider } from '@/backend/harness-adapters/title-store';
 import { uploadedFilesProvider } from '@/backend/harness-adapters/uploaded-files';
+import { PgMemoryStorage } from '@/backend/harness-adapters/pg-memory-storage';
+import { PgThreadMetaRepository } from '@/backend/repositories/thread-meta';
+import { PgRunRepository } from '@/backend/repositories/runs';
+import { InMemoryRunRegistry } from '@/backend/runtime/coordination/run-registry/in-memory';
+import { RedisRunRegistry } from '@/backend/runtime/coordination/run-registry/redis';
+import { InMemoryRunEventBus } from '@/backend/runtime/coordination/event-bus/in-memory';
+import { RedisEventBus } from '@/backend/runtime/coordination/event-bus/redis';
+import { createThreadService, type ThreadService } from '@/backend/services/thread-service';
 import {
   buildModelConfigFromPreset,
   resolveModelConfig,

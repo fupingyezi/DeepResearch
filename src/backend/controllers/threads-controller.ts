@@ -15,8 +15,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { ThreadServiceError, createSseStream } from '@deerflow-harness';
-import type { RunStatus, ThreadStatus } from '@deerflow-harness';
+import { createSseStream } from '@deerflow-harness';
+import type { RunStatus } from '@/backend/repositories/runs';
+import type { ThreadStatus } from '@/backend/repositories/thread-meta';
+import { ThreadServiceError } from '@/backend/services/thread-service';
 import type { ApiRouteHandler } from '@/backend/http';
 import { jsonError } from '@/backend/http';
 import { guardedStream } from '@/backend/services/run-stream-guard';

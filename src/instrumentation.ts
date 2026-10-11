@@ -14,7 +14,8 @@
  * threadService 在启动期初始化（建池 / 建 checkpointer）：停机与对账在无流量时同样可用。
  */
 
-import { getMemoryQueue, type ThreadService } from '@deerflow-harness';
+import { getMemoryQueue } from '@deerflow-harness';
+import type { ThreadService } from '@/backend/services/thread-service';
 import { initialDB } from '@/backend/lib/db';
 import { getThreadService } from '@/backend/wiring';
 

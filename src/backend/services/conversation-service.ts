@@ -8,7 +8,8 @@
  */
 
 import type { ChatMessageType, MessagePart, fileMetadataType } from '@/types';
-import { ThreadServiceError, type RunRepository, type ThreadService } from '@deerflow-harness';
+import { ThreadServiceError, type ThreadService } from '@/backend/services/thread-service';
+import type { RunRepository } from '@/backend/repositories/runs';
 import { deleteFile } from '@/backend/lib/storage';
 import { AppError } from '@/backend/http';
 import { getRunStore, getThreadService } from '@/backend/wiring';

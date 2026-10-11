@@ -7,7 +7,7 @@ vi.mock('@/backend/lib/db', () => ({
 
 import { getClient } from '@/backend/lib/db';
 import type { MessagePart } from '@/types';
-import { ThreadServiceError } from '@deerflow-harness';
+import { ThreadServiceError } from '@/backend/services/thread-service';
 import type { ChatMessageRepository } from '@/backend/repositories/chat-message';
 import type { ChatSessionRecord, ChatSessionRepository } from '@/backend/repositories/chat-session';
 import type { FileContentRepository } from '@/backend/repositories/file-content';

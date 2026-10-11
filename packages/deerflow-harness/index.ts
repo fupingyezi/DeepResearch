@@ -141,7 +141,6 @@ export {
   type MemoryStorage,
   type MemorySqlExecutor,
   type VectorSearchResult,
-  PgMemoryStorage,
   InMemoryMemoryStorage,
   getMemoryStorage,
   resetMemoryStorage,
@@ -258,7 +257,7 @@ export {
   type StampedClientAgentEvent,
 } from './runtime/sse';
 
-// Thread 系统（runtime + persistence）
+// runtime（宿主装配面：checkpoint / ALS 上下文 / Redis 客户端注入）
 
 // runtime/checkpointer
 export {
@@ -274,15 +273,7 @@ export {
 // runtime/context
 export { runWithContext, getContext, type RuntimeContext } from './runtime/context';
 
-// runtime/stream-bridge
-export { StreamBridge, ThreadChannel } from './runtime/stream-bridge';
-
-// runtime/coordination/contracts + 双实现（进程内 / Redis 跨进程）+ Redis 注入面
-export type { RunRegistry, RunEventBus, RunOwnerInfo } from './runtime/coordination/contracts';
-export { InMemoryRunRegistry } from './runtime/coordination/run-registry/in-memory';
-export { RedisRunRegistry } from './runtime/coordination/run-registry/redis';
-export { InMemoryRunEventBus } from './runtime/coordination/event-bus/in-memory';
-export { RedisEventBus } from './runtime/coordination/event-bus/redis';
+// runtime/redis-client-factory（宿主注入 Redis 客户端；沙箱协调与 app 侧跨进程实现共用）
 export {
   setRedisClientFactory,
   getRedisClientFactory,
@@ -290,53 +281,6 @@ export {
   type RedisClientOptions,
   type RedisClient,
 } from './runtime/redis-client-factory';
-
-// runtime/locks（互斥锁：进程内 / Redis 双实现）
-export {
-  getDistLock,
-  resetDistLock,
-  InMemoryDistLock,
-  RedisDistLock,
-  type DistLock,
-  type DistLockHandle,
-} from './runtime/locks/dist-lock';
-
-// runtime/service
-export {
-  createThreadService,
-  ThreadServiceError,
-  HEARTBEAT_INTERVAL_MS,
-  type ThreadService,
-  type ThreadServiceDeps,
-  type CreateThreadInput,
-  type ListThreadsOptions,
-  type GetThreadInput,
-  type DeleteThreadInput,
-  type CancelRunInput,
-  type SubmitRunInput,
-  type SubscribeInput,
-  type GetCheckpointInput,
-} from './runtime/service';
-
-// persistence/thread-meta
-export {
-  PgThreadMetaRepository,
-  type ThreadMeta,
-  type ThreadMetaRepository,
-  type ThreadStatus,
-  type ThreadMetaCreateInput,
-  type ThreadMetaSearchOptions,
-} from './persistence/thread-meta';
-
-// persistence/runs
-export {
-  PgRunRepository,
-  type Run,
-  type RunRepository,
-  type RunStatus,
-  type RunCreateInput,
-  type RunListOptions,
-} from './persistence/runs';
 
 // types/sql-executor —— 宿主注入的最小 SQL 执行面（单查询 + 事务）
 export type { SqlExecutor } from './types';
