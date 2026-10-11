@@ -428,6 +428,14 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             {artifactEntry}
           </>
         )}
+        {/* 流式进行中的底部提示：timeline 头部的「正在思考」在正文变长后会滚出屏幕，
+            底部需要常驻一条加载信息，让用户知道本轮还没结束 */}
+        {timelineStatus === 'processing' && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <LoadingOutlined className="text-teal-500" />
+            <span>正在生成…</span>
+          </div>
+        )}
         {/* 本轮被取消：正文之后单独一行说明（内容保留，只标注中断原因） */}
         {cancelledText && (
           <div className="flex items-center gap-1.5 text-xs text-gray-400">
