@@ -35,9 +35,11 @@ ENV NODE_OPTIONS=--max-old-space-size=2048
 # （langchain 等），轻量服务器上与同机 PG / Redis / MinIO / app 互挤内存会触发 swap
 # 风暴——构建进程活着但几乎不前进，叠加 Next 默认关闭的 worker 超时（见
 # next.config 的 staticPageGenerationTimeout）表现为「Collecting page data 后静默挂
-# 死，被 30m 墙钟杀死」。压到 2 把 fork 内存尖峰减半以上；机器规格较大时
-# --build-arg NEXT_BUILD_CPUS=4 可上调。
-ARG NEXT_BUILD_CPUS=2
+# 死，被 30m 墙钟杀死」。压到 1（pages+app 各 1，共 2 fork）：4G 无 swap 机器实测
+# cpus=2 的收集峰值 + 主进程逼近整机可用内存，配合 deploy-remote.sh 的容器额度
+# （~2G）cpus=1 才能稳定落在额度内（见 docs/cicd-notes.md §15 校准）。
+# 机器规格较大时 --build-arg NEXT_BUILD_CPUS=4 可上调。
+ARG NEXT_BUILD_CPUS=1
 ENV NEXT_BUILD_CPUS=$NEXT_BUILD_CPUS
 RUN pnpm build
 
