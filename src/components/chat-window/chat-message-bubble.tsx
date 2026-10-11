@@ -372,20 +372,20 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     <button
       type="button"
       onClick={handleOpenArtifact}
-      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
+      className="group mt-1 flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-4 py-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all hover:border-teal-300 hover:bg-teal-50/40 hover:shadow-[0_4px_12px_rgba(16,24,40,0.08)]"
     >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-          <FileTextOutlined />
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+          <FileTextOutlined className="text-lg" />
         </span>
-        <div className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium text-gray-800">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-[15px] font-medium text-gray-800">
             {artifactPart.content.title}
           </span>
-          <span className="text-[11px] text-gray-400">点击查看完整研究报告</span>
+          <span className="text-xs text-gray-400">点击查看完整研究报告</span>
         </div>
       </div>
-      <span className="shrink-0 text-xs font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
+      <span className="shrink-0 text-sm font-medium text-teal-600 transition-transform group-hover:translate-x-0.5">
         查看产物 →
       </span>
     </button>
