@@ -393,8 +393,9 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
   return (
     <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
+      {/* AI 气泡不做白色卡片：占满整行、直接铺在页面背景上（timeline 卡片样式保留） */}
       <div
-        className="flex max-w-[85%] min-w-0 flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)]"
+        className="flex w-full min-w-0 flex-col gap-2"
         onMouseEnter={() => setIsShowOtherOperators(true)}
         onMouseLeave={() => setIsShowOtherOperators(false)}
       >

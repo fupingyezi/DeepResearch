@@ -36,6 +36,7 @@ export interface ChatWindowProps {
 }
 
 export interface ChatLayoutProps {
+  header?: ReactNode;
   content: ReactNode;
   footer: ReactNode;
 }
