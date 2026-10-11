@@ -54,7 +54,8 @@ interface RegistryEntry {
 /** scope → 该范围感知到的注册次数（'both' 对两个 scope 各计一次）。 */
 const mutationCount: Record<'lead' | 'subagent', number> = { lead: 0, subagent: 0 };
 const entries: RegistryEntry[] = [];
-const warnedDuplicates = new WeakSet<object>();
+// let：reset 时替换实例（WeakSet 无 clear，去重记录是注册表状态的一部分）
+let warnedDuplicates = new WeakSet<object>();
 
 /** 注册一个自定义中间件；同一实例重复注册为 no-op（告警一次）。 */
 export function registerExtraMiddleware(
@@ -107,4 +108,5 @@ export function resetExtraMiddlewares(): void {
   entries.length = 0;
   mutationCount.lead = 0;
   mutationCount.subagent = 0;
+  warnedDuplicates = new WeakSet();
 }

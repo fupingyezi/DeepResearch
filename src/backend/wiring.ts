@@ -20,6 +20,7 @@ import {
   makeCheckpointer,
   EMBEDDING_BATCH_LIMIT,
   getMemoryConfig,
+  loadMemoryConfigFromDict,
   maxImageBytesFromEnv,
   PgMemoryStorage,
   setMemoryConfig,
@@ -37,12 +38,19 @@ import {
   type SqlExecutor,
   type ThreadService,
   type ModelConfig,
+  type MiddlewareConfigProvider,
 } from '@deerflow-harness';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { createClient } from 'redis';
 import { getClient, initialMemoryDb, pool, query } from '@/backend/lib/db';
 import { getFile, getMimeType } from '@/backend/lib/storage';
 import { createZhipuReranker } from '@/backend/lib/zhipu-rerank';
+import {
+  buildClientOptionsFromYaml,
+  buildMiddlewareConfigSnapshot,
+  getDeerflowConfigStore,
+} from '@/backend/config/deerflow-config';
+import { loadConfiguredExtraMiddlewares } from '@/backend/config/middleware-loader';
 import { titleStoreProvider } from '@/backend/harness-adapters/title-store';
 import { uploadedFilesProvider } from '@/backend/harness-adapters/uploaded-files';
 import {
@@ -372,6 +380,25 @@ async function build(): Promise<ThreadService> {
     return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
   })();
 
+  // 中间件装配配置（config.yaml，对齐 deer-flow 2.0）：
+  // 文件缺失 → SDK 默认（8 开关全开 + 各参数 = 构造器默认，与历史硬编码一致）；
+  // 存在但非法 → 大声抛错（启动即失败，防拼错键静默生效）。
+  // 必须在 ensureMemoryStorage 之前：memory 块经 loadMemoryConfigFromDict 载入
+  // MemoryConfig，embedding 工厂随后按（可能被覆盖的）维度初始化 pgvector。
+  const deerflowConfigStore = getDeerflowConfigStore();
+  const { config: mwConfig, fromFile: mwConfigFromFile } =
+    await deerflowConfigStore.loadWithSignature();
+  if (mwConfigFromFile) {
+    // memory 块：enabled（feature 门控）/ mode（注入模式服务级默认）不归
+    // MemoryConfig 自身字段，剥掉后其余 snake_case 键载入（函数容缺、只覆盖存在的键）
+    const memoryDict = Object.fromEntries(
+      Object.entries(mwConfig.memory).filter(([key]) => key !== 'enabled' && key !== 'mode'),
+    );
+    loadMemoryConfigFromDict(memoryDict);
+    // extensions.middlewares：启动时 require 一次进注册表（变更需重启）
+    await loadConfiguredExtraMiddlewares(mwConfig.extensions.middlewares, process.cwd());
+  }
+
   // 记忆存储后端：pgvector 就绪则切 PG（含旧文件懒迁移），否则保留文件后端
   await ensureMemoryStorage();
   ensureMemoryModelFactory();
@@ -383,28 +410,17 @@ async function build(): Promise<ThreadService> {
 
   const defaultModelConfig = getDefaultModelConfig();
 
-  // 服务级默认 features：
-  //   - memoryEnabled:    true  → 长期记忆默认开启；可被 metadata 覆盖。
-  //   - autoTitleEnabled: true  → 首轮后异步生成会话标题（替代占位 "New thread"）。
-  //   - threadDataEnabled: true → 装载本会话上传文件到 state（基础设施）。
-  //   - uploadsEnabled:   true  → 把上传文件以 SystemMessage 注入 prompt 上下文。
-  //   - sandboxEnabled:   true  → 获取沙箱并注入文件工具集（bash 默认禁用，需 env 开启）。
-  //   - summarizationEnabled: true → 历史触达阈值（12000 tokens）时自动摘要旧消息，
-  //                                保留近 8 条；会额外调用一次 LLM。
-  //   - guardrailEnabled: true  → 规则式护栏默认开启（仅告警不拦截）。
-  //   - todoEnabled:      true  → 注入 write_todos 工具，清单经 todo_update 事件下发前端。
-  // 单次请求可通过 body.configuration.<key> 显式覆盖（见 v3/chat route.ts）。
+  // 服务级默认 features 全部来自 config.yaml（键映射见 buildClientOptionsFromYaml）。
+  // 优先级链：metadata（严格 boolean）> snapshot.enabled（provider 热读 YAML）>
+  // baseOptions（=同一份 YAML）。单次请求仍可 body.configuration.<key> 显式覆盖。
+  const middlewareConfigProvider: MiddlewareConfigProvider = async () => {
+    const { config, signature } = await deerflowConfigStore.loadWithSignature();
+    return buildMiddlewareConfigSnapshot(config, signature);
+  };
   const sharedClientOptions = {
-    agentName: 'lead' as const,
-    memoryEnabled: true,
-    autoTitleEnabled: true,
-    threadDataEnabled: true,
-    uploadsEnabled: true,
-    sandboxEnabled: true,
-    summarizationEnabled: true,
-    guardrailEnabled: true,
-    todoEnabled: true,
+    ...buildClientOptionsFromYaml(mwConfig),
     checkpointer,
+    middlewareConfigProvider,
   };
 
   const client = new DeerFlowClient(defaultModelConfig, sharedClientOptions);

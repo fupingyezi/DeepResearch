@@ -28,18 +28,21 @@ import { DEFAULT_MEMORY_CONFIG } from '../agents/memory/config';
 // ── schema（zod v4：z.object 默认剥离未知键，必须用 z.strictObject 才能
 //    让「YAML 拼错键」大声失败而不是被静默丢弃）──
 
+// enabled 缺省 = true：块出现即启用、只改参数不改开关是合法写法
+// （如 `loop_detection: { hard_limit: 7 }`）；显式 false 才关。
+// 缺省值与 SDK 默认一致，合并语义不变。
 const enabledBlock = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
 });
 
 const summarizationBlockSchema = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
   trigger_tokens: z.number().int().positive().optional(),
   keep_messages: z.number().int().positive().optional(),
 });
 
 const loopDetectionBlockSchema = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
   warn_threshold: z.number().int().positive().optional(),
   hard_limit: z.number().int().positive().optional(),
   window_size: z.number().int().positive().optional(),
@@ -48,12 +51,12 @@ const loopDetectionBlockSchema = z.strictObject({
 });
 
 const guardrailsBlockSchema = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
   block_mode: z.enum(['none', 'injection', 'output', 'all']).optional(),
 });
 
 const memoryBlockSchema = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
   mode: z.enum(['inject', 'retrieve']).optional(),
   model_name: z.string().nullable().optional(),
   debounce_seconds: z.number().optional(),
@@ -68,7 +71,7 @@ const memoryBlockSchema = z.strictObject({
 });
 
 const subagentLimitBlockSchema = z.strictObject({
-  enabled: z.boolean(),
+  enabled: z.boolean().default(true),
   max_concurrent: z.number().int().positive().optional(),
   max_total: z.number().int().positive().optional(),
   max_tracked_threads: z.number().int().positive().optional(),

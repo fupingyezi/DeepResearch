@@ -107,6 +107,15 @@ describe('parseMiddlewareConfigYaml', () => {
     ).toThrow();
   });
 
+  it('块内 enabled 缺省 → 默认 true（只改参数不改开关是合法写法）', () => {
+    expect(parseMiddlewareConfigYaml('summarization:\n  trigger_tokens: 20000\n')).toEqual({
+      summarization: { enabled: true, trigger_tokens: 20000 },
+    });
+    expect(parseMiddlewareConfigYaml('loop_detection:\n  hard_limit: 7\n')).toEqual({
+      loop_detection: { enabled: true, hard_limit: 7 },
+    });
+  });
+
   it('块内键类型错抛错', () => {
     expect(() =>
       parseMiddlewareConfigYaml('summarization:\n  enabled: true\n  trigger_tokens: "many"\n'),
