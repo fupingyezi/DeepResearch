@@ -277,7 +277,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
     if (!isEditing) {
       return (
-        <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+        <div className="relative mb-12 flex w-full flex-col items-end gap-2 px-3">
           {/* 历史加载场景：file_metadata 表里的文件 */}
           {message.files && message.files.length !== 0 && (
             <div className="grid w-1/3 grid-cols-1 gap-2">
@@ -325,7 +325,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       );
     }
     return (
-      <div className="relative mb-5 flex w-full flex-col items-end gap-2 px-3">
+      <div className="relative mb-12 flex w-full flex-col items-end gap-2 px-3">
         <textarea
           value={reEditValue}
           onChange={(e) => setReEditValue(e.target.value)}
@@ -392,7 +392,7 @@ const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   ) : null;
 
   return (
-    <div className="relative mb-5 flex w-full flex-wrap justify-start px-3">
+    <div className="relative mb-12 flex w-full flex-wrap justify-start px-3">
       {/* AI 气泡不做白色卡片：占满整行、直接铺在页面背景上（timeline 卡片样式保留） */}
       <div
         className="flex w-full min-w-0 flex-col gap-2"
