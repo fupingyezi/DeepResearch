@@ -561,29 +561,35 @@ production build」后零输出挂满墙钟（`[deploy][ERROR] docker build 失�
 **修复**（延续「资源边界」哲学，与磁盘守卫同款）：
 
 1. `deploy-remote.sh` 加内存守卫：构建前读 `free -m`，构建容器内存上限 = 可用内存
-   − 预留（`BUILD_MEM_RESERVE_MB` 默认 1024MB，给同机服务）；低于构建下限
-   （`BUILD_MEM_MIN_MB` 默认 1536MB）直接快速失败并给出指引；
+   − 预留（`BUILD_MEM_RESERVE_MB` 默认 128MB，给同机服务）；低于构建下限
+   （`BUILD_MEM_MIN_MB` 默认 1024MB）直接快速失败并给出指引；
 2. `docker build` 加 `--memory` + `--memory-swap`（相等 = 禁构建容器 swap）：超限
    是明确的 OOM 快速失败，旧版本 app 全程健康——「不回滚」不再成立，因为变更从未
    发生；被掐掉的孤儿构建也受 cgroup 限住，恶性循环断掉；
 3. 构建失败时补打 `free -m` + `compose ps` 观测，失败文案明确「旧版本容器未受影响
    仍在运行」；
 4. 守卫频繁拦下构建时说明机器内存确实不够：扩容、或 `NEXT_BUILD_CPUS=1`（fork
-   4→2，页面仅 6 个代价小）、或下调 `BUILD_MEM_RESERVE_MB`。
+   4→2，页面仅 6 个代价小）、或下调 `BUILD_MEM_RESERVE_MB`（当前默认 128 已是
+   4G 机器的极限）。
 
-**校准（首次部署实测，4G 无 swap 机器）**：初版默认值（预留 1024MB / 下限 1536MB）
-下构建容器额度 ≈ 1.5G，而构建真实峰值 ≈ 2G（主进程 + 4 worker 收集阶段）——
-`RUN pnpm build` 在容器内 OOM（`exit code: 137` = SIGKILL），3 分钟干净失败，
-旧版本全程健康（守卫机制本身工作正常，是额度发少了）。校准：`BUILD_MEM_RESERVE_MB`
-默认 512（额度 ≈ 可用 − 512 ≈ 2.0G）、`BUILD_MEM_MIN_MB` 默认 1024，配合
-Dockerfile `NEXT_BUILD_CPUS=1`（fork 4→2）把峰值压进额度。仍 OOM 时按需下调
-预留或扩容。
+**校准（两轮部署实测 + 本机隔离测量，4G 无 swap 机器）**：初版默认值（预留 1024MB /
+下限 1536MB）下构建容器额度 ≈ 1.5G 必 OOM；第二轮（预留 512、cpus=1）额度
+≈ 1.8~1.9G 仍在收集阶段 OOM（`exit code: 137` = SIGKILL），两轮都 3 分钟内干净
+失败、旧版本全程健康（守卫机制本身工作正常，是额度发少了）。停止猜测改为实测：
+本机隔离复刻服务器构建环境（NEXT_BUILD_CPUS=1 + NODE_OPTIONS=2048）测得**冷构建
+峰值 1958MB、暖构建（webpack 持久缓存命中）峰值 1699MB**，峰值出现在收集阶段
+（构建收尾 ~16 秒）。Linux 侧可能略高按 ~2.0~2.1G 计：4G 机器预算 = 3719 − 同机
+服务 ~1.1G − 系统/页缓存，冷构建只有额度 ≈ 可用 − 128 才放得下（~200MB 裕量）。
+终值：`BUILD_MEM_RESERVE_MB` 默认 128（这台机器的极限，扩容后应调回 512）、
+`BUILD_MEM_MIN_MB` 默认 1024。若仍 OOM（Linux 峰值高过预期）说明机器预算已尽，
+扩容是唯一出路；暖构建 ~1.7G 舒适，只有合并后首次部署是冷的。
 
 **增量构建（后续补充）**：编译阶段经 BuildKit cache mount 复用 webpack 持久缓存
 （`.next/cache`，Next 14 默认 filesystem 缓存）与 pnpm store——未改动模块不重编译，
-缓存命中时编译时长与主进程峰值显著下降；页面数据收集阶段无跨构建缓存，worker
-fork 尖峰照旧，内存守卫与 cpus 上限仍需保留。缓存命中脏数据报诡异错误（幽灵
-module not found）时 `docker builder prune -f` 清掉重来。
+缓存命中时编译时长与主进程峰值显著下降（本机实测：冷 28.5s / 1958MB → 暖 13.9s /
+1699MB）；页面数据收集阶段无跨构建缓存，worker fork 尖峰照旧，内存守卫与 cpus
+上限仍需保留。缓存命中脏数据报诡异错误（幽灵 module not found）时
+`docker builder prune -f` 清掉重来。
 
 **教训**：
 

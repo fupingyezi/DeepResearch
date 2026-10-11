@@ -47,10 +47,13 @@ ensure_disk_space() {
 # 那种死法旧 app 跟着不可访问，只能重启整机恢复（见 docs/cicd-notes.md §15）。
 # 注意 NODE_OPTIONS 的堆上限只罩得住构建主进程（Next fork 静态 worker 时主动剥掉），
 # 只有这里的容器级上限对「主进程 + worker fork 群」整体生效。
-# 预留值按 4G 无 swap 机器实测标定：构建峰值 ≈ 2G（主进程 + 4 worker 收集阶段），
-# 预留 1024 会把额度压到 1.5G 以内触发容器 OOM（exit 137）；预留 512 让额度 ≈
-# 可用 − 512，配合 Dockerfile NEXT_BUILD_CPUS=1 把峰值压到额度内（§15 校准）。
-MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-512}" # 给同机 PG/Redis/MinIO/app + 系统预留
+# 预留值按构建峰值实测标定（本机隔离复刻服务器环境：NEXT_BUILD_CPUS=1 +
+# NODE_OPTIONS=--max-old-space-size=2048）：冷构建峰值 1958MB、暖构建（webpack
+# 持久缓存命中）1699MB，峰值出现在收集阶段（构建收尾 ~16 秒）；Linux 侧可能略高。
+# 4G 无 swap 机器预算 = 3719 − 同机服务 ~1.1G − 系统/页缓存，冷构建只有额度 ≈
+# 可用 − 128 才放得下（~200MB 裕量）——预留 512 时额度 1.8~1.9G，冷构建必 OOM
+# （两轮部署实测 exit 137，§15 校准）。128 已是这台机器的极限，扩容后应调回 512。
+MEM_RESERVE_MB="${BUILD_MEM_RESERVE_MB:-128}" # 给同机 PG/Redis/MinIO/app + 系统预留
 MIN_BUILD_MB="${BUILD_MEM_MIN_MB:-1024}"      # 构建自身下限，低于此值宁可快速失败
 ensure_memory_headroom() {
   local avail_mb
