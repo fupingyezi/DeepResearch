@@ -35,7 +35,7 @@ const nextConfig = {
     // （langchain 等）——轻量服务器上这个内存尖峰会与同机 PG/Redis/MinIO/app 互挤
     // 触发 swap 风暴（进程活着但几乎不前进，叠加上面超时禁用 = 构建静默挂起）。
     // 缺省不设（CI/本机用 Next 默认并行度），服务器构建经 Dockerfile 注入
-    // NEXT_BUILD_CPUS=2 压到 2。
+    // NEXT_BUILD_CPUS=1 压到 1。
     cpus: process.env.NEXT_BUILD_CPUS ? Number(process.env.NEXT_BUILD_CPUS) : undefined,
   },
 
