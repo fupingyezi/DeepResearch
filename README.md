@@ -90,11 +90,12 @@ src/
 │   └── sider/                          # 左侧会话侧边栏
 │
 ├── backend/                            # ⭐ 服务端四层（route → controller → service → repository）
-│   ├── wiring.ts                       # 组合根：ThreadService 进程单例 + harness 注入面注册
+│   ├── wiring.ts                       # 组合根：ThreadService 进程单例 + harness 注入面注册 + 每 run 独立 DeerFlowClient 工厂
 │   ├── controllers/                    # HTTP 层逻辑（14 文件按域分组）
-│   ├── services/                       # 领域编排、业务规则（无 SQL）
-│   ├── repositories/                   # 单表 SQL（chat-session/chat-message/file-metadata/file-content + email-token/oauth-account/user/user-model-key）
-│   ├── harness-adapters/               # harness 注入接口的 app 实现（title-store / uploaded-files）
+│   ├── services/                       # 领域编排（thread-service：run 生命周期/取消三路径/优雅停机 + chat/conversation/... 业务规则）
+│   ├── repositories/                   # 单表 SQL（chat-session/chat-message/file-metadata/file-content/thread-meta/runs + email-token/oauth-account/user/user-model-key）
+│   ├── runtime/                        # run 运行时：lifecycle（并发闸门/心跳/僵尸回收）+ coordination（RunRegistry/RunEventBus 进程内与 Redis 双实现）+ stream-bridge + locks
+│   ├── harness-adapters/               # harness 注入接口的 app 实现（title-store / uploaded-files / pg-memory-storage）
 │   ├── http/                           # withApiHandler 统一管线 / 错误映射 / 会话 cookie / 限流
 │   ├── validation/                     # 全部路由 body/query 的 zod schema（v4）
 │   ├── auth/                           # JWT 双 token / 密码 / OAuth provider / 体验账号
@@ -150,7 +151,7 @@ packages/deerflow-harness/              # ⭐ 多智能体编排核心（@deerfl
 │   ├── thread-state.ts                 # ThreadStateAnnotation 定义
 │   ├── lead-agent/                     # lead agent 系统提示词
 │   ├── middlewares/                    # 位序中间件实现（装配序见 index.ts）
-│   └── memory/                         # MemoryUpdater（LLM 驱动）+ PG 存储 + embeddings + retrieval（双路召回 / RRF / rerank）
+│   └── memory/                         # MemoryUpdater（LLM 驱动）+ InMemoryMemoryStorage + embeddings + retrieval（双路召回 / RRF / rerank）
 ├── extensions/                         # 统一扩展域：配置存储 + MCP 客户端 + Skill 加载器
 │   ├── mcp/                            # MCP 客户端（MultiServerMCPClient 封装）
 │   └── skills/                         # Skill 加载器（frontmatter 解析 + prompt 注入）
@@ -159,16 +160,12 @@ packages/deerflow-harness/              # ⭐ 多智能体编排核心（@deerfl
 │   ├── image-fetcher.ts                # ThreadImageRef + buildHumanMessageContent（image_url data URL）
 │   ├── vision-middleware.ts            # VisionMiddleware：历史图片压成文本占位（注入 view_image）
 │   └── content-blocks.ts               # 多模态 ToolMessage → 纯文本（SSE 脱敏入口）
-├── runtime/                            # ThreadService、事件总线、SSE、Checkpointer、生命周期
-│   ├── service.ts                      # ThreadService（fire-and-forget 提交 + 状态收敛）
-│   ├── coordination/                   # RunEventBus 契约 + 双实现（进程内 / Redis Stream 镜像）+ RedisClientFactory + run 登记
-│   ├── stream-bridge/                  # StreamBridge + ThreadChannel（typed EventEmitter + 缓冲回放）
-│   ├── lifecycle/                      # run 级并发闸门 / 心跳与 owner 存活 / 僵尸回收 / 优雅停机
+├── runtime/                            # SSE、Checkpointer、ALS 上下文、用量记账、Redis 客户端注入面
 │   ├── usage/                          # LLM 用量记账（模型工厂挂接，ALS 累加器 + pricing）
 │   ├── sse/                            # ClientAgentEvent 白名单 + 内→外过滤 + createSseStream
 │   ├── checkpointer/                   # PostgreSQL checkpoint 工厂
-│   └── context.ts                      # AsyncLocalStorage 上下文传播
-├── persistence/                        # ThreadMetaRepository + RunRepository（PostgreSQL）
+│   ├── context.ts                      # AsyncLocalStorage 上下文传播
+│   └── redis-client-factory.ts         # Redis 客户端注入面（docker-coordinator 与 app 侧协调组件共用）
 ├── tools/builtins/                     # 内置工具（task、search_web、clarification、view_image、skill）
 ├── models/                             # createChatModel 模型工厂 + provider 推断（MODEL_PRESETS 在 src/config/models.ts）
 ├── config/                             # YAML 中间件装配配置解析（宿主侧读取在 src/backend/config）

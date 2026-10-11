@@ -318,10 +318,10 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 ### 10.2 双层并发背压
 
-| 层级   | 落点                                        | 机制                                                   | 超限表现                                                        |
-| ------ | ------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
-| run 级 | `runtime/lifecycle/run-concurrency-gate.ts` | 本进程 FIFO 信号量 + 跨进程 `runs:count` 原子占位      | 进入队列，先回传 `task_progress{status:'queued'}`，对话可先思考 |
-| 容器级 | `DockerSandboxProvider.provisionContainer`  | `containers:count` Lua 原子占位 + LRU 淘汰空闲容器腾位 | 无可淘汰则抛可读错误，bash 工具转为 `Error:` 结果               |
+| 层级   | 落点                                                    | 机制                                                   | 超限表现                                                        |
+| ------ | ------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| run 级 | `src/backend/runtime/lifecycle/run-concurrency-gate.ts` | 本进程 FIFO 信号量 + 跨进程 `runs:count` 原子占位      | 进入队列，先回传 `task_progress{status:'queued'}`，对话可先思考 |
+| 容器级 | `DockerSandboxProvider.provisionContainer`              | `containers:count` Lua 原子占位 + LRU 淘汰空闲容器腾位 | 无可淘汰则抛可读错误，bash 工具转为 `Error:` 结果               |
 
 ### 10.3 生命周期与会话状态同步
 
@@ -374,19 +374,19 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 ### 10.8 关键改动文件
 
-| 文件                                        | 改动                                                                             |
-| ------------------------------------------- | -------------------------------------------------------------------------------- |
-| `sandbox/docker/docker-coordinator.ts`      | 新增：Redis 原子计数 / 登记 / 分布式锁，降级进程内                               |
-| `sandbox/docker/docker-config.ts`           | 新增并发上限 / 回收 / 只读根 / tmpfs / swap / 重试配置                           |
-| `sandbox/docker/docker-sandbox-provider.ts` | 容器级闸门 + LRU + 引用计数 + 回收器 + 对账 + 重建重试                           |
-| `sandbox/docker/docker-sandbox.ts`          | 路径反向映射 + 命令审计 + 容器消失重试 + 心跳                                    |
-| `sandbox/docker/docker-cli.ts`              | 新增 `dockerPsByPrefix` / `dockerStats` / 重试封装                               |
-| `sandbox/sandbox-provider.ts`               | 基类新增 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId`（默认 no-op） |
-| `sandbox/sandbox-monitor.ts`                | 新增：只读快照聚合                                                               |
-| `agents/middlewares/sandbox-middleware.ts`  | 补 `afterAgent` markIdle；`beforeAgent` retain                                   |
-| `runtime/lifecycle/run-concurrency-gate.ts` | 新增：run 级并发闸门                                                             |
-| `runtime/service.ts`                        | `executeRun` 前置 run 闸门 + 排队帧；`deleteThread` 联动销毁                     |
-| `app/api/sandbox/stats/route.ts`            | 新增：只读监控 API                                                               |
+| 文件                                                    | 改动                                                                             |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `sandbox/docker/docker-coordinator.ts`                  | 新增：Redis 原子计数 / 登记 / 分布式锁，降级进程内                               |
+| `sandbox/docker/docker-config.ts`                       | 新增并发上限 / 回收 / 只读根 / tmpfs / swap / 重试配置                           |
+| `sandbox/docker/docker-sandbox-provider.ts`             | 容器级闸门 + LRU + 引用计数 + 回收器 + 对账 + 重建重试                           |
+| `sandbox/docker/docker-sandbox.ts`                      | 路径反向映射 + 命令审计 + 容器消失重试 + 心跳                                    |
+| `sandbox/docker/docker-cli.ts`                          | 新增 `dockerPsByPrefix` / `dockerStats` / 重试封装                               |
+| `sandbox/sandbox-provider.ts`                           | 基类新增 `retain` / `markIdle` / `heartbeat` / `releaseByThreadId`（默认 no-op） |
+| `sandbox/sandbox-monitor.ts`                            | 新增：只读快照聚合                                                               |
+| `agents/middlewares/sandbox-middleware.ts`              | 补 `afterAgent` markIdle；`beforeAgent` retain                                   |
+| `src/backend/runtime/lifecycle/run-concurrency-gate.ts` | 新增：run 级并发闸门                                                             |
+| `src/backend/services/thread-service.ts`                | `executeRun` 前置 run 闸门 + 排队帧；`deleteThread` 联动销毁                     |
+| `app/api/sandbox/stats/route.ts`                        | 新增：只读监控 API                                                               |
 
 ### 10.9 配置项
 
