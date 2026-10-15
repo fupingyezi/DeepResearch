@@ -1,13 +1,13 @@
-# mini-DeepResearch 对齐 DeerFlow 2.0 技术方案
+# DeepResearch 对齐 DeerFlow 2.0 技术方案
 
 > 参照基准：`/Users/yokotu/code/agent/deer-flow`（DeerFlow 2.0，Python 后端 + Next.js 前端）
-> 本文目标：系统性完善 mini-DeepResearch 的 **Agent 设置** 与 **消息流/事件流处理**，先给出差距分析与改进方案，再据此逐项落地代码。
+> 本文目标：系统性完善 DeepResearch 的 **Agent 设置** 与 **消息流/事件流处理**，先给出差距分析与改进方案，再据此逐项落地代码。
 
 ---
 
 ## 1. 结论先行
 
-mini-DeepResearch 与 DeerFlow 2.0 的**整体形态已经一致**：二者都是「单一 lead-agent（LangGraph ReAct）+ `task` 工具委派 general-purpose subagent」，没有 Planner/Researcher/Reporter/Coder 多节点 graph。
+DeepResearch 与 DeerFlow 2.0 的**整体形态已经一致**：二者都是「单一 lead-agent（LangGraph ReAct）+ `task` 工具委派 general-purpose subagent」，没有 Planner/Researcher/Reporter/Coder 多节点 graph。
 
 > 注：`README.md` 中关于「Planner/Researcher/Reporter/Coder 多节点」「走 `/api/chat/v2`」的描述已过时，应以 `CLAUDE.md` 与实际代码为准。真实主入口是 `src/app/api/v3/chat/route.ts`。
 
@@ -22,7 +22,7 @@ mini-DeepResearch 与 DeerFlow 2.0 的**整体形态已经一致**：二者都�
 
 ## 2. 架构形态对照
 
-| 维度             | DeerFlow 2.0                                                                                              | mini-DeepResearch                                                                 | 结论       |
+| 维度             | DeerFlow 2.0                                                                                              | DeepResearch                                                                      | 结论       |
 | ---------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------- |
 | 图入口           | `langgraph.json` 单图 `lead_agent` → `make_lead_agent`，基于 `create_agent`                               | `createBaseAgent()` → `createAgent()`（ReAct），单 agent                          | 一致       |
 | 多智能体         | 无多节点；靠 subagent 并行委派                                                                            | 无多节点；靠 `taskTool` 委派                                                      | 一致       |
@@ -39,25 +39,25 @@ mini-DeepResearch 与 DeerFlow 2.0 的**整体形态已经一致**：二者都�
 DeerFlow 2.0（`backend/packages/harness/deerflow/agents/middlewares`，16 个，均真实现并装配）：
 `clarification` · `dangling_tool_call` · `deferred_tool_filter` · `llm_error_handling` · `loop_detection` · `memory` · `sandbox_audit` · `subagent_limit` · `summarization` · `thread_data` · `title` · `todo` · `token_usage` · `tool_error_handling` · `uploads` · `view_image`
 
-mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assembleFromFeatures` 装配的中间件（按 `ORDERED_MIDDLEWARES` 位序）：
+DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assembleFromFeatures` 装配的中间件（按 `ORDERED_MIDDLEWARES` 位序）：
 
-| 位序 | 中间件                            | 启用条件                                                                     | 对应 deer-flow         |
-| ---- | --------------------------------- | ---------------------------------------------------------------------------- | ---------------------- |
-| —    | `qwenToolCallRecoveryMiddleware`  | `qwenToolCallRecovery===true` 或 `provider==='qwen'` 自动                    | mini 特有（Qwen 适配） |
-| 0    | `threadDataMiddleware`            | `features.threadData===true`（服务级默认 true）                              | `thread_data`          |
-| 1    | `uploadsMiddleware`               | `features.uploads===true`（服务级默认 true）                                 | `uploads`              |
-| 3    | `toolCallIntegrityMiddleware`     | 始终                                                                         | `dangling_tool_call`   |
-| 5    | `toolErrorHandlingMiddleware`     | 始终                                                                         | `tool_error_handling`  |
-| 6    | `summarizationMiddleware`         | `features.summarization` = 实例（不允许 true）                               | `summarization`        |
-| 7    | `todoMiddleware`                  | `features.todo===true`                                                       | `todo`                 |
-| 8    | `titleMiddleware`                 | `features.autoTitle===true`（服务级默认 true）                               | `title`                |
-| 9    | `memoryMiddleware`                | `features.memory===true`（服务级默认 true）                                  | `memory`               |
-| 10   | `VisionMiddleware`                | `features.vision`（由 `modelConfig.supportsVision` 驱动）+ `view_image` 工具 | `view_image`           |
-| 11   | `createSubagentLimitMiddleware()` | 始终（每请求新建实例）                                                       | `subagent_limit`       |
-| 12   | `loopDetectionMiddleware`         | 始终                                                                         | `loop_detection`       |
+| 位序 | 中间件                            | 启用条件                                                                     | 对应 deer-flow                 |
+| ---- | --------------------------------- | ---------------------------------------------------------------------------- | ------------------------------ |
+| —    | `qwenToolCallRecoveryMiddleware`  | `qwenToolCallRecovery===true` 或 `provider==='qwen'` 自动                    | DeepResearch 特有（Qwen 适配） |
+| 0    | `threadDataMiddleware`            | `features.threadData===true`（服务级默认 true）                              | `thread_data`                  |
+| 1    | `uploadsMiddleware`               | `features.uploads===true`（服务级默认 true）                                 | `uploads`                      |
+| 3    | `toolCallIntegrityMiddleware`     | 始终                                                                         | `dangling_tool_call`           |
+| 5    | `toolErrorHandlingMiddleware`     | 始终                                                                         | `tool_error_handling`          |
+| 6    | `summarizationMiddleware`         | `features.summarization` = 实例（不允许 true）                               | `summarization`                |
+| 7    | `todoMiddleware`                  | `features.todo===true`                                                       | `todo`                         |
+| 8    | `titleMiddleware`                 | `features.autoTitle===true`（服务级默认 true）                               | `title`                        |
+| 9    | `memoryMiddleware`                | `features.memory===true`（服务级默认 true）                                  | `memory`                       |
+| 10   | `VisionMiddleware`                | `features.vision`（由 `modelConfig.supportsVision` 驱动）+ `view_image` 工具 | `view_image`                   |
+| 11   | `createSubagentLimitMiddleware()` | 始终（每请求新建实例）                                                       | `subagent_limit`               |
+| 12   | `loopDetectionMiddleware`         | 始终                                                                         | `loop_detection`               |
 
 **占位 / 未装配**：（无 —— 第 10 位 `view_image` 已实装，见 `vision/` 子系统）。
-**mini 暂缺**：`deferred_tool_filter` · `llm_error_handling` · `token_usage`（本次不强制补，文档登记）。
+**DeepResearch 暂缺**：`deferred_tool_filter` · `llm_error_handling` · `token_usage`（本次不强制补，文档登记）。
 
 ---
 
@@ -131,11 +131,11 @@ mini-DeepResearch（`src/deerflow-harness/agents/middlewares`）实际由 `assem
 
 ### 方案 #6：Subagent 对齐（核对 #7）
 
-以差距校验为主：核对 `max_concurrent_subagents` 默认值（mini=3，与 deer-flow 一致）、`disabledTools` 递归防护、`model='inherit'` 缺 `inheritedModelConfig` 时的告警兜底、超时/取消终态语义；必要处补强校验与注释，保持 `createSubagentLimitMiddleware()` 每请求新建实例的语义。
+以差距校验为主：核对 `max_concurrent_subagents` 默认值（DeepResearch=3，与 deer-flow 一致）、`disabledTools` 递归防护、`model='inherit'` 缺 `inheritedModelConfig` 时的告警兜底、超时/取消终态语义；必要处补强校验与注释，保持 `createSubagentLimitMiddleware()` 每请求新建实例的语义。
 
 ### 方案 #7：Prompt 对齐（#8）
 
-在 `lead-agent/prompt.ts` 补齐：CLARIFY→PLAN→ACT 澄清系统（信息缺失/歧义/多方案/危险操作先 `ask_clarification`）、skills_section、working_directory、统一 citations 段；保留 mini 既有 final-report/task_summary schema。
+在 `lead-agent/prompt.ts` 补齐：CLARIFY→PLAN→ACT 澄清系统（信息缺失/歧义/多方案/危险操作先 `ask_clarification`）、skills_section、working_directory、统一 citations 段；保留 DeepResearch 既有 final-report/task_summary schema。
 
 ---
 

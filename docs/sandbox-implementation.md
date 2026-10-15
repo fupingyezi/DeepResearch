@@ -298,7 +298,7 @@ Agent 必须使用 `/mnt/user-data` 下的绝对路径：
 
 ## 9. 参考文档
 
-- **project.md**：`/Users/yokotu/code/ai-repo/mini-DeepResearch/project.md`
+- **project.md**：`/Users/yokotu/code/ai-repo/DeepResearch/project.md`
 - **LangChain Tool Runtime**：`@langchain/core/dist/tools/types.d.ts`
 
 ---

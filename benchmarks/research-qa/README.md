@@ -1,4 +1,4 @@
-# mini-DeepResearch Benchmark (research-qa)
+# DeepResearch Benchmark (research-qa)
 
 基于 **LangSmith** 的 Deep Research Agent 质量评估方案。
 
@@ -118,7 +118,7 @@ benchmarks/
 
 1. 运行 `--upload` 上传数据集
 2. 访问 https://smith.langchain.com
-3. 选择项目 `mini-deepresearch-benchmark`
+3. 选择项目 `deepresearch-benchmark`
 4. 在 Datasets 页面查看已上传的测试用例
 5. 点击 "Compare" 可对比不同版本的 Agent 输出
 

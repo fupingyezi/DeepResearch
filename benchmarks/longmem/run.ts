@@ -2,7 +2,7 @@
 /**
  * LongMemEval 专用运行脚本
  *
- * 用于测试 mini-DeepResearch 的长期记忆系统在 LongMemEval 基准上的表现。
+ * 用于测试 DeepResearch 的长期记忆系统在 LongMemEval 基准上的表现。
  * LongMemEval (ICLR 2025) 测试 5 大核心能力：
  *   - Information Extraction    (信息提取)
  *   - Multi-Session Reasoning   (多会话推理)

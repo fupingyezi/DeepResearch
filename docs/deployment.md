@@ -33,9 +33,9 @@ GitHub Actions（.github/workflows/deploy.yml）
 | `SSH_USER`    | SSH 登录用户名                     | `ubuntu` / `root`         |
 | `SSH_KEY`     | SSH 私钥全文（PEM 格式，含首尾行） | `-----BEGIN ... KEY-----` |
 | `SSH_PORT`    | SSH 端口（可选，默认 22）          | `22`                      |
-| `DEPLOY_PATH` | 服务器上的部署目录（绝对路径）     | `/opt/mini-deepresearch`  |
+| `DEPLOY_PATH` | 服务器上的部署目录（绝对路径）     | `/opt/deepresearch`       |
 
-> 生成部署专用密钥：`ssh-keygen -t ed25519 -C "deploy@mini-deepresearch"`，公钥追加到服务器 `~/.ssh/authorized_keys`，私钥全文填入 `SSH_KEY`。
+> 生成部署专用密钥：`ssh-keygen -t ed25519 -C "deploy@deepresearch"`，公钥追加到服务器 `~/.ssh/authorized_keys`，私钥全文填入 `SSH_KEY`。
 
 ## 三、服务器初始化（首次）
 
@@ -50,8 +50,8 @@ GitHub Actions（.github/workflows/deploy.yml）
 2. **创建部署目录**（须与 `DEPLOY_PATH` 一致）：
 
    ```bash
-   sudo mkdir -p /opt/mini-deepresearch
-   sudo chown "$USER":"$USER" /opt/mini-deepresearch
+   sudo mkdir -p /opt/deepresearch
+   sudo chown "$USER":"$USER" /opt/deepresearch
    ```
 
 3. **放置生产环境变量文件 `.env.production`**：
@@ -59,7 +59,7 @@ GitHub Actions（.github/workflows/deploy.yml）
    将仓库中的 `.env.production.example` 内容复制到服务器 `DEPLOY_PATH/.env.production`，填入真实密钥。
 
    ```bash
-   cd /opt/mini-deepresearch
+   cd /opt/deepresearch
    vim .env.production
    ```
 
@@ -83,7 +83,7 @@ GitHub Actions（.github/workflows/deploy.yml）
 也可在服务器手动执行（用于调试，前提：源码已解包到 DEPLOY_PATH）：
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 chmod +x scripts/*.sh
 bash scripts/deploy-remote.sh deepresearch:<git_sha>
 ```
@@ -110,7 +110,7 @@ bash scripts/deploy-remote.sh deepresearch:<git_sha>
 **手动回滚**：
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 bash scripts/rollback.sh
 ```
 

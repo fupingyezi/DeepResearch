@@ -129,7 +129,7 @@ export default function LoginPage() {
         <div className="mb-6 flex flex-col items-center gap-2">
           <Image src="/四叶草.svg" alt="logo" width={48} height={48} className="rounded-xl" />
           <h1 className="text-[20px] font-semibold text-[#111827]">{title}</h1>
-          <p className="text-[13px] text-[#9ca3af]">mini-DeepResearch</p>
+          <p className="text-[13px] text-[#9ca3af]">DeepResearch</p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">

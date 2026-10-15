@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-**Mini-DeepResearch** 是基于 **Next.js 14 + LangChain/LangGraph 1.x** 的多智能体对话应用：
+**DeepResearch** 是基于 **Next.js 14 + LangChain/LangGraph 1.x** 的多智能体对话应用：
 
 - **单一 lead-agent 形态**（对齐 deer-flow 2.0）：lead 永远具备 subagent 能力（`task` 工具 + general-purpose subagent），由 agent 自主判断「简单直接答 / 复杂分解为并行 subagent」，没有「联网搜索 / 深度研究」档位
 - 多模型对话（MODEL_PRESETS 预设：Qwen Max/Turbo、DeepSeek v4 Flash/Pro、OpenAI 4o、Moonshot v1、GLM-5.3 Flash，见 `src/config/models.ts`）
@@ -38,7 +38,7 @@ docker-compose up -d    # 本地基础设施（PostgreSQL + Redis + MinIO）
 
 ## CI/CD 自动部署
 
-push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/mini-deepresearch`）：
+push main 触发 `.github/workflows/deploy.yml`（目标腾讯云 Ubuntu `/opt/deepresearch`）：
 
 - **job quality**：lint / format:check / typecheck / test / build（PR 也跑）
 - **job deploy**（仅 push main 且改动含非文档文件）：`git archive`（~0.5MB）→ scp → **服务器本地 `docker build`**（`scripts/deploy-remote.sh`）→ compose 起服务 → 健康检查（`/api/auth/setup-status`，30×3s，<500 即存活）→ 失败自动回滚 `.previous-image`。**镜像构建不含 lint/typecheck**（next.config 已关：quality 门禁同款校验独立覆盖，构建期重复跑曾在服务器挂死 40 分钟，见 `docs/cicd-notes.md` §13）

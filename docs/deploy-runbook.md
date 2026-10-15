@@ -5,7 +5,7 @@
 
 约定（下文直接沿用，换成你自己的值即可）：
 
-- 部署目录：`/opt/mini-deepresearch`（与 GitHub Secret `DEPLOY_PATH` 一致）
+- 部署目录：`/opt/deepresearch`（与 GitHub Secret `DEPLOY_PATH` 一致）
 - 服务器：腾讯云轻量/CVM，Ubuntu 系，公网 IP 记为 `<IP>`
 
 ---
@@ -28,12 +28,12 @@
 | `SSH_USER`    | `ubuntu`（或你的登录用户）                 | 须能免 sudo 用 docker（见下） |
 | `SSH_KEY`     | 私钥**全文**（含首尾 `-----BEGIN/END...`） | 部署专用，不要复用个人密钥    |
 | `SSH_PORT`    | `22`                                       | 改过 SSH 端口才需要配         |
-| `DEPLOY_PATH` | `/opt/mini-deepresearch`                   | 与服务器目录一致              |
+| `DEPLOY_PATH` | `/opt/deepresearch`                        | 与服务器目录一致              |
 
 生成部署专用密钥（在你本地电脑执行）：
 
 ```bash
-ssh-keygen -t ed25519 -C "deploy@mini-deepresearch" -f ~/.ssh/deploy_key
+ssh-keygen -t ed25519 -C "deploy@deepresearch" -f ~/.ssh/deploy_key
 # 公钥追加到服务器（下一步服务器端会用到，也可现在就做）：
 ssh-copy-id -i ~/.ssh/deploy_key.pub <SSH_USER>@<IP>
 # 私钥全文复制进 SSH_KEY：
@@ -77,8 +77,8 @@ docker pull hello-world
 ### 2. 创建部署目录
 
 ```bash
-sudo mkdir -p /opt/mini-deepresearch
-sudo chown "$USER":"$USER" /opt/mini-deepresearch
+sudo mkdir -p /opt/deepresearch
+sudo chown "$USER":"$USER" /opt/deepresearch
 ```
 
 ### 3. 放置 .env.production
@@ -86,9 +86,9 @@ sudo chown "$USER":"$USER" /opt/mini-deepresearch
 在本地仓库根目录把模板传上去再编辑：
 
 ```bash
-scp .env.production.example <SSH_USER>@<IP>:/opt/mini-deepresearch/.env.production
+scp .env.production.example <SSH_USER>@<IP>:/opt/deepresearch/.env.production
 ssh <SSH_USER>@<IP>
-cd /opt/mini-deepresearch && vim .env.production
+cd /opt/deepresearch && vim .env.production
 ```
 
 必改项（其余按需）：
@@ -131,7 +131,7 @@ cd /opt/mini-deepresearch && vim .env.production
 核对服务器上已配了哪些：
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 for v in ZHIPU_API_KEY DEERFLOW_EMBEDDING_MODEL DEERFLOW_EMBEDDING_DIMENSIONS \
          DEERFLOW_VISION_MAX_IMAGE_MB DEERFLOW_MAX_CONCURRENT_RUNS DEERFLOW_SANDBOX_BACKEND; do
   grep -q "^${v}=" .env.production && echo "✓ ${v}" || echo "— 未配置 ${v}（走默认）"
@@ -151,7 +151,7 @@ done
 ### 5. 自检
 
 ```bash
-cd /opt/mini-deepresearch && ls        # 应有 .env.production
+cd /opt/deepresearch && ls        # 应有 .env.production
 docker --version && docker compose version
 ```
 
@@ -170,7 +170,7 @@ docker --version && docker compose version
 服务器上验收：
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 docker compose --env-file .env.production -f docker-compose.prod.yaml ps   # 4 个服务，app 为 healthy
 cat .previous-image    # 记录了上一版本 tag（首次部署没有，正常）
 ```
@@ -200,7 +200,7 @@ git push origin main        # 推上去即自动发布
 旧文件保留（回滚窗口见「五」）；已存在的 scope 行自动跳过，重复跑安全。
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 # 确认新版本已启动过一次（initialMemoryDb 建好 memory_state / memory_vectors 表）
 docker compose --env-file .env.production -f docker-compose.prod.yaml exec postgres \
   psql -U deepresearch -d DeepResearch -c "\dt memory_*"
@@ -222,7 +222,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec app \
 
 ```bash
 # 手动回滚到上一版本（.previous-image 记录的那个）
-cd /opt/mini-deepresearch && bash scripts/rollback.sh
+cd /opt/deepresearch && bash scripts/rollback.sh
 
 # 回滚到任意历史版本（镜像在服务器本地按 git sha 打 tag，都留着）
 docker images 'deepresearch:*'
@@ -267,7 +267,7 @@ free -m ; docker system df
 排查命令速查：
 
 ```bash
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 docker compose --env-file .env.production -f docker-compose.prod.yaml logs --tail=100 app   # 应用日志
 docker compose --env-file .env.production -f docker-compose.prod.yaml exec postgres \
   psql -U deepresearch -d DeepResearch -c "SELECT id,status FROM threads ORDER BY created_at DESC LIMIT 10;"
@@ -279,7 +279,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yaml exec postg
   （`env_file` 只在容器创建时注入，`docker compose restart` 不会重读）：
 
   ```bash
-  cd /opt/mini-deepresearch
+  cd /opt/deepresearch
   # 关键：把当前镜像 tag 传给 APP_IMAGE。不传会回落到 compose 里的 deepresearch:latest，
   # 而部署只打 deepresearch:<sha> 的 tag —— 要么拉取失败、要么误用旧镜像。
   APP_IMAGE="$(docker inspect --format '{{.Config.Image}}' \

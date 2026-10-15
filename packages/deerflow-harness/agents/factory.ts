@@ -145,7 +145,7 @@ export function assembleFromFeatures(
   const extraTools: StructuredToolInterface[] = [];
 
   // QwenToolCallRecoveryMiddleware：feature 启用，或 provider=qwen 时自动启用
-  // 编排上不在 ORDERED_MIDDLEWARES 内（mini 特有），保持在最前以最早处理 qwen
+  // 编排上不在 ORDERED_MIDDLEWARES 内（DeepResearch 特有），保持在最前以最早处理 qwen
   // 工具调用流式残片。
   const recoveryFeat = features.qwenToolCallRecovery;
   if (recoveryFeat === true) {

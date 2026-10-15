@@ -52,7 +52,7 @@ export class AuthService {
     const link = `${appBaseUrl()}/verify-email?token=${token}`;
     await this.safeSend({
       to: user.email,
-      subject: '验证你的邮箱 - mini-DeepResearch',
+      subject: '验证你的邮箱 - DeepResearch',
       html: `<p>你好，</p><p>请点击下面的链接完成邮箱验证（24 小时内有效）：</p><p><a href="${link}">${link}</a></p><p>如果这不是你的操作，请忽略此邮件。</p>`,
     });
   }
@@ -90,7 +90,7 @@ export class AuthService {
     const link = `${appBaseUrl()}/reset-password?token=${token}`;
     await this.safeSend({
       to: user.email,
-      subject: '重置密码 - mini-DeepResearch',
+      subject: '重置密码 - DeepResearch',
       html: `<p>请点击下面的链接重置密码（24 小时内有效）：</p><p><a href="${link}">${link}</a></p><p>如果这不是你的操作，请忽略此邮件。</p>`,
     });
   }

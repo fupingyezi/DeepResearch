@@ -31,7 +31,7 @@ GitHub Actions（.github/workflows/deploy.yml）
             → deploy-remote.sh（tag = deepresearch:<git sha 前 12 位>）
         │
         ▼
-腾讯云服务器 /opt/mini-deepresearch
+腾讯云服务器 /opt/deepresearch
   docker build → 记录 .previous-image → compose up（PG/Redis 健康后才起 app）
   → 健康检查（30 次 × 3s，HTTP < 500 视为存活）
      ├─ 健康 → 发布成功，prune 清理
@@ -285,13 +285,13 @@ Plan B 把 `pnpm install` 挪到服务器上执行后，官方 npm 源在境内�
 
 ### 8.1 事件线
 
-| #   | 现象                                         | 根因                              | 定位/修复                                            |
-| --- | -------------------------------------------- | --------------------------------- | ---------------------------------------------------- |
-| 1   | scp 报 Permission denied + 要密码            | 在**服务器**上跑了 Mac 路径的 scp | 认清命令该在哪台机器跑                               |
-| 2   | vim 编辑 env 报 E212: Can't open for writing | `/opt` 目录 sudo 建的属 root      | `sudo chown -R ubuntu:ubuntu /opt/mini-deepresearch` |
-| 3   | 装好公钥后 ssh 仍要密码                      | **IP 打错一位**，连的是别人的机器 | 见 8.2 的方法论                                      |
-| 4   | （前置怀疑）公钥粘贴损坏 / 权限不对          | 排查后排除                        | `ssh-keygen -lf` 指纹比对 + `ls -ld` 权限三连        |
-| 5   | drone-scp 报 `ssh: no key found`             | `SSH_KEY` Secret 粘成了**公钥**   | 私钥以 `-----BEGIN OPENSSH PRIVATE KEY-----` 开头    |
+| #   | 现象                                         | 根因                              | 定位/修复                                         |
+| --- | -------------------------------------------- | --------------------------------- | ------------------------------------------------- |
+| 1   | scp 报 Permission denied + 要密码            | 在**服务器**上跑了 Mac 路径的 scp | 认清命令该在哪台机器跑                            |
+| 2   | vim 编辑 env 报 E212: Can't open for writing | `/opt` 目录 sudo 建的属 root      | `sudo chown -R ubuntu:ubuntu /opt/deepresearch`   |
+| 3   | 装好公钥后 ssh 仍要密码                      | **IP 打错一位**，连的是别人的机器 | 见 8.2 的方法论                                   |
+| 4   | （前置怀疑）公钥粘贴损坏 / 权限不对          | 排查后排除                        | `ssh-keygen -lf` 指纹比对 + `ls -ld` 权限三连     |
+| 5   | drone-scp 报 `ssh: no key found`             | `SSH_KEY` Secret 粘成了**公钥**   | 私钥以 `-----BEGIN OPENSSH PRIVATE KEY-----` 开头 |
 
 ### 8.2 SSH 排障三板斧（可复用套路)
 
@@ -634,7 +634,7 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm build   # CI 门禁本�
 git config core.hooksPath && ls .husky/_                          # 验证 husky 激活
 
 # ── CI 产物验证（服务器）──
-cd /opt/mini-deepresearch
+cd /opt/deepresearch
 docker compose --env-file .env.production -f docker-compose.prod.yaml ps
 docker compose --env-file .env.production -f docker-compose.prod.yaml logs --tail=100 app
 bash scripts/rollback.sh                                          # 手动回滚上一版

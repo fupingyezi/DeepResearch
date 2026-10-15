@@ -1,4 +1,4 @@
-# project.md — mini-DeepResearch AI 协作规范
+# project.md — DeepResearch AI 协作规范
 
 > 本文件面向 AI 协作者（Claude / Codex / Cursor / CodeBuddy 等）。在本仓库
 > 进行**任何**代码改动前，必须先阅读并遵守本文件的全部约定。

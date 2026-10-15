@@ -4,7 +4,7 @@
  * 使用前请设置环境变量：
  *   LANGCHAIN_TRACING_V2=true
  *   LANGCHAIN_API_KEY=your-langsmith-api-key  (从 https://smith.langchain.com 获取)
- *   LANGSMITH_PROJECT=mini-deepresearch-benchmark
+ *   LANGSMITH_PROJECT=deepresearch-benchmark
  */
 
 export interface BenchmarkConfig {
@@ -42,7 +42,7 @@ export interface BenchmarkConfig {
 /** 默认配置 */
 export const defaultConfig: BenchmarkConfig = {
   langsmith: {
-    project: process.env.LANGSMITH_PROJECT ?? 'mini-deepresearch-benchmark',
+    project: process.env.LANGSMITH_PROJECT ?? 'deepresearch-benchmark',
     datasetName: 'deep-research-qa-v1',
   },
   // Agent 配置 (对齐 packages/deerflow-harness/models/index.ts)
