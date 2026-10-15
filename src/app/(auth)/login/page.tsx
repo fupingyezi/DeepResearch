@@ -36,6 +36,25 @@ const OAUTH_PROVIDER_LABELS: Record<OAuthProviderName, string> = {
   qq: 'QQ 登录',
 };
 
+/** 左侧品牌区轮播内容：渐变色 + 一句话价值主张 */
+const BRAND_SLIDES = [
+  {
+    title: '让每一次搜索，\n都成为一次深入的研究。',
+    desc: '多智能体协作的深度研究引擎，自动规划、检索、推理并生成结构化的研究报告。',
+    gradient: 'from-[#0f766e] via-[#0d9488] to-[#0ea5a4]',
+  },
+  {
+    title: '多智能体分工，\n像一支研究团队在协作。',
+    desc: '规划者、检索者、推理者各司其职，把复杂问题拆解成可执行的步骤。',
+    gradient: 'from-[#0f766e] via-[#0e7490] to-[#38bdf8]',
+  },
+  {
+    title: '把零散的信息，\n沉淀成有结构的报告。',
+    desc: '从检索到推理，最终输出可下载、可复用的结构化研究成果。',
+    gradient: 'from-[#115e59] via-[#0f766e] to-[#14b8a6]',
+  },
+];
+
 export default function LoginPage() {
   const router = useRouter();
   const { applyUser } = useAuth();
@@ -52,6 +71,16 @@ export default function LoginPage() {
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
   // 已配置的 OAuth 第三方登录（未配置任何平台时为空，按钮隐藏）
   const [oauthProviders, setOauthProviders] = useState<OAuthProviderName[]>([]);
+  // 左侧品牌区轮播：当前 slide 下标
+  const [slideIndex, setSlideIndex] = useState(0);
+
+  // 左侧品牌区自动轮播：每 4 秒切一张
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSlideIndex((i) => (i + 1) % BRAND_SLIDES.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
 
   // 无 admin 时引导到首启设置页
   useEffect(() => {
@@ -124,117 +153,176 @@ export default function LoginPage() {
     mode === 'login' ? '登录' : mode === 'register' ? '注册并登录' : '发送重置邮件';
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#f9fafb]">
-      <div className="w-[380px] rounded-2xl border border-[#e5e7eb] bg-white p-8 shadow-[0_8px_30px_rgba(16,24,40,0.08)]">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <Image src="/四叶草.svg" alt="logo" width={48} height={48} className="rounded-xl" />
-          <h1 className="text-[20px] font-semibold text-[#111827]">{title}</h1>
-          <p className="text-[13px] text-[#9ca3af]">DeepResearch</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <input
-            type="email"
-            placeholder="邮箱"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="h-11 rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6]"
-          />
-          {mode !== 'forgot' && (
-            <input
-              type="password"
-              placeholder="密码（至少 8 位）"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
-              className="h-11 rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6]"
-            />
-          )}
-
-          {error && <p className="text-[13px] text-[#dc2626]">{error}</p>}
-          {sentMessage && <p className="text-[13px] text-[#0f766e]">{sentMessage}</p>}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-1 h-11 rounded-xl bg-[#0f766e] text-[14px] font-medium text-white transition-all hover:bg-[#0d655e] disabled:cursor-not-allowed disabled:opacity-60"
+    <div className="flex h-screen w-full bg-white">
+      {/* 左侧品牌面板：自动轮播图（渐变底 + 价值主张），lg 以下隐藏 */}
+      <div className="relative hidden h-screen w-[560px] shrink-0 overflow-hidden lg:flex">
+        {BRAND_SLIDES.map((slide, i) => (
+          <div
+            key={i}
+            className={`absolute inset-0 flex flex-col justify-between bg-linear-to-br p-16 transition-opacity duration-700 ${
+              slide.gradient
+            } ${i === slideIndex ? 'opacity-100' : 'opacity-0'}`}
           >
-            {loading ? '请稍候…' : submitLabel}
-          </button>
-        </form>
-
-        {(demoEmail !== null || oauthProviders.length > 0) && mode !== 'forgot' && (
-          <>
-            <div className="mt-5 flex items-center gap-3" aria-hidden>
-              <span className="h-px flex-1 bg-[#e5e7eb]" />
-              <span className="text-[12px] text-[#9ca3af]">或</span>
-              <span className="h-px flex-1 bg-[#e5e7eb]" />
+            <div className="flex items-center gap-3">
+              <Image src="/四叶草.svg" alt="logo" width={36} height={36} className="rounded-lg" />
+              <span className="text-[20px] font-semibold text-white">DeepResearch</span>
             </div>
-            {demoEmail !== null && (
-              <button
-                type="button"
-                onClick={() => runLogin(demoLogin)}
-                disabled={loading}
-                className="mt-3 h-11 w-full rounded-xl border border-[#14b8a6] bg-white text-[14px] font-medium text-[#0f766e] transition-all hover:bg-[#f0fdfa] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {demoEmail ? `一键体验（${demoEmail}）` : '一键体验登录'}
-              </button>
-            )}
-            {oauthProviders.map((provider) => (
-              <button
-                key={provider}
-                type="button"
-                // 顶层导航跳转：302 链（begin → provider 授权页 → callback → 首页）
-                // 走完浏览器自然回到应用，不能走 fetch（会拿不到 cookie 域语义）
-                onClick={() => {
-                  window.location.href = oauthLoginUrl(provider);
-                }}
-                disabled={loading}
-                className="mt-3 h-11 w-full rounded-xl border border-[#e5e7eb] bg-white text-[14px] font-medium text-[#374151] transition-all hover:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {OAUTH_PROVIDER_LABELS[provider]}
-              </button>
-            ))}
-          </>
-        )}
 
-        <div className="mt-5 text-center text-[13px] text-[#9ca3af]">
-          {mode === 'login' ? (
-            <>
-              {registrationEnabled ? (
-                <>
-                  还没有账号？
+            <div className="flex flex-col gap-4">
+              <h2 className="text-[40px] leading-[1.3] font-bold whitespace-pre-line text-white">
+                {slide.title}
+              </h2>
+              <p className="max-w-[400px] text-[16px] leading-relaxed text-white/80">
+                {slide.desc}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {BRAND_SLIDES.map((_, dotIndex) => (
+                <button
+                  key={dotIndex}
+                  type="button"
+                  aria-label={`切换到第 ${dotIndex + 1} 张`}
+                  onClick={() => setSlideIndex(dotIndex)}
+                  className={`h-2 rounded-full transition-all ${
+                    dotIndex === slideIndex ? 'w-6 bg-white' : 'w-2 bg-white/40 hover:bg-white/60'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 右侧表单面板：白底居中 */}
+      <div className="flex min-w-0 flex-1 items-center justify-center bg-[#f9fafb] p-8">
+        <div className="w-full max-w-[400px]">
+          <div className="mb-8 flex flex-col gap-2">
+            <Image
+              src="/四叶草.svg"
+              alt="logo"
+              width={40}
+              height={40}
+              className="rounded-xl lg:hidden"
+            />
+            <h1 className="text-[28px] font-bold text-[#111827]">{title}</h1>
+            <p className="text-[14px] text-[#9ca3af]">登录你的 DeepResearch 账号</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-[#4b5563]">邮箱</label>
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="h-[46px] rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6] focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+
+            {mode !== 'forgot' && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[13px] font-medium text-[#4b5563]">密码</label>
                   <button
                     type="button"
-                    onClick={() => switchMode('register')}
-                    className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
+                    onClick={() => switchMode('forgot')}
+                    className="cursor-pointer text-[13px] font-medium text-[#0f766e] hover:underline"
                   >
-                    注册
+                    忘记密码？
                   </button>
-                </>
-              ) : (
-                <>注册暂未开放</>
+                </div>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  className="h-[46px] rounded-xl border border-[#e5e7eb] bg-white px-4 text-[14px] transition-colors outline-none focus:border-[#14b8a6] focus:ring-2 focus:ring-teal-500/20"
+                />
+              </div>
+            )}
+
+            {error && <p className="text-[13px] text-[#dc2626]">{error}</p>}
+            {sentMessage && <p className="text-[13px] text-[#0f766e]">{sentMessage}</p>}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-1 h-[48px] rounded-xl bg-[#0f766e] text-[15px] font-medium text-white transition-all hover:bg-[#0d655e] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? '请稍候…' : submitLabel}
+            </button>
+          </form>
+
+          {(demoEmail !== null || oauthProviders.length > 0) && mode !== 'forgot' && (
+            <>
+              <div className="mt-6 flex items-center gap-3" aria-hidden>
+                <span className="h-px flex-1 bg-[#e5e7eb]" />
+                <span className="text-[12px] text-[#9ca3af]">或使用以下方式</span>
+                <span className="h-px flex-1 bg-[#e5e7eb]" />
+              </div>
+              {demoEmail !== null && (
+                <button
+                  type="button"
+                  onClick={() => runLogin(demoLogin)}
+                  disabled={loading}
+                  className="mt-4 h-[46px] w-full rounded-xl border border-[#14b8a6] bg-white text-[14px] font-medium text-[#0f766e] transition-all hover:bg-[#f0fdfa] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {demoEmail ? `一键体验（${demoEmail}）` : '一键体验登录'}
+                </button>
               )}
-              <span className="mx-2">·</span>
+              <div className="mt-4 flex gap-3">
+                {oauthProviders.map((provider) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    // 顶层导航跳转：302 链（begin → provider 授权页 → callback → 首页）
+                    // 走完浏览器自然回到应用，不能走 fetch（会拿不到 cookie 域语义）
+                    onClick={() => {
+                      window.location.href = oauthLoginUrl(provider);
+                    }}
+                    disabled={loading}
+                    className="h-[46px] flex-1 rounded-xl border border-[#e5e7eb] bg-white text-[14px] font-medium text-[#374151] transition-all hover:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {OAUTH_PROVIDER_LABELS[provider]}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="mt-6 text-center text-[13px] text-[#9ca3af]">
+            {mode === 'login' ? (
+              <>
+                {registrationEnabled ? (
+                  <>
+                    还没有账号？
+                    <button
+                      type="button"
+                      onClick={() => switchMode('register')}
+                      className="ml-1 cursor-pointer font-medium text-[#0f766e] hover:underline"
+                    >
+                      注册
+                    </button>
+                  </>
+                ) : (
+                  <>注册暂未开放</>
+                )}
+              </>
+            ) : (
               <button
                 type="button"
-                onClick={() => switchMode('forgot')}
+                onClick={() => switchMode('login')}
                 className="cursor-pointer font-medium text-[#0f766e] hover:underline"
               >
-                忘记密码
+                {mode === 'register' ? '已有账号？去登录' : '返回登录'}
               </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => switchMode('login')}
-              className="cursor-pointer font-medium text-[#0f766e] hover:underline"
-            >
-              {mode === 'register' ? '已有账号？去登录' : '返回登录'}
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
