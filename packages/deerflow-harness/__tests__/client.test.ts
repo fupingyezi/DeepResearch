@@ -5,6 +5,7 @@ import {
   buildConfigKey,
   buildRetrievalQueries,
   collectRecentHumanTexts,
+  DeerFlowClient,
   readRecentHumanTexts,
   resolveRuntimeOptions,
 } from '../client';
@@ -272,5 +273,89 @@ describe('readRecentHumanTexts', () => {
     await expect(readRecentHumanTexts(throwing as never, 'thread-1', 3)).resolves.toEqual([]);
     const empty = { getTuple: async () => undefined };
     await expect(readRecentHumanTexts(empty as never, 'thread-1', 3)).resolves.toEqual([]);
+  });
+});
+
+describe('stream —— TOOL_CALL 在 AI step 边界下发', () => {
+  /**
+   * 锁定事件时序契约：task 工具的 TOOL_CALL 必须早于其子 agent 进度
+   * （custom task_*）。ToolMessage 是 tools node 全部执行完才到达——若
+   * TOOL_CALL 等到那时才发，前端 timeline 按到达序渲染，工作流卡片会
+   * 先子 agent、后 task 工具，与因果顺序颠倒。
+   */
+  const mockAgent = (chunks: unknown[]): DeerFlowClient => {
+    const client = new DeerFlowClient(modelConfig, {
+      mcpEnabled: false,
+      memoryEnabled: false,
+      systemPrompt: 'test',
+    });
+    (client as unknown as { ensureAgent: unknown }).ensureAgent = async () => ({
+      stream: async function* () {
+        for (const chunk of chunks) yield chunk;
+      },
+    });
+    return client;
+  };
+
+  const collect = async (client: DeerFlowClient) => {
+    const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+    for await (const ev of client.stream('帮我研究', 'thread-1')) {
+      events.push(ev as never);
+    }
+    return events;
+  };
+
+  it('完整 AIMessage 到达即发 tool_call，先于 custom task_started，ToolMessage 不重复发', async () => {
+    const aiMsg = {
+      _getType: () => 'ai',
+      content: '',
+      tool_calls: [{ id: 'tc-1', name: 'task', args: { prompt: '研究 A' } }],
+    };
+    const toolMsg = {
+      _getType: () => 'tool',
+      tool_call_id: 'tc-1',
+      name: 'task',
+      content: '子 agent 报告',
+    };
+    const client = mockAgent([
+      ['updates', { agent: { messages: [aiMsg] } }],
+      ['custom', { type: 'task_started', task_id: 't1', description: '研究 A' }],
+      ['updates', { tools: { messages: [toolMsg] } }],
+    ]);
+
+    const events = await collect(client);
+
+    const toolCall = events.findIndex((e) => e.eventType === 'tool_call');
+    const taskStarted = events.findIndex((e) => e.eventType === 'task_progress');
+    const toolResult = events.findIndex((e) => e.eventType === 'tool_result');
+
+    expect(toolCall).toBeGreaterThanOrEqual(0);
+    expect(toolCall).toBeLessThan(taskStarted);
+    expect(toolResult).toBeGreaterThan(taskStarted);
+    expect(events.filter((e) => e.eventType === 'tool_call')).toHaveLength(1);
+    expect(events[toolCall].payload.arguments).toBe(JSON.stringify({ prompt: '研究 A' }));
+  });
+
+  it('chunks 分片先行时，边界以聚合结果覆盖 args 且只发一次', async () => {
+    const chunkMsg = {
+      _getType: () => 'ai',
+      content: '',
+      tool_call_chunks: [{ index: 0, id: 'tc-1', name: 'task', args: '{"prompt"' }],
+    };
+    const aiMsg = {
+      _getType: () => 'ai',
+      content: '',
+      tool_calls: [{ id: 'tc-1', name: 'task', args: { prompt: '研究 A', depth: 2 } }],
+    };
+    const client = mockAgent([
+      ['messages', [chunkMsg, {}]],
+      ['updates', { agent: { messages: [aiMsg] } }],
+      ['custom', { type: 'task_started', task_id: 't1', description: '研究 A' }],
+    ]);
+
+    const events = await collect(client);
+    const toolCalls = events.filter((e) => e.eventType === 'tool_call');
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0].payload.arguments).toBe(JSON.stringify({ prompt: '研究 A', depth: 2 }));
   });
 });

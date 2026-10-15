@@ -1115,6 +1115,40 @@ export class DeerFlowClient {
               }
               stepHasToolCalls = false;
               inFinalReportBody = false;
+
+              // TOOL_CALL_START 必须在 AI step 边界（本处）下发，不能等 ToolMessage：
+              // ToolMessage 是 tools node 全部执行完才随 updates 到达，而 task 工具的
+              // 子 agent 进度（custom task_*）在执行期就已推送——若等到 ToolMessage，
+              // 三个 task 的 TOOL_CALL_START 会排在全部子 agent 进度之后，前端 timeline
+              // 按到达序渲染，工作流卡片会先子 agent、后 task 工具，与因果顺序颠倒。
+              if (hasToolCalls) {
+                for (const tc of msg.tool_calls) {
+                  const tcId = typeof tc?.id === 'string' ? tc.id : '';
+                  let acc = tcId ? toolCallsById.get(tcId) : undefined;
+                  if (!acc) {
+                    acc = {
+                      toolCallId: tcId,
+                      toolName: '',
+                      argsBuffer: '',
+                      startEmitted: false,
+                    };
+                    if (tcId) toolCallsById.set(tcId, acc);
+                  }
+                  // 以完整消息的聚合结果覆盖 chunk 缓冲：chunks 可能缺 name，
+                  // args 分片拼接也可能与聚合结果不一致
+                  if (tc?.name) acc.toolName = tc.name;
+                  const rawArgs = tc?.args;
+                  const argsStr =
+                    typeof rawArgs === 'string'
+                      ? rawArgs
+                      : rawArgs != null
+                        ? JSON.stringify(rawArgs)
+                        : '';
+                  if (argsStr) acc.argsBuffer = argsStr;
+                  const startEvt = emitToolCallStart(acc);
+                  if (startEvt) yield startEvt;
+                }
+              }
             } else if (msgType === 'tool') {
               yield* handleToolMessage(msg);
             }
