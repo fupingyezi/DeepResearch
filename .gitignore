@@ -64,3 +64,6 @@ next-env.d.ts
 # benchmarks 数据文件和评测结果（运行期生成，不纳入版本控制）
 benchmarks/data/
 benchmarks/results/
+
+# 本地plan不进版本控制
+docs/superpowers
